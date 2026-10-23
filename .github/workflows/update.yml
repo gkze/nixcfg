@@ -97,6 +97,30 @@ jobs:
         ${{ github.event_name == 'push' ||
         inputs.validate_all_packages || false }}
     secrets: inherit
+  # A kernel block-device I/O error on the hosted VM (39883371442,
+  # 39835075034) leaves registered store paths with bad bytes. The same
+  # VM cannot recover: it publishes nothing, uploads its candidate under a
+  # -device-fault name, and this job reruns the identical stage once on a
+  # fresh VM. Any other prepare failure is not retried.
+  prepare-darwin-retry:
+    needs:
+      - prepare-pins
+      - prepare-darwin
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin.outputs.device_fault == 'true'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: prepare
+      previous: prepare-pins
+      targets: ${{ inputs.targets || '' }}
+      validate_all_packages: |-
+        ${{ github.event_name == 'push' ||
+        inputs.validate_all_packages || false }}
+    secrets: inherit
   prepare-arm:
     needs: prepare-pins
     if: |-
@@ -132,11 +156,15 @@ jobs:
   prepare-merge:
     needs:
       - prepare-darwin
+      - prepare-darwin-retry
       - prepare-arm
       - prepare-x86
     if: |-
       always() && !cancelled() &&
-      needs.prepare-darwin.result == 'success' &&
+      (needs.prepare-darwin.result == 'success' &&
+      needs.prepare-darwin.outputs.device_fault != 'true' ||
+      needs.prepare-darwin-retry.result == 'success' &&
+      needs.prepare-darwin-retry.outputs.device_fault != 'true') &&
       needs.prepare-arm.result == 'success' &&
       needs.prepare-x86.result == 'success'
     uses: ./.github/workflows/update-native.yml
@@ -675,6 +703,7 @@ jobs:
     needs:
       - prepare-pins
       - prepare-darwin
+      - prepare-darwin-retry
       - prepare-arm
       - prepare-x86
       - prepare-merge

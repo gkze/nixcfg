@@ -11,6 +11,7 @@ import os
 import queue
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -100,6 +101,21 @@ _STORAGE_FAULT_PREDICATE = (
     'senderImagePath CONTAINS[c] "IOStorage" OR '
     'eventMessage CONTAINS[c] "IOStorage"'
 )
+# A hosted VM boots for one job; 7h spans the 360-minute job cap plus boot.
+_KERNEL_LOG_WINDOW = "7h"
+# 39883371442 prepare-darwin: the VM's virtual disk logged 99241 kernel
+# "(IOStorageFamily) disk2s7: I/O error." lines across the Nix Store, Data and
+# container devices (02:31:54-02:33:27) with 43+ GiB guest free, above
+# min-free, so not auto-GC. Paths written then stayed registered with bad
+# bytes: 35 min later evals read a .drv failing "expected string 'D'" and a
+# binary bun.lock. 39835075034 logged 257514 such lines before temproot
+# EILSEQ. Failed jobs without a device fault (39850402233, 39791273689,
+# 39774011035) logged none. One such line makes the VM's store untrusted.
+_DEVICE_FAULT_LINE = re.compile(r"\(IOStorageFamily\) disk\d+(?:s\d+)*: I/O error\.")
+_DEVICE_FAULT_PREDICATE = 'process == "kernel" AND eventMessage CONTAINS[c] "I/O error"'
+_DEVICE_FAULT_QUERY_SECONDS = 300
+_DEVICE_FAULT_NAME = "device-fault.log"
+_DEVICE_FAULT_EXCERPT_LINES = 50
 _IMAGE_LOG_LOCK = threading.Lock()
 _UNUSED_IMAGE_PATHS = {
     "darwin": (Path("/usr/local/share/dotnet"),),
@@ -571,13 +587,15 @@ def dump_hosted_storage_fault() -> None:
     Guest ``df`` can show tens of GiB free while the host backing store or
     I/O path is saturated. A process-only ranlib EIO is not enough: capture
     the device layer before the VM disappears.
+
+    Emits ``device_fault=true`` when this VM's kernel logged a block-device
+    I/O error, so the workflow reruns the stage on a fresh VM.
     """
     if not is_hosted_darwin_runner():
         return
     artifacts = _storage_fault_artifacts()
     record_runner_storage("storage-fault")
     report = artifacts / "storage-fault.txt"
-    log_path = artifacts / "apfs-io.log"
     report.write_text("hosted Darwin storage-fault dump\n\n", encoding="utf-8")
     diskutil = shutil.which("diskutil")
     if diskutil is None:
@@ -588,17 +606,27 @@ def dump_hosted_storage_fault() -> None:
             _append_command_output(
                 report, f"diskutil info {target}", [diskutil, "info", target]
             )
+    kernel_log = _dump_kernel_storage_log(artifacts / "apfs-io.log", report)
+    marker = artifacts / _DEVICE_FAULT_NAME
+    if not marker.is_file() and (faults := device_fault_lines(kernel_log)):
+        _record_device_fault(artifacts, faults)
+    if os.environ.get("GITHUB_OUTPUT"):
+        _outputs(device_fault=str(marker.is_file()).lower())
+
+
+def _dump_kernel_storage_log(log_path: Path, report: Path) -> str:
+    """Retain this VM's storage kernel log since boot and return its text."""
     log_bin = shutil.which("log")
     if log_bin is None:
         log_path.write_text("log show missing\n", encoding="utf-8")
-        return
+        return ""
     try:
         result = subprocess.run(  # noqa: S603 -- resolved log path
             [
                 log_bin,
                 "show",
                 "--last",
-                "2h",
+                _KERNEL_LOG_WINDOW,
                 "--style",
                 "compact",
                 "--predicate",
@@ -611,12 +639,98 @@ def dump_hosted_storage_fault() -> None:
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         log_path.write_text(f"{type(error).__name__}: {error}\n", encoding="utf-8")
-        return
+        return ""
     log_path.write_text(result.stdout + result.stderr, encoding="utf-8")
     with report.open("a", encoding="utf-8") as handle:
         handle.write(
             f"## log show exit={result.returncode} bytes={log_path.stat().st_size}\n"
         )
+    return result.stdout
+
+
+class HostedDeviceStateError(RuntimeError):
+    """The kernel log could not show whether the hosted block device faulted."""
+
+
+def device_fault_lines(text: str) -> list[str]:
+    """Return kernel block-device I/O error lines from ``log show`` output."""
+    return [line for line in text.splitlines() if _DEVICE_FAULT_LINE.search(line)]
+
+
+def hosted_device_faults() -> list[str]:
+    """Return this VM's kernel block-device I/O errors since boot.
+
+    Fails closed: a missing or failing ``log show`` cannot prove the store
+    sound, so it raises instead of reporting no fault.
+    """
+    log_bin = shutil.which("log")
+    if log_bin is None:
+        msg = "log is missing; cannot check the hosted block device"
+        raise HostedDeviceStateError(msg)
+    try:
+        result = subprocess.run(  # noqa: S603 -- resolved log path
+            [
+                log_bin,
+                "show",
+                "--last",
+                _KERNEL_LOG_WINDOW,
+                "--style",
+                "compact",
+                "--predicate",
+                _DEVICE_FAULT_PREDICATE,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=_DEVICE_FAULT_QUERY_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        msg = f"Kernel log query failed: {type(error).__name__}: {error}"
+        raise HostedDeviceStateError(msg) from error
+    if result.returncode:
+        msg = f"log show exited {result.returncode}: {result.stderr.strip()}"
+        raise HostedDeviceStateError(msg)
+    return device_fault_lines(result.stdout)
+
+
+def _record_device_fault(artifacts: Path, faults: list[str]) -> Path:
+    """Write the marker that keeps a faulted VM from publishing store paths."""
+    marker = artifacts / _DEVICE_FAULT_NAME
+    excerpt = "\n".join(faults[:_DEVICE_FAULT_EXCERPT_LINES])
+    marker.write_text(
+        f"{len(faults)} kernel block-device I/O errors\n{excerpt}\n",
+        encoding="utf-8",
+    )
+    return marker
+
+
+def _quarantine_faulted_runner(artifacts: Path, faults: list[str], log: TextIO) -> None:
+    """Stop a VM whose block device faulted from publishing more store paths.
+
+    The Cachix daemon uploads every realized path; paths realized after the
+    fault can hold bad bytes under a valid registration. Killing it drops the
+    queue instead of draining it. The marker makes ``flush-cachix`` publish
+    nothing and hide the dead daemon from cachix-action's post hook.
+    """
+    _record_device_fault(artifacts, faults)
+    _write_diagnostic(
+        log,
+        f"Hosted block device faulted ({len(faults)} kernel I/O errors, first: "
+        f"{faults[0].strip()}); publishing nothing from this runner",
+    )
+    daemon_dir = os.environ.get(_CACHIX_DAEMON_DIR_ENV, "").strip()
+    if not daemon_dir:
+        return
+    try:
+        pid = int((Path(daemon_dir) / "daemon.pid").read_text().strip())
+    except (OSError, ValueError) as error:
+        _write_diagnostic(log, f"Cachix daemon pid unavailable: {error}")
+        return
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    _write_diagnostic(log, f"Killed Cachix daemon pid={pid} without draining")
 
 
 def reclaim_hosted_store() -> None:
@@ -1126,7 +1240,34 @@ def native(stage: str) -> int:
         record_runner_storage(f"after-native-{stage}", log, detail=False, live=False)
         if summary := _failure_summary(artifacts / "result.json"):
             _write_diagnostic(log, summary)
+        # A green updater on a faulted disk still hashed untrusted bytes.
+        if (
+            stage == "prepare"
+            and is_hosted_darwin_runner()
+            and (faults := hosted_device_faults())
+        ):
+            _quarantine_faulted_runner(artifacts, faults, log)
+            return _hand_off_device_fault(faults, returncode)
         return _publish_prefetched_receipts(receipts, log, artifacts, returncode)
+
+
+def _hand_off_device_fault(faults: list[str], returncode: int) -> int:
+    """Report a device fault as this stage's outcome; a fresh VM redoes the work.
+
+    The candidate is never consumed: it uploads under a ``-device-fault``
+    name and ``prepare-merge`` requires a fault-free attempt. Without a step
+    output nothing can hand the work off, so the stage fails instead.
+    """
+    if not os.environ.get("GITHUB_OUTPUT"):
+        return returncode or 1
+    _outputs(device_fault="true")
+    sys.stdout.write(
+        "::warning title=Hosted block device faulted::"
+        f"{len(faults)} kernel I/O errors; this runner's candidate is discarded "
+        "and the stage reruns on a fresh VM\n"
+    )
+    sys.stdout.flush()
+    return 0
 
 
 def certify() -> None:
@@ -1946,6 +2087,8 @@ def flush_cachix() -> None:
       then logs ``Cachix Daemon not started. Skipping push``. Flush still
       ``cachix push``es leftovers and ``realized-root-paths.json`` so the
       successful stripe members reach gkze.
+    - Block-device fault (39883371442): the ``device-fault.log`` marker
+      makes this flush publish nothing from the untrusted store.
     """
     os.environ["NIXCFG_CI_STAGE"] = "flush-cachix"
     artifacts = _temp() / "update-artifacts"
@@ -1955,6 +2098,15 @@ def flush_cachix() -> None:
         _write_diagnostic(log, "Flushing Cachix daemon and prefetch receipts")
         record_runner_storage("flush-start", log)
         _retain_cachix_daemon_evidence(artifacts, log)
+        if (artifacts / _DEVICE_FAULT_NAME).is_file():
+            _release_cachix_daemon_dir()
+            _write_diagnostic(
+                log,
+                "Skipping Cachix flush: this runner's block device faulted, "
+                "so its store paths are untrusted; cleared CACHIX_DAEMON_DIR "
+                "so cachix-action post skips its drain",
+            )
+            return
         if receipts.exists():
             _publish_prefetched_receipts(receipts, log, artifacts, 0)
         daemon_log = artifacts / "cachix-daemon" / "daemon.log"

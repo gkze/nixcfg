@@ -265,6 +265,33 @@ Actions reruns can reuse completed upstream artifacts. A failed preparation
 cannot advance to another platform. A missing or mismatched validation report
 cannot authorize publication.
 
+### Hosted block-device faults
+
+The virtual disk of a hosted macOS VM can fail beneath the guest. The kernel
+then logs `(IOStorageFamily) diskN: I/O error.` across the Nix Store, Data,
+and container devices, while `df` still shows tens of GiB free. Store paths
+written during that window stay registered with bad bytes. Later evaluations
+fail on derivations that do not parse, unreadable `bun.lock` files, or
+`Illegal byte sequence`. Runs 39883371442 and 39835075034 failed this way.
+Store garbage collection cannot explain those failures, and the in-job
+store-fault retries above cannot repair them.
+
+After the updater exits, Darwin preparation queries the kernel log for this VM
+since boot. Preparation fails closed if that query cannot answer. One device
+error makes the runner's store untrusted:
+
+- The job pushes no prefetch receipts. It kills the Cachix daemon without
+  draining it, and `flush-cachix` publishes nothing.
+- The job reports `device_fault=true` with a warning annotation. Its candidate
+  uploads as `prepare-aarch64-darwin-device-fault`, a name that no stage
+  downloads.
+- `prepare-darwin-retry` reruns the identical stage once on a fresh VM.
+  `prepare-merge` accepts only a fault-free attempt.
+
+Any other preparation failure is still a failure. A device fault on the retry
+also leaves preparation incomplete, so the run fails. The PR update-prepare
+check uses the same retry.
+
 ### Validation failures and timeouts
 
 Validation distinguishes completed target failures from incomplete execution.

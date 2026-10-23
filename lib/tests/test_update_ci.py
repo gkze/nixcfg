@@ -3,6 +3,7 @@
 import ast
 import json
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -1964,8 +1965,17 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
         for step in native["jobs"]["native"]["steps"]
         if step.get("name") == "Dump hosted storage-fault evidence"
     )
-    assert dump["if"] == "failure()"
+    assert dump["if"] == "failure() || steps.candidate.outputs.device_fault == 'true'"
+    assert dump["id"] == "storage"
     assert dump["env"]["NIXCFG_CI_STAGE"] == "dump-storage-fault"
+    assert " ".join(native["jobs"]["native"]["outputs"]["device_fault"].split()) == (
+        "${{ steps.candidate.outputs.device_fault || "
+        "steps.storage.outputs.device_fault }}"
+    )
+    assert (
+        native["on"]["workflow_call"]["outputs"]["device_fault"]["value"]
+        == "${{ jobs.native.outputs.device_fault }}"
+    )
     names = [step.get("name") for step in native["jobs"]["native"]["steps"]]
     assert names.index("Dump hosted storage-fault evidence") < names.index(
         "Retain candidate and failure evidence"
@@ -1984,6 +1994,32 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
     assert "inputs.shard" in artifact
     assert "inputs.stage == 'merge-candidates' && 'prepare-x86_64-linux'" in artifact
     assert "inputs.stage == 'prepare-pins' && 'prepare-pins'" in artifact
+    # A faulted runner's candidate can never be downloaded as prepare-*.
+    assert artifact.startswith("${{ format('{0}{1}', ")
+    assert artifact.endswith(
+        "(steps.candidate.outputs.device_fault == 'true' || "
+        "steps.storage.outputs.device_fault == 'true') && '-device-fault' || '') }}"
+    )
+
+
+def _assert_device_fault_retry(jobs: dict) -> None:
+    """Only a device-faulted Darwin prepare reruns, on a fresh VM, unchanged."""
+    retry = jobs["prepare-darwin-retry"]
+    assert retry["needs"] == ["prepare-pins", "prepare-darwin"]
+    assert retry["uses"] == jobs["prepare-darwin"]["uses"]
+    assert retry["with"] == jobs["prepare-darwin"]["with"]
+    assert retry["secrets"] == "inherit"
+    assert " ".join(retry["if"].split()) == (
+        "always() && !cancelled() && needs.prepare-pins.result == 'success' && "
+        "needs.prepare-darwin.outputs.device_fault == 'true'"
+    )
+    merge = " ".join(jobs["prepare-merge"]["if"].split())
+    assert (
+        "(needs.prepare-darwin.result == 'success' && "
+        "needs.prepare-darwin.outputs.device_fault != 'true' || "
+        "needs.prepare-darwin-retry.result == 'success' && "
+        "needs.prepare-darwin-retry.outputs.device_fault != 'true')"
+    ) in merge
 
 
 def _assert_parallel_linux_prepare(jobs: dict, matrix: list[dict]) -> None:
@@ -2010,7 +2046,14 @@ def _assert_parallel_linux_prepare(jobs: dict, matrix: list[dict]) -> None:
         assert jobs[name]["needs"] == "prepare-pins"
         assert jobs[name]["with"]["previous"] == "prepare-pins"
     merge = jobs["prepare-merge"]
-    assert set(merge["needs"]) == {"prepare-darwin", "prepare-arm", "prepare-x86"}
+    assert set(merge["needs"]) == {
+        "prepare-darwin",
+        "prepare-darwin-retry",
+        "prepare-arm",
+        "prepare-x86",
+    }
+    _assert_device_fault_retry(jobs)
+    assert "prepare-darwin-retry" in jobs["repair"]["needs"]
     assert merge["with"]["stage"] == "merge-candidates"
     assert merge["with"]["previous"] == "prepare-aarch64-darwin"
     assert merge["with"]["previous_extra"] == "prepare-aarch64-linux"
@@ -3829,8 +3872,7 @@ def test_dump_hosted_storage_fault_keeps_diskutil_and_unified_logs(
             )
             return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
         if args[:2] == [str(log_bin), "show"]:
-            assert "--last" in args
-            assert "2h" in args
+            assert args[args.index("--last") + 1] == jobs._KERNEL_LOG_WINDOW
             assert jobs._STORAGE_FAULT_PREDICATE in args
             return subprocess.CompletedProcess(
                 args, 0, stdout="apfs I/O error disk2s7\n", stderr=""
@@ -3909,6 +3951,312 @@ def test_dump_hosted_storage_fault_survives_missing_and_timed_out_tools(
     assert (
         (tmp_path / "update-artifacts/apfs-io.log").read_text().startswith("OSError:")
     )
+
+
+_KERNEL_DEVICE_FAULT = (
+    "2026-10-23 02:31:54.809 Df kernel[0:e3] (IOStorageFamily) disk2s7: I/O error."
+)
+
+
+def test_device_fault_lines_keep_only_kernel_block_device_errors() -> None:
+    """39883371442's Nix Store, container and Data errors match; noise does not."""
+    container = (
+        "2026-10-23 02:31:59.789 Df kernel[0:e3] (IOStorageFamily) disk2: I/O error."
+    )
+    data = (
+        "2026-10-23 02:33:27.856 Df kernel[0:e3] (IOStorageFamily) disk2s5: I/O error."
+    )
+    text = "\n".join((
+        "Timestamp               Ty Process[PID:TID]",
+        "2026-10-23 01:28:18.339 Df kernel[0:331] (IOStorageFamily) "
+        "disk2s1s1: device is not readable.",
+        _KERNEL_DEVICE_FAULT,
+        container,
+        data,
+        "2026-10-23 03:07:47.937 Df log[43673:57384] [com.apple.log:] log run "
+        "noninteractively, args: 'eventMessage CONTAINS[c] \"I/O error\"'",
+        "ld: can't write to output file (Input/output error)",
+    ))
+    assert jobs.device_fault_lines(text) == [_KERNEL_DEVICE_FAULT, container, data]
+    assert jobs.device_fault_lines("") == []
+
+
+def test_kernel_log_window_spans_the_native_job_cap() -> None:
+    """A fault early in a 360-minute job must still be inside the query."""
+    native = yaml.load(
+        (ROOT / ".github/workflows/update-native.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    cap_minutes = int(native["jobs"]["native"]["timeout-minutes"])
+    window = jobs._KERNEL_LOG_WINDOW
+    assert window.endswith("h")
+    assert int(window.removesuffix("h")) * 60 > cap_minutes
+
+
+def test_hosted_device_faults_query_the_kernel_log_since_boot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    log_bin = tmp_path / "log"
+    monkeypatch.setattr(
+        jobs.shutil, "which", lambda name: str(log_bin) if name == "log" else None
+    )
+    seen: list[tuple[list[str], float]] = []
+
+    def run(args, **kwargs):
+        seen.append((args, kwargs["timeout"]))
+        return subprocess.CompletedProcess(
+            args, 0, stdout=f"Timestamp\n{_KERNEL_DEVICE_FAULT}\n", stderr=""
+        )
+
+    monkeypatch.setattr(jobs.subprocess, "run", run)
+    assert jobs.hosted_device_faults() == [_KERNEL_DEVICE_FAULT]
+    assert seen == [
+        (
+            [
+                str(log_bin),
+                "show",
+                "--last",
+                jobs._KERNEL_LOG_WINDOW,
+                "--style",
+                "compact",
+                "--predicate",
+                jobs._DEVICE_FAULT_PREDICATE,
+            ],
+            jobs._DEVICE_FAULT_QUERY_SECONDS,
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("log_present", "outcome", "message"),
+    [
+        (False, None, "log is missing"),
+        (True, OSError("exec failed"), "OSError: exec failed"),
+        (True, subprocess.TimeoutExpired(["log"], 300), "TimeoutExpired"),
+        (True, subprocess.CompletedProcess(["log"], 64, "", "bad predicate\n"), "64"),
+    ],
+)
+def test_hosted_device_faults_fail_closed_when_the_log_cannot_answer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    log_present: bool,
+    outcome: object,
+    message: str,
+) -> None:
+    """An unanswered query cannot prove the store sound, so it never returns []."""
+    log_bin = tmp_path / "log"
+    monkeypatch.setattr(
+        jobs.shutil,
+        "which",
+        lambda name: str(log_bin) if log_present and name == "log" else None,
+    )
+
+    def run(args, **_kwargs):
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(jobs.subprocess, "run", run)
+    with pytest.raises(jobs.HostedDeviceStateError, match=message):
+        jobs.hosted_device_faults()
+
+
+def _faulted_hosted_prepare(
+    native_job, monkeypatch: pytest.MonkeyPatch, faults: list[str], **extra: str
+) -> tuple[dict[str, str], Path]:
+    env, checkout = native_job
+    env |= {
+        "TEST_PREFETCH_RECEIPTS": '{"storePath": "/nix/store/faulted.zip"}\n',
+        **extra,
+    }
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv("CACHIX_DAEMON_DIR", raising=False)
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    monkeypatch.chdir(checkout)
+    monkeypatch.setattr(jobs, "is_hosted_darwin_runner", lambda: True)
+    monkeypatch.setattr(jobs, "hosted_device_faults", lambda: faults)
+    return env, Path(env["RUNNER_TEMP"]) / "update-artifacts"
+
+
+@pytest.mark.parametrize("exit_code", ["0", "17"])
+def test_faulted_prepare_hands_off_and_publishes_nothing(
+    native_job,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    exit_code: str,
+) -> None:
+    """39883371442: the faulted VM pushed 69 prefetched paths, then failed."""
+    output = native_job[0]["RUNNER_TEMP"] + "/github-output"
+    env, artifacts = _faulted_hosted_prepare(
+        native_job, monkeypatch, [_KERNEL_DEVICE_FAULT], TEST_EXIT=exit_code
+    )
+    Path(env["RUNNER_TEMP"]).mkdir()
+    daemon_dir = _cachix_daemon_dir(Path(env["RUNNER_TEMP"]))
+    (daemon_dir / "daemon.pid").write_text("4242\n")
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    monkeypatch.setenv("GITHUB_OUTPUT", output)
+    killed: list[tuple[int, int]] = []
+    monkeypatch.setattr(jobs.os, "kill", lambda pid, sig: killed.append((pid, sig)))
+    assert jobs.native("prepare") == 0
+    assert not Path(env["TEST_CACHE_LOG"]).exists()
+    assert killed == [(4242, signal.SIGKILL)]
+    assert Path(output).read_text() == "device_fault=true\n"
+    assert (artifacts / "device-fault.log").read_text() == (
+        f"1 kernel block-device I/O errors\n{_KERNEL_DEVICE_FAULT}\n"
+    )
+    assert "::warning title=Hosted block device faulted::" in capsys.readouterr().out
+    stderr_log = (artifacts / "stderr.log").read_text()
+    assert "publishing nothing from this runner" in stderr_log
+    assert "Killed Cachix daemon pid=4242 without draining" in stderr_log
+    assert "prefetched store paths" not in stderr_log
+
+
+@pytest.mark.parametrize(("exit_code", "expected"), [("0", 1), ("17", 17)])
+def test_faulted_prepare_fails_when_no_step_output_can_hand_off(
+    native_job, monkeypatch: pytest.MonkeyPatch, exit_code: str, expected: int
+) -> None:
+    env, artifacts = _faulted_hosted_prepare(
+        native_job, monkeypatch, [_KERNEL_DEVICE_FAULT], TEST_EXIT=exit_code
+    )
+    assert jobs.native("prepare") == expected
+    assert not Path(env["TEST_CACHE_LOG"]).exists()
+    assert (artifacts / "device-fault.log").is_file()
+
+
+def test_healthy_hosted_prepare_still_publishes_prefetch_receipts(
+    native_job, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env, artifacts = _faulted_hosted_prepare(native_job, monkeypatch, [])
+    assert jobs.native("prepare") == 0
+    assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
+        "push",
+        "gkze",
+        "/nix/store/faulted.zip",
+    ]
+    assert not (artifacts / "device-fault.log").exists()
+
+
+def test_hosted_validation_does_not_query_device_faults(
+    native_job, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only prepare hands a faulted VM's work to a fresh-VM retry job."""
+    _faulted_hosted_prepare(
+        native_job,
+        monkeypatch,
+        [],
+        NIXCFG_CI_STAGE="validate",
+        NIXCFG_PREVIOUS_CANDIDATE="/candidate.json",
+    )
+
+    def unexpected() -> list[str]:
+        raise AssertionError("validation must not query device faults")
+
+    monkeypatch.setattr(jobs, "hosted_device_faults", unexpected)
+    assert jobs.native("validate") == 0
+
+
+def test_quarantine_tolerates_a_missing_or_exited_cachix_daemon(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    log = StringIO()
+    monkeypatch.delenv("CACHIX_DAEMON_DIR", raising=False)
+    jobs._quarantine_faulted_runner(tmp_path, [_KERNEL_DEVICE_FAULT], log)
+    assert (tmp_path / "device-fault.log").is_file()
+    assert "Cachix daemon" not in log.getvalue()
+
+    daemon_dir = tmp_path / "cachix"
+    daemon_dir.mkdir()
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    jobs._quarantine_faulted_runner(tmp_path, [_KERNEL_DEVICE_FAULT], log)
+    assert "Cachix daemon pid unavailable" in log.getvalue()
+
+    (daemon_dir / "daemon.pid").write_text("4242\n")
+
+    def exited(_pid: int, _sig: int) -> None:
+        raise ProcessLookupError
+
+    monkeypatch.setattr(jobs.os, "kill", exited)
+    jobs._quarantine_faulted_runner(tmp_path, [_KERNEL_DEVICE_FAULT], log)
+    assert "Killed Cachix daemon" not in log.getvalue()
+
+
+def test_flush_cachix_publishes_nothing_from_a_faulted_runner(
+    native_job, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No receipt push, drain or pin; cachix-action post must skip its drain."""
+    env, checkout = native_job
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    artifacts.mkdir(parents=True)
+    (artifacts / "prefetch-receipts.jsonl").write_text(
+        '{"storePath": "/nix/store/faulted.zip"}\n'
+    )
+    (artifacts / "device-fault.log").write_text("1 kernel block-device I/O errors\n")
+    daemon_dir = _cachix_daemon_dir(Path(env["RUNNER_TEMP"]))
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
+    monkeypatch.chdir(checkout)
+    assert jobs.main("flush-cachix") == 0
+    assert not Path(env["TEST_CACHE_LOG"]).exists()
+    assert not (daemon_dir / "daemon.sock").exists()
+    assert not (daemon_dir / "daemon.pid").exists()
+    assert "CACHIX_DAEMON_DIR" not in os.environ
+    flush_log = (artifacts / "cachix-flush.log").read_text()
+    assert "Skipping Cachix flush: this runner's block device faulted" in flush_log
+    assert "prefetched store paths" not in flush_log
+
+
+def _dump_with_kernel_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kernel_log: str | None
+) -> Path:
+    """Run the dump with ``log show`` returning *kernel_log* (None: no log)."""
+    _hosted_darwin_dump_env(tmp_path, monkeypatch)
+    output = tmp_path / "github-output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    log_bin = tmp_path / "log"
+
+    def which(name: str) -> str | None:
+        return str(log_bin) if name == "log" and kernel_log is not None else None
+
+    def run(args, **_kwargs):
+        return subprocess.CompletedProcess(args, 0, stdout=kernel_log, stderr="")
+
+    monkeypatch.setattr(jobs.shutil, "which", which)
+    monkeypatch.setattr(jobs.subprocess, "run", run)
+    assert jobs.main("dump-storage-fault") == 0
+    return output
+
+
+def test_dump_marks_a_device_fault_found_in_the_kernel_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fault that broke the stage before native()'s check still hands off."""
+    output = _dump_with_kernel_log(tmp_path, monkeypatch, f"{_KERNEL_DEVICE_FAULT}\n")
+    assert output.read_text() == "device_fault=true\n"
+    marker = tmp_path / "update-artifacts/device-fault.log"
+    assert marker.read_text().startswith("1 kernel block-device I/O errors\n")
+
+
+def test_dump_keeps_the_prepare_marker_when_the_log_is_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    artifacts = tmp_path / "update-artifacts"
+    artifacts.mkdir()
+    (artifacts / "device-fault.log").write_text("from prepare\n")
+    output = _dump_with_kernel_log(tmp_path, monkeypatch, None)
+    assert output.read_text() == "device_fault=true\n"
+    assert (artifacts / "device-fault.log").read_text() == "from prepare\n"
+
+
+def test_dump_reports_no_device_fault_for_a_clean_kernel_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """39850402233's GC failure logged no device errors and must not retry."""
+    output = _dump_with_kernel_log(tmp_path, monkeypatch, "Timestamp\n")
+    assert output.read_text() == "device_fault=false\n"
+    assert not (tmp_path / "update-artifacts/device-fault.log").exists()
 
 
 def test_append_command_output_keeps_empty_stdout_and_terminated_stderr(

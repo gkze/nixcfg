@@ -83,6 +83,21 @@ jobs:
       previous: prepare-pins
       targets: ${{ needs.targets.outputs.targets }}
     secrets: inherit
+  # Same fresh-VM rerun as Update: only a kernel block-device fault retries.
+  prepare-darwin-retry:
+    needs: [targets, prepare-pins, prepare-darwin]
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin.outputs.device_fault == 'true'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: prepare
+      previous: prepare-pins
+      targets: ${{ needs.targets.outputs.targets }}
+    secrets: inherit
   prepare-arm:
     needs: [targets, prepare-pins]
     uses: ./.github/workflows/update-native.yml
@@ -104,7 +119,15 @@ jobs:
       targets: ${{ needs.targets.outputs.targets }}
     secrets: inherit
   prepare-merge:
-    needs: [prepare-darwin, prepare-arm, prepare-x86]
+    needs: [prepare-darwin, prepare-darwin-retry, prepare-arm, prepare-x86]
+    if: |-
+      always() && !cancelled() &&
+      (needs.prepare-darwin.result == 'success' &&
+      needs.prepare-darwin.outputs.device_fault != 'true' ||
+      needs.prepare-darwin-retry.result == 'success' &&
+      needs.prepare-darwin-retry.outputs.device_fault != 'true') &&
+      needs.prepare-arm.result == 'success' &&
+      needs.prepare-x86.result == 'success'
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04

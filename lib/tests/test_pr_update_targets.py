@@ -110,10 +110,19 @@ def test_pr_update_prepare_runs_the_update_prepare_stages() -> None:
     assert set(stages) == {
         "prepare-pins",
         "prepare-darwin",
+        "prepare-darwin-retry",
         "prepare-arm",
         "prepare-x86",
         "prepare-merge",
     }
+    retry = jobs["prepare-darwin-retry"]
+    assert retry["with"] == jobs["prepare-darwin"]["with"]
+    assert " ".join(retry["if"].split()) == " ".join(
+        update["jobs"]["prepare-darwin-retry"]["if"].split()
+    )
+    assert " ".join(jobs["prepare-merge"]["if"].split()) == " ".join(
+        update["jobs"]["prepare-merge"]["if"].split()
+    )
     for name, job in jobs.items():
         if name == "targets":
             continue
