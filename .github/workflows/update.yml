@@ -300,6 +300,28 @@ jobs:
       scope: fod-canary
       shard: fod-${{ matrix.host }}
     secrets: inherit
+  # 39166099302: cascade slots 1 and 2 both compiled zeron (26 min each)
+  # while plan-darwin-closures left three macos-15 runners idle ~40 min.
+  # Realize heavy rust_*-independent leaves in that window; the Cachix
+  # hook publishes them and cascade substitutes. Not a gate: cascade and
+  # roots still realize every path, so a failure here only loses the head
+  # start. Starts with the FOD canaries (3 of 5 runners) so it finishes
+  # before plan frees the 5-wide rust stripe.
+  prebuild-darwin-leaves:
+    needs:
+      - prepare-merge
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-merge.result == 'success'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      previous: prepare-x86_64-linux
+      scope: leaf-prebuild
+      shard: leaves
+    secrets: inherit
   canary-warm-rust:
     needs:
       - canary-slots
@@ -412,6 +434,7 @@ jobs:
       - plan-darwin-closures
       - validate-darwin-warm-rust
       - canary-warm-cascade
+      - prebuild-darwin-leaves
     if: |-
       always() && !cancelled() &&
       needs.prepare-merge.result == 'success' &&
@@ -419,7 +442,10 @@ jobs:
       needs.validate-darwin-warm-rust.result == 'success' &&
       (needs.canary-warm-cascade.result == 'success' ||
       needs.canary-warm-cascade.result == 'skipped' ||
-      needs.canary-warm-cascade.result == 'failure')
+      needs.canary-warm-cascade.result == 'failure') &&
+      (needs.prebuild-darwin-leaves.result == 'success' ||
+      needs.prebuild-darwin-leaves.result == 'skipped' ||
+      needs.prebuild-darwin-leaves.result == 'failure')
     strategy:
       fail-fast: false
       max-parallel: 5
