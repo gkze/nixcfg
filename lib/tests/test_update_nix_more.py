@@ -338,6 +338,28 @@ def test_goproxy_http2_internal_error_is_retryable_network_failure() -> None:
     )
 
 
+def test_nix_offline_detection_is_retryable_network_failure() -> None:
+    """39912925016 warm-rust 0: offline nix turned cached llvm into a build."""
+    stderr = (
+        "warning: you don't have Internet access; "
+        "disabling some network-dependent features\n"
+        "these 4 derivations will be built:\n"
+        "  /nix/store/jg9wapn2mhb7pgrcyq71gahva6yf9z49-llvm-21.1.8.drv\n"
+        "error: Cannot build '/nix/store/jg9wapn2mhb7pgrcyq71gahva6yf9z49-"
+        "llvm-21.1.8.drv'.\n"
+        "       Reason: local builds are disabled (max-jobs = 0)"
+    )
+    assert is_retryable_nix_network_failure(stdout="", stderr=stderr)
+    assert not is_retryable_nix_network_failure(
+        stdout="",
+        stderr=(
+            "error: Cannot build '/nix/store/jg9wapn2mhb7pgrcyq71gahva6yf9z49-"
+            "llvm-21.1.8.drv'.\n"
+            "       Reason: local builds are disabled (max-jobs = 0)"
+        ),
+    )
+
+
 def test_http_5xx_and_git_rpc_are_retryable_network_failures() -> None:
     """Shared FOD/updater retry covers HTTP 5xx and git 503, not 4xx."""
     assert is_retryable_nix_network_failure(
