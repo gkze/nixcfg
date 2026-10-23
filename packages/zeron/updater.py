@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, ClassVar
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import EventSink, ignore_event
+from lib.update.net import fetch_url, github_raw_url
 from lib.update.nix import (
     _build_fetch_from_github_expr,
     _build_package_path_attr_expr,
@@ -17,6 +18,7 @@ from lib.update.updaters import (
     register_updater,
     stream_fixed_output_hashes,
 )
+from packages.zeron.patch_nix_managed import UPDATE_SOURCE, validate_update_source
 
 if TYPE_CHECKING:
     import aiohttp
@@ -40,6 +42,32 @@ class ZeronUpdater(GitHubReleaseUpdater):
             systems=("aarch64-darwin",),
         ),
     )
+
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
+        """Reject a release whose updater seam the Nix ownership patch cannot own.
+
+        This runs in the Linux pins stage, so anchor drift fails only this
+        target there instead of failing the Darwin build's patchPhase.
+        """
+        info = await super().fetch_latest(session, context=context)
+        payload = await fetch_url(
+            session,
+            github_raw_url(
+                self.GITHUB_OWNER,
+                self.GITHUB_REPO,
+                self._require_commit(info),
+                UPDATE_SOURCE.as_posix(),
+            ),
+            config=self.config,
+        )
+        try:
+            validate_update_source(payload.decode("utf-8"))
+        except RuntimeError as exc:
+            msg = f"Zeron {info.version} updater seam drifted from the Nix ownership patch"
+            raise RuntimeError(msg) from exc
+        return info
 
     @classmethod
     def _src_expr(cls, commit: str) -> str:
