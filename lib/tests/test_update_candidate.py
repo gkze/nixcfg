@@ -1745,6 +1745,94 @@ def test_rust_warmup_retries_rusty_v8_after_others_hash_mismatch(
     ]
 
 
+def test_rust_warmup_realizes_rusty_v8_family_on_exactly_one_slot(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """39912925016: two slots each compiled rust_pctx_code_execution_runtime.
+
+    Slot 0's local copy had a different SVH than the one Cachix
+    rust_pctx_executor was built against, and rust_goose E0463'd.
+    """
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
+    )
+    native = "/nix/store/11111111111111111111111111111111-goose-cli-v8-native-dbb64c2"
+    v8 = "/nix/store/22222222222222222222222222222222-rust_v8-goose-145.0.0"
+    runtime = (
+        "/nix/store/44444444444444444444444444444444-"
+        "rust_pctx_code_execution_runtime-0.2.2"
+    )
+    executor = "/nix/store/55555555555555555555555555555555-rust_pctx_executor-0.2.2"
+    goose = "/nix/store/66666666666666666666666666666666-rust_goose-1.55.0"
+    family = (native, v8, runtime, executor, goose)
+    filler = tuple(f"/nix/store/{index:032x}-rust_filler-{index}" for index in range(8))
+    realized: list[str] = []
+
+    def warmup_realize(paths: object, *_args: object, **_kwargs: object) -> tuple[()]:
+        assert isinstance(paths, tuple)
+        realized.extend(paths)
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_args, **_kwargs: ())
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=tuple(sorted((*family, *filler))),
+            # Plain round-robin would split the family over slots 0, 1, and 2.
+            rustLayers=(
+                (native, *filler[:5]),
+                (filler[5], v8),
+                (runtime,),
+                (filler[6], filler[7], executor),
+                (goose,),
+            ),
+            rustyV8Family=tuple(sorted(family)),
+            outputDrvs={path: f"{path}.drv" for path in (*family, *filler)},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=13, missing=13, warmup=13, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    per_slot: list[frozenset[str]] = []
+    for slot in range(5):
+        realized.clear()
+        report = pipeline.validate_candidate(
+            candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=slot
+        )
+        assert report.failures == ()
+        per_slot.append(frozenset(realized))
+    family_drvs = frozenset(f"{path}.drv" for path in family)
+    owners = [slot for slot, drvs in enumerate(per_slot) if drvs & family_drvs]
+    assert len(owners) == 1
+    assert family_drvs <= per_slot[owners[0]]
+
+
 def test_rust_warmup_keeps_rusty_v8_failure_when_fod_retry_misses(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
