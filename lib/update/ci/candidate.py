@@ -57,6 +57,7 @@ from lib.update.ci.warmup import (
     command_store_drv,
     compiler_input_drvs,
     darwin_fod_canary_installables,
+    darwin_leaf_prebuild_installables,
     export_warmup_drvs,
     filter_cascade_realize_drvs,
     gitbutler_family_slot_from_package,
@@ -148,6 +149,7 @@ ValidationScope = Literal[
     "cascade-warmup",
     "cascade-canary",
     "fod-canary",
+    "leaf-prebuild",
     "zed-warmup",
 ]
 ValidationGate = Literal["packages", "closures"]
@@ -253,6 +255,7 @@ _FAIL_FAST_PROGRESS_SOURCES = frozenset({
     "cascade-warmup",
     "cascade-canary",
     "fod-canary",
+    "leaf-prebuild",
     "root-deps",
     "root-closures",
 })
@@ -734,6 +737,7 @@ def _gates_for_scope(scope: str) -> tuple[ValidationGate, ...]:
         "cascade-warmup",
         "cascade-canary",
         "fod-canary",
+        "leaf-prebuild",
         "zed-warmup",
     }:
         return ()
@@ -1509,6 +1513,31 @@ def _realize_fod_canary(
     return tuple(failures)
 
 
+def _realize_leaf_prebuild(
+    *,
+    flake_root: Path,
+) -> tuple[validation.DerivationValidationFailure, ...]:
+    """Realize heavy Darwin leaves while plan-darwin-closures evaluates.
+
+    The Cachix hook publishes them, so cascade stripes substitute instead
+    of compiling the same leaf on two slots. Cascade and roots still
+    realize and gate every path; this only moves when the leaf is built.
+    """
+    return validation.validate_derivation_requests(
+        tuple(
+            validation.DerivationValidationRequest(
+                source="leaf-prebuild",
+                installable=installable,
+                mode="build",
+            )
+            for installable in darwin_leaf_prebuild_installables()
+        ),
+        flake_root=flake_root,
+        progress=_hosted_validation_progress("leaf-prebuild"),
+        print_build_logs=True,
+    )
+
+
 def _realize_requested_warmup(
     scope: str,
     warmup_plan: Path | None,
@@ -1516,7 +1545,7 @@ def _realize_requested_warmup(
     *,
     flake_root: Path,
 ) -> tuple[validation.DerivationValidationFailure, ...]:
-    """Dispatch rust-warmup, cascade-warmup, cascade-canary, fod-canary, or zed-warmup."""
+    """Dispatch rust/cascade warmups, the canaries, leaf-prebuild, or zed-warmup."""
     if scope == "rust-warmup":
         if warmup_plan is None or warmup_slot is None:
             msg = "rust-warmup requires a warmup plan and slot"
@@ -1534,6 +1563,8 @@ def _realize_requested_warmup(
         return _realize_cascade_canary(warmup_plan, flake_root=flake_root)
     if scope == "fod-canary":
         return _realize_fod_canary(flake_root=flake_root)
+    if scope == "leaf-prebuild":
+        return _realize_leaf_prebuild(flake_root=flake_root)
     if scope == "zed-warmup":
         if warmup_plan is None:
             msg = "zed-warmup requires a warmup plan"
@@ -1629,7 +1660,8 @@ def validate_candidate(
     evidence. ``fod-canary`` realizes Darwin warmup-path FODs
     (pnpm-deps, DMG src) on two hosts before rust-warmup. ``cascade-canary``
     realizes ``buzz-onnxruntime`` and versioned ``hq-*`` once so
-    the 5-wide stripe can substitute them. ``cascade-warmup`` realizes the
+    the 5-wide stripe can substitute them. ``leaf-prebuild`` realizes
+    heavy rust_*-independent leaves (zeron) during the plan window. ``cascade-warmup`` realizes the
     shared non-rust intersection one drv at a time. Hosted Darwin shards
     GC before the root-closure fetch: a cache-miss rust_* subtree can
     fill macos-15 and ``min-free`` then GCs

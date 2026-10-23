@@ -273,6 +273,20 @@ def darwin_fod_canary_installables(
     return tuple(f"path:.#pkgs.{system}.{attr}" for attr in _DARWIN_FOD_CANARY_ATTRS)
 
 
+# 39166099302: cascade slots 1 and 2 each compiled zeron-0.2.114 (26 min,
+# cargo-vendored, no rust_* inputs) because two striped drvs depend on it.
+# Cascade waited 46.5 min on slot 1 while plan-darwin-closures left three
+# macos-15 runners idle for ~40 min. Realize these leaves in that window.
+_DARWIN_LEAF_PREBUILD_ATTRS = ("zeron",)
+
+
+def darwin_leaf_prebuild_installables(
+    system: str = _DARWIN_SYSTEM,
+) -> tuple[str, ...]:
+    """Return flake attrs for heavy Darwin leaves built before cascade."""
+    return tuple(f"path:.#pkgs.{system}.{attr}" for attr in _DARWIN_LEAF_PREBUILD_ATTRS)
+
+
 def warmup_fatal_line(
     line: str,
     *,
