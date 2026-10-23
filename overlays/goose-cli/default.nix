@@ -33,6 +33,12 @@ let
       ];
   };
 
+  # Goose <= 1.55.0 patches crates.io `v8` to its `vendor/v8` shim over the
+  # pinned `v8-goose` fork; 1.56.0 replaced V8 with Boa. patch_source.py
+  # validates the rest of the layout and rejects V8 without this patch entry.
+  upstreamManifest = builtins.fromTOML (builtins.readFile "${upstreamSrc}/Cargo.toml");
+  usesVendoredV8 = upstreamManifest ? patch.crates-io.v8;
+
   v8Source = sources.goose-v8;
   v8HashEntry = builtins.head (
     builtins.filter (entry: entry.hashType == "srcHash") (v8Source.hashes or [ ])
@@ -84,7 +90,7 @@ let
   inherit (v8Build) chromiumToolchainBundle;
 
   cargoNixGooseVersion = cargoNix.internal.crates."goose-cli".version;
-  cargoNixV8Version = cargoNix.internal.crates."v8-goose".version;
+  cargoNixHasV8Goose = cargoNix.internal.crates ? "v8-goose";
   cargoNixVersionCheck =
     if cargoNixGooseVersion == version then
       true
@@ -93,12 +99,25 @@ let
         overlays/goose-cli/Cargo.nix has goose-cli version ${cargoNixGooseVersion},
         expected ${version}; regenerate Cargo.nix
       '';
-  cargoNixV8VersionCheck =
-    if cargoNixV8Version == v8ManifestVersion then
+  cargoNixV8Check =
+    if !usesVendoredV8 then
+      if cargoNixHasV8Goose then
+        throw ''
+          overlays/goose-cli/Cargo.nix has a v8-goose crate, but Goose ${version}
+          does not vendor V8; regenerate Cargo.nix
+        ''
+      else
+        true
+    else if !cargoNixHasV8Goose then
+      throw ''
+        overlays/goose-cli/Cargo.nix has no v8-goose crate, but Goose ${version}
+        vendors V8; regenerate Cargo.nix
+      ''
+    else if cargoNix.internal.crates."v8-goose".version == v8ManifestVersion then
       true
     else
       throw ''
-        overlays/goose-cli/Cargo.nix has v8-goose version ${cargoNixV8Version},
+        overlays/goose-cli/Cargo.nix has v8-goose version ${cargoNix.internal.crates."v8-goose".version},
         expected ${v8ManifestVersion}; regenerate Cargo.nix
       '';
 
@@ -112,20 +131,26 @@ let
           prev.python3
         ];
       }
-      ''
-        cp -r ${upstreamSrc} $out
-        chmod -R u+w $out
+      (
+        ''
+          cp -r ${upstreamSrc} $out
+          chmod -R u+w $out
+        ''
+        + prev.lib.optionalString usesVendoredV8 ''
 
-        mkdir -p $out/vendor
-        cp -r ${patchedV8Src} $out/vendor/v8-goose-src
-        chmod -R u+w $out/vendor/v8-goose-src
+          mkdir -p $out/vendor
+          cp -r ${patchedV8Src} $out/vendor/v8-goose-src
+          chmod -R u+w $out/vendor/v8-goose-src
+        ''
+        + ''
 
-        PYTHONPATH=${
-          import ../../lib/codemods-pythonpath.nix { inherit (prev) lib; }
-        } ${prev.lib.getExe prev.python3} ${./patch_source.py} "$out"
+          PYTHONPATH=${
+            import ../../lib/codemods-pythonpath.nix { inherit (prev) lib; }
+          } ${prev.lib.getExe prev.python3} ${./patch_source.py} "$out"
 
-        cp ${./crate-hashes.json} $out/crate-hashes.json
-      '';
+          cp ${./crate-hashes.json} $out/crate-hashes.json
+        ''
+      );
 
   crateSource = (import ../../lib/crate2nix-source-slice.nix).sourceFor {
     rootSrc = upstreamSrc;
@@ -248,15 +273,19 @@ let
 
   # Keep all build-system compatibility shims in one place so version bumps can
   # be audited crate-by-crate.
-  crateOverrides = prev.defaultCrateOverrides // {
-    bitcoin-internals = bitcoinInternalsOverride;
-    goose-cli = gooseCliOverride;
-    hipstr = hipstrOverride;
-    llama-cpp-sys-2 = llamaCppSysOverride;
-    rmcp = rmcpOverride;
-    v8-goose = v8GooseOverride;
-    xcap = xcapLinuxOverride;
-  };
+  crateOverrides =
+    prev.defaultCrateOverrides
+    // {
+      bitcoin-internals = bitcoinInternalsOverride;
+      goose-cli = gooseCliOverride;
+      hipstr = hipstrOverride;
+      llama-cpp-sys-2 = llamaCppSysOverride;
+      rmcp = rmcpOverride;
+      xcap = xcapLinuxOverride;
+    }
+    // prev.lib.optionalAttrs usesVendoredV8 {
+      v8-goose = v8GooseOverride;
+    };
 
   # Build the Goose CLI workspace member, including its install-check smoke tests.
   gooseCliDrv = cargoNix.workspaceMembers.goose-cli.build.override {
@@ -290,7 +319,7 @@ in
     assert sourceVersionCheck;
     assert v8SourceVersionCheck;
     assert cargoNixVersionCheck;
-    assert cargoNixV8VersionCheck;
+    assert cargoNixV8Check;
     prev.symlinkJoin {
       name = "goose-cli-${version}";
       paths = [ gooseCliDrvChecked ];

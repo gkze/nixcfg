@@ -1,6 +1,7 @@
 """Tests for Goose CLI source-tree patching before crate2nix builds."""
 
 import re
+import shutil
 import tomllib
 from pathlib import Path
 from types import ModuleType
@@ -33,9 +34,15 @@ def _cargo_lock_packages(path: Path) -> dict[str, dict[str, Any]]:
     return by_name
 
 
+_VENDORED_V8_PATCH = '[patch.crates-io]\nv8 = { path = "vendor/v8" }\n'
+_REGISTRY_LOCK = '[[package]]\nname = "serde"\nversion = "1.0.0"\n'
+
+
 def _write_minimal_goose_tree(root: Path) -> None:
+    """Write the Goose <= 1.55.0 layout that routes ``v8`` through ``vendor/v8``."""
     (root / "Cargo.toml").write_text(
-        '[workspace]\nmembers = []\n[workspace.package]\nversion = "1.2.3"\n',
+        '[workspace]\nmembers = []\n[workspace.package]\nversion = "1.2.3"\n'
+        + _VENDORED_V8_PATCH,
         encoding="utf-8",
     )
     (root / "crates/goose-cli/src").mkdir(parents=True)
@@ -111,6 +118,18 @@ version = "1.0.0"
     )
 
 
+def _write_v8_free_goose_tree(root: Path) -> None:
+    """Write the Goose >= 1.56.0 layout, which has no V8 crates at all."""
+    _write_minimal_goose_tree(root)
+    shutil.rmtree(root / "vendor")
+    (root / "Cargo.toml").write_text(
+        '[workspace]\nmembers = []\n[workspace.package]\nversion = "1.2.3"\n'
+        '[patch.crates-io]\ncudaforge = { git = "https://example.invalid/cudaforge" }\n',
+        encoding="utf-8",
+    )
+    (root / "Cargo.lock").write_text(_REGISTRY_LOCK, encoding="utf-8")
+
+
 def _write_workspace_member(root: Path, member: str, manifest: str) -> None:
     manifest_path = root / member / "Cargo.toml"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -161,7 +180,7 @@ def test_patch_source_reconciles_v1_48_workspace_lock_versions(
     _write_minimal_goose_tree(tmp_path)
     (tmp_path / "Cargo.toml").write_text(
         '[workspace]\nmembers = ["crates/*"]\n'
-        '[workspace.package]\nversion = "1.48.0"\n',
+        '[workspace.package]\nversion = "1.48.0"\n' + _VENDORED_V8_PATCH,
         encoding="utf-8",
     )
     _write_workspace_member(
@@ -662,3 +681,136 @@ def test_rewrite_v8_goose_lock_entry_requires_existing_lock_entry(
 
     with pytest.raises(SystemExit, match="Cargo.lock entry"):
         module.rewrite_v8_goose_lock_entry(tmp_path, "1.2.3")
+
+
+def test_patch_source_accepts_the_v8_free_goose_layout(tmp_path: Path) -> None:
+    """Goose 1.56.0 dropped vendor/v8; patching must not require it."""
+    module = _load_module()
+    _write_v8_free_goose_tree(tmp_path)
+    (tmp_path / "Cargo.toml").write_text(
+        '[workspace]\nmembers = ["crates/*"]\n[workspace.package]\nversion = "1.56.0"\n'
+        '[patch.crates-io]\ncudaforge = { git = "https://example.invalid/cudaforge" }\n',
+        encoding="utf-8",
+    )
+    _write_workspace_member(
+        tmp_path,
+        "crates/goose-cli",
+        '[package]\nname = "goose-cli"\nversion.workspace = true\n',
+    )
+    _append_lock_packages(
+        tmp_path, '\n[[package]]\nname = "goose-cli"\nversion = "1.55.0"\n'
+    )
+
+    module.main([str(tmp_path)])
+
+    assert module.uses_vendored_v8(tmp_path) is False
+    assert not (tmp_path / "vendor").exists()
+    assert _cargo_lock_packages(tmp_path / "Cargo.lock") == {
+        "serde": {"name": "serde", "version": "1.0.0"},
+        "goose-cli": {"name": "goose-cli", "version": "1.56.0"},
+    }
+    assert (
+        tmp_path / "crates/goose-cli/static/img/logo_dark.png"
+    ).read_text() == "dark"
+
+
+def test_uses_vendored_v8_accepts_a_manifest_without_patch_table(
+    tmp_path: Path,
+) -> None:
+    """A root manifest with no [patch] table is the plain V8-free layout."""
+    module = _load_module()
+    _write_v8_free_goose_tree(tmp_path)
+    (tmp_path / "Cargo.toml").write_text(
+        '[workspace]\nmembers = []\n[workspace.package]\nversion = "1.2.3"\n',
+        encoding="utf-8",
+    )
+
+    assert module.uses_vendored_v8(tmp_path) is False
+
+
+def test_uses_vendored_v8_detects_the_vendored_layout(tmp_path: Path) -> None:
+    """Goose <= 1.55.0 keeps the pinned v8-goose rewrites."""
+    module = _load_module()
+    _write_minimal_goose_tree(tmp_path)
+
+    assert module.uses_vendored_v8(tmp_path) is True
+
+
+@pytest.mark.parametrize(
+    ("leftover", "lock_packages", "message"),
+    [
+        ("vendor/v8", "", "paths: vendor/v8; Cargo.lock: none"),
+        ("vendor/v8-goose-src", "", "paths: vendor/v8-goose-src; Cargo.lock: none"),
+        (
+            None,
+            '\n[[package]]\nname = "v8"\nversion = "146.0.0"\n'
+            'source = "registry+https://github.com/rust-lang/crates.io-index"\n',
+            "paths: none; Cargo.lock: v8)",
+        ),
+        (
+            None,
+            '\n[[package]]\nname = "v8-goose"\nversion = "146.0.0"\n'
+            '\n[[package]]\nname = "v8"\nversion = "146.0.0"\n',
+            "paths: none; Cargo.lock: v8, v8-goose)",
+        ),
+    ],
+    ids=("vendor-shim", "vendor-fork", "registry-v8", "both-lock-entries"),
+)
+def test_uses_vendored_v8_rejects_unpinned_v8_without_the_patch_entry(
+    tmp_path: Path,
+    leftover: str | None,
+    lock_packages: str,
+    message: str,
+) -> None:
+    """V8 reappearing in any other shape must fail instead of building unpinned."""
+    module = _load_module()
+    _write_v8_free_goose_tree(tmp_path)
+    if leftover is not None:
+        (tmp_path / leftover).mkdir(parents=True)
+    _append_lock_packages(tmp_path, lock_packages)
+
+    with pytest.raises(SystemExit, match=re.escape(message)):
+        module.patch_source(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("patch_section", "message"),
+    [
+        (
+            '[patch.crates-io]\nv8 = { path = "vendor/v8-next" }\n',
+            "expected Goose [patch.crates-io] v8 to be",
+        ),
+        ('[patch.crates-io]\nv8 = "146"\n', "expected Goose [patch.crates-io] v8"),
+        ('patch = "invalid"\n', "expected [patch.crates-io] to be a table"),
+        (
+            '[patch]\ncrates-io = "invalid"\n',
+            "expected [patch.crates-io] to be a table",
+        ),
+    ],
+)
+def test_uses_vendored_v8_rejects_unexpected_patch_shapes(
+    tmp_path: Path,
+    patch_section: str,
+    message: str,
+) -> None:
+    """Only the reviewed vendor/v8 patch entry selects the pinned V8 rewrites."""
+    module = _load_module()
+    _write_minimal_goose_tree(tmp_path)
+    (tmp_path / "Cargo.toml").write_text(
+        patch_section
+        + '[workspace]\nmembers = []\n[workspace.package]\nversion = "1.2.3"\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit, match=re.escape(message)):
+        module.patch_source(tmp_path)
+
+
+def test_uses_vendored_v8_requires_the_injected_fork(tmp_path: Path) -> None:
+    """The Nix side must inject vendor/v8-goose-src whenever Goose vendors V8."""
+    module = _load_module()
+    _write_minimal_goose_tree(tmp_path)
+    shutil.rmtree(tmp_path / "vendor/v8-goose-src")
+
+    with pytest.raises(SystemExit, match="vendor/v8-goose-src is missing"):
+        module.patch_source(tmp_path)

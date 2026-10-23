@@ -21,6 +21,9 @@ _V8_GOOSE_SOURCE_HEADERS_TO_DROP = frozenset({
     "[[test]]",
     "[[bench]]",
 })
+_VENDORED_V8_PATCH = {"path": "vendor/v8"}
+_VENDORED_V8_PATHS = ("vendor/v8", "vendor/v8-goose-src")
+_V8_LOCK_PACKAGES = frozenset({"v8", "v8-goose"})
 
 
 def drop_top_level_sections(text: str, headers: frozenset[str]) -> str:
@@ -103,6 +106,51 @@ def patch_goose_cli_crate(crate_root: Path, logo_root: Path) -> None:
     """Prepare the filtered Goose CLI crate used by the production build."""
     if _rewrite_goose_cli_crate_logo_paths(crate_root):
         _copy_goose_cli_logos(crate_root, logo_root)
+
+
+def uses_vendored_v8(root: Path) -> bool:
+    """Return whether this Goose release routes ``v8`` through ``vendor/v8``.
+
+    Goose 1.55.0 and earlier patch crates.io ``v8`` to ``vendor/v8``, a shim
+    over the ``v8-goose`` fork. Goose 1.56.0 replaced its V8-based code mode
+    with Boa and dropped both. Without that patch entry, any V8 crate or
+    vendored V8 directory is an unreviewed layout, so fail instead of building
+    an unpinned V8.
+    """
+    manifest = tomllib.loads((root / "Cargo.toml").read_text())
+    patches = manifest.get("patch", {})
+    crates_io = patches.get("crates-io", {}) if isinstance(patches, dict) else None
+    if not isinstance(crates_io, dict):
+        msg = "expected [patch.crates-io] to be a table in Goose Cargo.toml"
+        raise SystemExit(msg)
+    if "v8" in crates_io:
+        if crates_io["v8"] != _VENDORED_V8_PATCH:
+            msg = (
+                "expected Goose [patch.crates-io] v8 to be "
+                f"{_VENDORED_V8_PATCH!r}, found {crates_io['v8']!r}"
+            )
+            raise SystemExit(msg)
+        if not (root / "vendor/v8-goose-src").is_dir():
+            msg = "Goose patches v8 to vendor/v8 but vendor/v8-goose-src is missing"
+            raise SystemExit(msg)
+        return True
+
+    leftovers = sorted(path for path in _VENDORED_V8_PATHS if (root / path).exists())
+    lock_packages = tomllib.loads((root / "Cargo.lock").read_text()).get("package", [])
+    v8_packages = sorted({
+        package["name"]
+        for package in lock_packages
+        if package.get("name") in _V8_LOCK_PACKAGES
+    })
+    if leftovers or v8_packages:
+        msg = (
+            "Goose has no [patch.crates-io] v8 entry but still carries V8 "
+            f"(paths: {', '.join(leftovers) or 'none'}; "
+            f"Cargo.lock: {', '.join(v8_packages) or 'none'}); "
+            "review and pin the new V8 layout"
+        )
+        raise SystemExit(msg)
+    return False
 
 
 def rewrite_v8_dependency(root: Path) -> None:
@@ -266,11 +314,12 @@ def patch_source(root: Path) -> None:
     if rewrite_goose_logo_paths(root):
         copy_goose_logos(root)
 
-    rewrite_v8_dependency(root)
-    v8_goose_cargo_text = strip_v8_goose_workspace_sections(root)
-    v8_manifest = tomllib.loads(v8_goose_cargo_text)
-    v8_version = v8_manifest["package"]["version"]
-    rewrite_v8_goose_lock_entry(root, v8_version)
+    if uses_vendored_v8(root):
+        rewrite_v8_dependency(root)
+        v8_goose_cargo_text = strip_v8_goose_workspace_sections(root)
+        v8_manifest = tomllib.loads(v8_goose_cargo_text)
+        v8_version = v8_manifest["package"]["version"]
+        rewrite_v8_goose_lock_entry(root, v8_version)
     rewrite_workspace_lock_versions(root)
 
 
