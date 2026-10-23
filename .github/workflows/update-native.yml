@@ -67,6 +67,9 @@ on:
       darwin_closure_shards:
         description: Generated always-run Darwin closure matrix
         value: ${{ jobs.native.outputs.darwin_closure_shards }}
+      device_fault:
+        description: The hosted runner's kernel logged a block-device I/O error
+        value: ${{ jobs.native.outputs.device_fault }}
     secrets:
       UPDATE_SELF_HEAL_GITHUB_TOKEN:
         required: true
@@ -80,6 +83,9 @@ jobs:
     timeout-minutes: 360
     outputs:
       darwin_closure_shards: ${{ steps.candidate.outputs.darwin_closure_shards }}
+      device_fault: |-
+        ${{ steps.candidate.outputs.device_fault ||
+        steps.storage.outputs.device_fault }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -160,25 +166,31 @@ jobs:
           runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
         shell: python
       - name: Dump hosted storage-fault evidence
-        if: failure()
+        id: storage
+        if: failure() || steps.candidate.outputs.device_fault == 'true'
         env:
           NIXCFG_CI_STAGE: dump-storage-fault
         run: |
           import runpy
           runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
         shell: python
+      # A faulted runner's candidate keeps a distinct name: no consumer can
+      # download it, and a fresh-VM retry cannot overwrite its evidence.
       - name: Retain candidate and failure evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: |-
-            ${{ inputs.stage == 'merge-candidates' && 'prepare-x86_64-linux' ||
+            ${{ format('{0}{1}',
+            inputs.stage == 'merge-candidates' && 'prepare-x86_64-linux' ||
             inputs.stage == 'prepare-pins' && 'prepare-pins' ||
             inputs.shard != '' &&
             format('{0}-{1}-{2}-{3}', inputs.stage, inputs.system, inputs.scope, inputs.shard) ||
             inputs.scope == 'all' &&
             format('{0}-{1}', inputs.stage, inputs.system) ||
-            format('{0}-{1}-{2}', inputs.stage, inputs.system, inputs.scope) }}
+            format('{0}-{1}-{2}', inputs.stage, inputs.system, inputs.scope),
+            (steps.candidate.outputs.device_fault == 'true' ||
+            steps.storage.outputs.device_fault == 'true') && '-device-fault' || '') }}
           path: ${{ runner.temp }}/update-artifacts
           if-no-files-found: warn
           overwrite: true
