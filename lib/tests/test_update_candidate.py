@@ -105,6 +105,21 @@ def test_resolution_rejects_executable_or_unknown_metadata() -> None:
         ),
         ("packages/mux/updater.py", "MuxSourceMetadata", {"bun_version": "1.3.0"}),
         (
+            "lib/update/updaters/exact_bun.py",
+            "ExactBunMetadata",
+            {
+                "bun_version": "1.4.4",
+                "bun_runtime_hashes": [
+                    {
+                        "hashType": "bunRuntimeHash",
+                        "hash": _HASH,
+                        "platform": "x86_64-linux",
+                        "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-x64-baseline.zip",
+                    }
+                ],
+            },
+        ),
+        (
             "lib/update/electron_manifest.py",
             "ElectronManifestMetadata",
             {"manifest_path": "package.json", "manifest_version": "1.2.3"},

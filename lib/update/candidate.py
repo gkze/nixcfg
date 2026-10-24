@@ -33,10 +33,15 @@ def git(root: Path, *args: str, input_bytes: bytes | None = None) -> bytes:
 def _metadata_types() -> dict[str, type[MappingMetadata]]:
     # Only classes already registered by trusted updater code can be hydrated.
     # Artifact contents can never request an import or execute a pickle.
-    return {
-        f"{cls.__module__}.{cls.__qualname__}": cls
-        for cls in MappingMetadata.__subclasses__()
-    }
+    # Shared metadata bases are specialized by package updaters, so walk the
+    # whole subclass tree rather than only direct subclasses.
+    types: dict[str, type[MappingMetadata]] = {}
+    pending = list(MappingMetadata.__subclasses__())
+    while pending:
+        cls = pending.pop()
+        types[f"{cls.__module__}.{cls.__qualname__}"] = cls
+        pending.extend(cls.__subclasses__())
+    return types
 
 
 class ResolvedVersion(BaseModel):

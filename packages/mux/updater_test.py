@@ -7,13 +7,17 @@ import pytest
 
 from lib.nix.models.flake_lock import FlakeLockNode
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
+from lib.system_policy import supported_systems
 from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events, load_repo_module, run_async
+from lib.update import process as update_process
+from lib.update.bun_toolchain import bun_release_urls, bun_runtime_hash_entries
 from lib.update.config import resolve_config
 from lib.update.events import EventSink, UpdateEvent, ignore_event
 from lib.update.net import github_raw_url
 from lib.update.nix import PreparedProbe, _build_package_path_attr_expr
 from lib.update.updaters import BunNodeModulesHashUpdater, UpdateContext, VersionInfo
+from lib.update.updaters.exact_bun import ExactBunMetadata
 
 _VERSION = "2.3.4"
 _REF = f"v{_VERSION}"
@@ -227,7 +231,7 @@ def test_fetch_hashes_uses_exact_bun_sources_for_node_modules_probes(
         url_list = list(urls)
         return dict(zip(url_list, (_HASH_A, _HASH_B, _HASH_C), strict=True))
 
-    def candidate_expressions(self, candidate):
+    def candidate_expressions(self, candidate, _prerequisite_sources=None):
         for system in self._platform_targets("aarch64-darwin"):
             seen_candidates[system] = candidate
         return {system: system for system in seen_candidates}
@@ -242,7 +246,7 @@ def test_fetch_hashes_uses_exact_bun_sources_for_node_modules_probes(
         return _NODE_HASHES[probe.expression]
 
     monkeypatch.setattr(
-        updater_module.update_process,
+        update_process,
         "compute_url_hashes",
         compute_url_hashes,
     )
@@ -353,6 +357,12 @@ def test_version_and_source_identity_metadata_fail_closed(
         updater_module._release_version("main")
     with pytest.raises(TypeError, match="resolved release source"):
         updater.build_result(VersionInfo(version=_REF), [])
+    # Shared exact-Bun identity alone lacks Mux's Electron source identity.
+    generic = ExactBunMetadata(
+        node=_flake_node(), commit=_COMMIT, bun_version=_BUN_VERSION
+    )
+    with pytest.raises(TypeError, match="resolved release source"):
+        updater.build_result(VersionInfo(version=_REF, metadata=generic), [])
 
 
 def _release_info(updater_module: ModuleType) -> VersionInfo:
@@ -368,12 +378,10 @@ def _release_info(updater_module: ModuleType) -> VersionInfo:
 
 
 def _runtime_hashes(updater_module: ModuleType) -> list[HashEntry]:
-    urls = updater_module.bun_release_urls(
-        _BUN_VERSION, updater_module._SUPPORTED_SYSTEMS
-    )
-    return updater_module.bun_runtime_hash_entries(
+    urls = bun_release_urls(_BUN_VERSION, supported_systems())
+    return bun_runtime_hash_entries(
         _BUN_VERSION,
-        updater_module._SUPPORTED_SYSTEMS,
+        supported_systems(),
         dict.fromkeys(urls.values(), _HASH_A),
     )
 
@@ -482,12 +490,8 @@ def test_incomplete_hash_producers_cannot_yield_a_candidate(
             return {"aarch64-darwin": _HASH_B}
         raise RuntimeError("node hash probe failed")
 
-    monkeypatch.setattr(
-        updater_module.update_process, "compute_url_hashes", _runtime_hashes
-    )
-    monkeypatch.setattr(
-        updater_module.BunNodeModulesHashUpdater, "fetch_hashes", _node_hashes
-    )
+    monkeypatch.setattr(update_process, "compute_url_hashes", _runtime_hashes)
+    monkeypatch.setattr(BunNodeModulesHashUpdater, "fetch_hashes", _node_hashes)
     with pytest.raises(error, match=message):
         run_async(
             collect_events(
@@ -508,7 +512,7 @@ def test_candidate_hashes_cannot_replace_or_duplicate_resolved_runtime_hashes(
 ) -> None:
     """A dependency probe must not overwrite the previously hashed Bun sources."""
     runtime_hashes = _runtime_hashes(updater_module)
-    info = updater_module._with_bun_runtime_hashes(
+    info = updater_module.MuxUpdater().with_bun_runtime_hashes(
         _release_info(updater_module), runtime_hashes
     )
     if duplicate_runtime:
@@ -553,9 +557,7 @@ def test_bumped_pin_hashes_exact_bun_runtimes_before_fingerprinting(
         hashed.append(tuple(urls))
         return dict.fromkeys(hashed[-1], _HASH_A)
 
-    monkeypatch.setattr(
-        updater_module.update_process, "compute_url_hashes", compute_url_hashes
-    )
+    monkeypatch.setattr(update_process, "compute_url_hashes", compute_url_hashes)
     updater = updater_module.MuxUpdater()
     info = _release_info(updater_module)
 
@@ -592,9 +594,7 @@ def test_finalize_does_not_rehash_present_or_native_runtimes(
         msg = "finalize must not hash Bun runtimes here"
         raise AssertionError(msg)
 
-    monkeypatch.setattr(
-        updater_module.update_process, "compute_url_hashes", compute_url_hashes
-    )
+    monkeypatch.setattr(update_process, "compute_url_hashes", compute_url_hashes)
     updater = updater_module.MuxUpdater()
     info = _release_info(updater_module)
     entries = _runtime_hashes(updater_module) if hashes == "runtime" else []
