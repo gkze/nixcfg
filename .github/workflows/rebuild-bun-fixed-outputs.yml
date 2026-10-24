@@ -55,3 +55,12 @@ jobs:
                   ],
                   check=True,
               )
+      - name: Flush Cachix daemon
+        if: always()
+        timeout-minutes: 45
+        env:
+          NIXCFG_CI_STAGE: flush-cachix
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
