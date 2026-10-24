@@ -24,6 +24,7 @@ from lib.asar_integrity import (
 )
 from lib.nix.models.sources import SourceEntry
 from lib.tests._assertions import expect_instance
+from lib.tests._darwin_signing import sign_and_verify_bundle_arguments
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     expect_binding,
@@ -39,7 +40,7 @@ from lib.tests._source_metadata import (
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import UpdateContext, VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo, vendor_feeds
 from lib.update.updaters.metadata import AssetURLsMetadata
 
 _PACKAGE_DIR = REPO_ROOT / "packages/zo"
@@ -256,8 +257,7 @@ def _install_release_api(
         calls.append(path)
         return latest if path.endswith("/releases/latest") else tagged
 
-    async def _fetch_url(_session: object, url: str, *, config: object) -> bytes:
-        _ = config
+    async def _fetch_url(_session: object, url: str, **_kwargs: object) -> bytes:
         calls.append(url)
         return feed.encode()
 
@@ -265,7 +265,7 @@ def _install_release_api(
         "lib.update.updaters.github_release.fetch_github_api", _fetch_github_api
     )
     monkeypatch.setattr(module, "fetch_github_api", _fetch_github_api)
-    monkeypatch.setattr(module, "fetch_url", _fetch_url)
+    monkeypatch.setattr(vendor_feeds, "fetch_url", _fetch_url)
     return calls
 
 
@@ -403,7 +403,7 @@ def test_zo_package_owns_required_runtime_entitlements() -> None:
 
 
 def test_zo_package_patches_integrity_then_deep_resigns() -> None:
-    """Package construction must patch updates and re-sign every process."""
+    """Package construction must patch updates, re-sign, and verify every process."""
     package = expect_instance(
         parse_nix_expr((_PACKAGE_DIR / "default.nix").read_text(encoding="utf-8")),
         FunctionDefinition,
@@ -430,6 +430,10 @@ def test_zo_package_patches_integrity_then_deep_resigns() -> None:
         Primitive(value=True),
     )
     assert_nix_ast_equal(
+        expect_binding(arguments.values, "verifyAppSignature").value,
+        Primitive(value=True),
+    )
+    assert_nix_ast_equal(
         expect_binding(arguments.values, "platforms").value,
         '[ "aarch64-darwin" "x86_64-darwin" ]',
     )
@@ -440,22 +444,21 @@ def test_zo_package_patches_integrity_then_deep_resigns() -> None:
     )
     shell = parse_shell(indented_string_body(post_install.rebuild()))
     patch_commands = command_texts(shell, "__NIX_INTERP__")
-    sign_commands = command_texts(shell, "/usr/bin/codesign")
 
     assert patch_commands == [
         "PYTHONPATH=__NIX_INTERP__ __NIX_INTERP__ __NIX_INTERP__ \\\n"
         '      "$app_bundle/Contents/Resources/app.asar" \\\n'
-        '      "$app_bundle/Contents/Info.plist"'
+        '      "$app_bundle/Contents/Info.plist"',
+        # The bare interpolation is the re-sign call checked below: it must
+        # run after the bundle is patched.
+        "__NIX_INTERP__",
     ]
-    assert sign_commands == [
-        "/usr/bin/codesign \\\n"
-        "      --force \\\n"
-        "      --deep \\\n"
-        "      --sign - \\\n"
-        "      --preserve-metadata=identifier,flags,runtime \\\n"
-        "      --entitlements __NIX_INTERP__ \\\n"
-        '      "$app_bundle"'
-    ]
+    [sign_arguments] = sign_and_verify_bundle_arguments(post_install)
+    assert_nix_ast_equal(
+        sign_arguments,
+        '{ bundle = \'\'"$app_bundle"\'\'; preserveMetadata = [ "identifier" "flags" "runtime" ]; entitlements = ./Entitlements.plist; verify = true; }',
+    )
+    assert command_texts(shell, "/usr/bin/codesign") == []
 
 
 def test_zo_sources_pin_the_official_latest_release_zip() -> None:

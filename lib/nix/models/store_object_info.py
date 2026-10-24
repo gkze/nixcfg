@@ -13,7 +13,10 @@ The schema defines three variants that form an inheritance chain:
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from .content_address import ContentAddress
+from .hash import NixHash  # noqa: TC001 -- Pydantic resolves this at runtime
 
 
 class StoreObjectInfo(BaseModel):
@@ -39,7 +42,7 @@ class StoreObjectInfo(BaseModel):
     )
     """Store path base name, or ``None`` when used as a map value."""
 
-    nar_hash: str = Field(
+    nar_hash: NixHash = Field(
         alias="narHash",
         description="SRI hash of the store object serialized as a Nix Archive (NAR).",
     )
@@ -66,6 +69,16 @@ class StoreObjectInfo(BaseModel):
         ),
     )
     """Content address (``{method, hash}``), or ``None`` if input-addressed."""
+
+    @field_validator("ca")
+    @classmethod
+    def validate_content_address(
+        cls, value: dict[str, str] | None
+    ) -> dict[str, str] | None:
+        """Validate the wire mapping while retaining its dict API shape."""
+        if value is not None:
+            ContentAddress.model_validate(value)
+        return value
 
     store_dir: str = Field(
         alias="storeDir",
@@ -140,7 +153,7 @@ class NarInfo(ImpureStoreObjectInfo):
     )
     """Compression algorithm used for the download archive."""
 
-    download_hash: str = Field(
+    download_hash: NixHash = Field(
         alias="downloadHash",
         description="SRI hash of the compressed archive itself.",
     )

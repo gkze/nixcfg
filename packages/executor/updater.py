@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, ClassVar, cast
 
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
-from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.bun_nix_normalizer import normalize_bun_nix_path
@@ -24,8 +23,8 @@ from lib.update.events import (
     raise_failed_command,
 )
 from lib.update.net import fetch_json, github_raw_url
-from lib.update.nix import _build_fetch_from_github_expr
-from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
+from lib.update.nix_expr import compact_nix_expr, identifier_attr_path, nix_str
+from lib.update.npm_semver import require_exact_semantic_version
 from lib.update.paths import updater_dir_for
 from lib.update.process import RunCommandOptions, run_command
 from lib.update.updaters import (
@@ -41,18 +40,10 @@ if TYPE_CHECKING:
     import aiohttp
 
 _PACKAGE_MANAGER_PATTERN = re.compile(r"^bun@(?P<version>[^\s]+)$")
-_EXACT_VERSION_PATTERN = re.compile(
-    r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
-    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
-    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
-)
 
 
 def _require_exact_bun_version(version: str) -> str:
-    if _EXACT_VERSION_PATTERN.fullmatch(version) is None:
-        msg = f"Executor requires an exact Bun version, got {version!r}"
-        raise RuntimeError(msg)
-    return version
+    return require_exact_semantic_version(version, context="Executor Bun")
 
 
 @register_updater
@@ -205,15 +196,6 @@ class ExecutorUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
         )
 
     @classmethod
-    def _src_expr(cls, commit: str) -> str:
-        return _build_fetch_from_github_expr(
-            cls.GITHUB_OWNER,
-            cls.GITHUB_REPO,
-            rev=commit,
-            fetch_submodules=False,
-        )
-
-    @classmethod
     def _bun_lock_url(cls, commit: str) -> str:
         return github_raw_url(
             cls.GITHUB_OWNER,
@@ -237,7 +219,7 @@ class ExecutorUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
                 values=[
                     Binding(
                         name="url",
-                        value=StringPrimitive(value=cls._bun_source_url(bun_version)),
+                        value=nix_str(cls._bun_source_url(bun_version)),
                     ),
                     Binding(
                         name="hash",

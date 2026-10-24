@@ -112,6 +112,23 @@ def test_plan_snapshot_recovery_rejects_distinct_ambiguous_snapshots(
         asyncio.run(rs.plan_snapshot_recovery(str(realised)))
 
 
+def test_snapshot_selection_rejects_an_executable_only_difference(
+    tmp_path: Path,
+) -> None:
+    """Identical bytes with different Git executable modes remain ambiguous."""
+    snapshot_a = tmp_path / "snapshot-a"
+    snapshot_b = tmp_path / "snapshot-b"
+    for snapshot in (snapshot_a, snapshot_b):
+        snapshot.mkdir()
+        _write_markers(snapshot)
+        (snapshot / "tool").write_text("#!/bin/sh\n", encoding="utf-8")
+    (snapshot_a / "tool").chmod(0o644)
+    (snapshot_b / "tool").chmod(0o755)
+
+    with pytest.raises(RuntimeError, match="Multiple distinct source snapshots"):
+        rs._select_source_snapshot([str(snapshot_a), str(snapshot_b)])
+
+
 def test_snapshot_helpers_cover_missing_generation_symlinks_and_candidates(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -126,7 +143,7 @@ def test_snapshot_helpers_cover_missing_generation_symlinks_and_candidates(
     (symlink_root / "target.txt").write_text("payload\n", encoding="utf-8")
     (symlink_root / "link.txt").symlink_to("target.txt")
     fingerprint = rs._snapshot_fingerprint(symlink_root)
-    assert ("symlink", "link.txt", "target.txt") in fingerprint
+    assert ("symlink", "link.txt", "target.txt", False) in fingerprint
 
     with pytest.raises(RuntimeError, match="Could not locate a source snapshot"):
         rs._select_source_snapshot([str(tmp_path / "not-a-snapshot")])

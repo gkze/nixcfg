@@ -89,11 +89,15 @@ def test_pyupgrade_exclusion_inventory_is_narrow_and_explicit() -> None:
     )
 
 
-def test_flake_pytest_source_excludes_local_node_modules() -> None:
-    """The hermetic TypeScript fixture must not inherit ignored workspace installs."""
+def test_flake_pytest_source_excludes_local_dependency_trees() -> None:
+    """Pytest's input is the shared repo fileset, which omits local installs.
+
+    ``tests/nix/repo-checks.nix`` proves on a fixture that the fileset drops
+    ``node_modules`` and ``.direnv``; here the flake must use that owner.
+    """
     assert_nix_ast_equal(
-        nix_file_binding_expr("flake.nix", "pytestFiles"),
-        "lib.fileset.difference ./. (lib.fileset.maybeMissing ./node_modules)",
+        nix_file_binding_expr("lib/repo-checks.nix", "pytestFiles"),
+        "repoFiles",
     )
     pytest_check = expect_instance(
         nix_file_binding_expr("flake.nix", '"test-python-pytest"'), AttributeSet

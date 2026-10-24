@@ -5,20 +5,23 @@ import hashlib
 import json
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
+from typing import Protocol, cast
 from urllib.parse import quote
 
 import yaml
 
 from lib import codegen_utils, http_utils
 from lib.schema_codegen.models._generated import CodegenLockfile, CodegenManifest
+from lib.update import io as update_io
 
 DEFAULT_LOCKFILE_NAME = "codegen.lock.json"
 _GITHUB_RAW_BASE = "https://raw.githubusercontent.com"
 _GITHUB_API_BASE = "https://api.github.com"
 _GITHUB_COMMIT_SHA_PATTERN = re.compile(r"^[a-f0-9]{40}$")
+_CODEGEN_MANIFEST_SCHEMA_PATH = Path(__file__).with_name("codegen.schema.json")
 
 type JsonScalar = str | int | bool | None
 type CanonicalJsonValue = (
@@ -26,6 +29,45 @@ type CanonicalJsonValue = (
 )
 ProgressReporter = codegen_utils.ProgressReporter
 _emit_progress = codegen_utils.emit_progress
+_import_optional = codegen_utils.import_optional
+
+
+class _ValidationErrorLike(Protocol):
+    message: str
+    json_path: str
+    path: Sequence[str | int]
+    absolute_schema_path: Sequence[str | int]
+    validator: object
+
+
+class _ValidatorLike(Protocol):
+    def iter_errors(self, instance: object) -> Iterable[_ValidationErrorLike]: ...
+
+
+class _Draft202012ValidatorLike(Protocol):
+    def __call__(
+        self,
+        schema: Mapping[str, object],
+        *,
+        format_checker: object,
+    ) -> _ValidatorLike: ...
+
+    def check_schema(self, schema: Mapping[str, object]) -> None: ...
+
+
+class _JsonSchemaExceptionsLike(Protocol):
+    def best_match(
+        self,
+        errors: Iterable[_ValidationErrorLike],
+        *,
+        key: Callable[[_ValidationErrorLike], tuple[int, bool, str, str]],
+    ) -> _ValidationErrorLike | None: ...
+
+
+class _JsonSchemaModuleLike(Protocol):
+    Draft202012Validator: _Draft202012ValidatorLike
+    FormatChecker: Callable[[], object]
+    exceptions: _JsonSchemaExceptionsLike
 
 
 def _ensure_mapping(value: object, *, context: str) -> Mapping[str, object]:
@@ -56,10 +98,49 @@ def _load_manifest_payload(path: Path) -> Mapping[str, object]:
     return _ensure_mapping(payload, context=f"manifest {path}")
 
 
+def _manifest_error_relevance(
+    error: _ValidationErrorLike,
+) -> tuple[int, bool, str, str]:
+    """Prefer concrete constraint errors over union-discriminator diagnostics."""
+    return (
+        -len(error.path),
+        error.validator in {"anyOf", "oneOf", "const", "required"},
+        error.json_path,
+        "/".join(str(part) for part in error.absolute_schema_path),
+    )
+
+
+def _validate_canonical_constraints(payload: object) -> None:
+    """Validate raw manifest data with the canonical Draft 2020-12 schema."""
+    schema = _ensure_mapping(
+        json.loads(_CODEGEN_MANIFEST_SCHEMA_PATH.read_text(encoding="utf-8")),
+        context="canonical codegen manifest schema",
+    )
+    jsonschema = cast(
+        "_JsonSchemaModuleLike",
+        _import_optional("jsonschema", feature="codegen manifest validation"),
+    )
+    validator_type = jsonschema.Draft202012Validator
+    validator_type.check_schema(schema)
+    validator = validator_type(
+        schema,
+        format_checker=jsonschema.FormatChecker(),
+    )
+    error = jsonschema.exceptions.best_match(
+        validator.iter_errors(payload),
+        key=_manifest_error_relevance,
+    )
+    if error is not None:
+        msg = f"Manifest validation failed at {error.json_path}: {error.message}"
+        raise ValueError(msg)
+
+
 def load_codegen_manifest(*, manifest_path: Path) -> CodegenManifest:
-    """Load and validate a canonical codegen manifest document."""
+    """Validate a manifest against its canonical schema and generated model."""
     resolved_path = manifest_path.expanduser().resolve()
-    return CodegenManifest.model_validate(_load_manifest_payload(resolved_path))
+    payload = _load_manifest_payload(resolved_path)
+    _validate_canonical_constraints(payload)
+    return CodegenManifest.model_validate(payload)
 
 
 def _normalize_posix_string(value: str) -> str:
@@ -79,6 +160,30 @@ def _normalize_posix_string(value: str) -> str:
     return "/".join(parts)
 
 
+def _normalize_repository_relative_path(value: str) -> str:
+    """Return a normalized path that cannot escape a repository root."""
+    normalized = _normalize_posix_string(value)
+    if normalized.startswith("/"):
+        msg = f"GitHub raw source path must be repository-relative: {value!r}"
+        raise RuntimeError(msg)
+
+    parts: list[str] = []
+    for part in normalized.split("/"):
+        if part in {"", "."}:
+            continue
+        if part == "..":
+            if not parts:
+                msg = f"GitHub raw source path escapes the repository root: {value!r}"
+                raise RuntimeError(msg)
+            parts.pop()
+        else:
+            parts.append(part)
+    if not parts:
+        msg = f"GitHub raw source path must name a file: {value!r}"
+        raise RuntimeError(msg)
+    return "/".join(parts)
+
+
 def _normalize_relative_posix_path(*, path: Path, start: Path) -> str:
     """Return a normalized relative POSIX path from ``start`` to ``path``."""
     return _normalize_posix_string(os.path.relpath(path, start))
@@ -95,6 +200,9 @@ def _iter_materialized_directory_files(
     include_patterns: tuple[str, ...],
 ) -> tuple[tuple[str, Path], ...]:
     """Return matched regular files relative to ``source_root`` in sorted order."""
+    if source_root.is_symlink():
+        msg = f"Directory source path must not be a symlink: {source_root}"
+        raise RuntimeError(msg)
     if not source_root.exists():
         msg = f"Directory source path does not exist: {source_root}"
         raise RuntimeError(msg)
@@ -105,11 +213,11 @@ def _iter_materialized_directory_files(
     compiled = tuple(_compile_include_pattern(pattern) for pattern in include_patterns)
     matched: dict[str, Path] = {}
     for path in sorted(source_root.rglob("*")):
-        if path.is_dir():
-            continue
         if path.is_symlink():
             msg = f"Directory source includes unsupported symlink: {path}"
             raise RuntimeError(msg)
+        if path.is_dir():
+            continue
         if not path.is_file():
             msg = f"Directory source includes unsupported non-regular file: {path}"
             raise RuntimeError(msg)
@@ -218,7 +326,11 @@ def _build_locked_directory_source(
         )
     absolute_path = Path(raw_path)
     if not absolute_path.is_absolute():
-        absolute_path = (manifest_dir / absolute_path).resolve()
+        absolute_path = manifest_dir / absolute_path
+    if absolute_path.is_symlink():
+        msg = f"Directory source path must not be a symlink: {absolute_path}"
+        raise RuntimeError(msg)
+    absolute_path = absolute_path.resolve()
     normalized_path = _normalize_relative_posix_path(
         path=absolute_path, start=manifest_dir
     )
@@ -272,11 +384,12 @@ def _build_locked_github_raw_source(
     requested_ref = _ensure_string(
         source.get("ref"), context=f"source {source_name}.ref"
     )
-    source_path = _normalize_posix_string(
+    source_path = _normalize_repository_relative_path(
         _ensure_string(source.get("path"), context=f"source {source_name}.path")
     )
     resolved_ref = _resolve_github_commit(owner, repo, requested_ref)
-    uri = f"{_GITHUB_RAW_BASE}/{owner}/{repo}/{resolved_ref}/{source_path}"
+    encoded_path = "/".join(quote(part, safe="") for part in source_path.split("/"))
+    uri = f"{_GITHUB_RAW_BASE}/{owner}/{repo}/{resolved_ref}/{encoded_path}"
     payload, _headers = _fetch_https_bytes(uri)
     locked: dict[str, object] = {
         "kind": "github-raw",
@@ -436,8 +549,11 @@ def write_codegen_lockfile(
         include_metadata=include_metadata,
         progress=progress,
     )
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(render_codegen_lockfile(lockfile), encoding="utf-8")
+    update_io.atomic_write_text(
+        output_path,
+        render_codegen_lockfile(lockfile),
+        mkdir=True,
+    )
     return output_path
 
 

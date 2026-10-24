@@ -6,10 +6,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar
 from urllib.parse import urlsplit
 
-import aiohttp
-
-from lib.http_utils import HTTP_BAD_REQUEST
 from lib.update.events import EventSink, ignore_event
+from lib.update.net import fetch_redirect_location
 from lib.update.updaters import (
     DownloadHashUpdater,
     VersionInfo,
@@ -20,11 +18,12 @@ from lib.update.updaters.core import verify_platform_versions
 from lib.update.updaters.strategies import url_without_query
 
 if TYPE_CHECKING:
+    import aiohttp
+
     from lib.nix.models.sources import SourceHashes
     from lib.update.updaters import UpdateContext
 
 
-_HTTP_REDIRECT_MIN = 300
 _ARTIFACT_HOST = (
     "pplx-browser-binaries.a0adf9b772aecba4fa8883581f3c9180.r2.cloudflarestorage.com"
 )
@@ -74,24 +73,11 @@ class CometUpdater(DownloadHashUpdater):
         session: aiohttp.ClientSession,
         download_url: str,
     ) -> _ResolvedInstaller:
-        timeout = aiohttp.ClientTimeout(total=self.config.default_timeout)
-        async with session.request(
-            "GET",
-            download_url,
-            allow_redirects=False,
-            timeout=timeout,
-        ) as response:
-            if not _HTTP_REDIRECT_MIN <= response.status < HTTP_BAD_REQUEST:
-                msg = (
-                    f"Expected Comet download redirect from {download_url}, "
-                    f"got HTTP {response.status} {response.reason}"
-                )
-                raise RuntimeError(msg)
-            location = response.headers.get("Location")
-            if not location:
-                msg = f"Comet download redirect from {download_url} did not include Location"
-                raise RuntimeError(msg)
-        return self._parse_artifact(location)
+        return self._parse_artifact(
+            await fetch_redirect_location(
+                session, download_url, method="GET", config=self.config
+            )
+        )
 
     async def _resolve_artifacts(
         self,

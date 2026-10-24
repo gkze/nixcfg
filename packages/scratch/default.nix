@@ -79,6 +79,7 @@ rustPlatform.buildRustPackage {
     librsvg
   ];
 
+  # src-tauri defines no Rust tests; cargo test would only rebuild it.
   doCheck = false;
 
   postInstall = lib.optionalString stdenv.hostPlatform.isDarwin ''

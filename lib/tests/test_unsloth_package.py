@@ -30,12 +30,14 @@ from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     binding_map,
-    darwin_guarded_exports,
     expect_binding,
     parse_nix_expr,
 )
 from lib.tests._nix_source import nix_file_expr, nix_source_fragment_expr
-from lib.tests._package_registry import registry_override_metadata
+from lib.tests._package_registry import (
+    is_darwin_overlay_export,
+    registry_override_metadata,
+)
 from lib.tests._shell_ast import (
     command_texts,
     indented_string_body,
@@ -414,17 +416,12 @@ def test_unsloth_registry_exports_only_on_arm64_darwin() -> None:
 
 
 def test_unsloth_binary_darwin_overlay_exports_the_audited_package() -> None:
-    """The shared overlay must expose the same source-backed package path."""
-    overlay = expect_instance(
-        nix_file_expr("overlays/binary-darwin-apps.nix"),
-        FunctionDefinition,
+    """The registry-driven overlay must expose the audited package."""
+    registry = expect_instance(
+        nix_file_expr("packages/registry.nix"), FunctionDefinition
     )
-    # The exports are the argument of the Darwin-only guard.
-    exports = darwin_guarded_exports(overlay)
-
-    assert_nix_ast_equal(
-        expect_binding(exports.values, "unsloth").value,
-        'callDarwinAppPackage "unsloth"',
+    assert is_darwin_overlay_export(
+        expect_instance(registry.output, AttributeSet), "unsloth"
     )
 
 

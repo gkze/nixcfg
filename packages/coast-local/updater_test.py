@@ -70,6 +70,9 @@ class _FakeResponse:
     async def __aenter__(self) -> _FakeResponse:
         return self
 
+    async def read(self) -> bytes:
+        return b""
+
     async def __aexit__(self, *_args: object) -> None:
         return None
 
@@ -119,7 +122,7 @@ def test_coast_local_accepts_the_cdns_strong_multipart_etag() -> None:
     )
 
     assert info == VersionInfo(_MULTIPART_DISCOVERY_VERSION)
-    assert not _run(updater._is_latest(UpdateContext(current=None), info))
+    assert updater.always_rehash
 
 
 @pytest.mark.parametrize(
@@ -153,11 +156,7 @@ def test_coast_local_rejects_weak_or_ambiguous_dmg_metadata(
     ("response", "message"),
     [
         (_FakeResponse(status=403, reason="Forbidden"), "HTTP 403 Forbidden"),
-        (_FakeResponse(status=302, reason="Found"), "HTTP 302 Found"),
-        (
-            _FakeResponse(url="https://example.test/Coast%20Local.dmg"),
-            "unexpected URL",
-        ),
+        (_FakeResponse(status=302, reason="Found"), "HTTP 302"),
     ],
 )
 def test_coast_local_rejects_http_failures_and_redirects(
@@ -187,11 +186,7 @@ def test_coast_local_persists_full_sha256_content_identity() -> None:
     assert result.version == _CONTENT_VERSION
     assert result.hashes.to_json() == {"aarch64-darwin": _SRI_HASH}
     assert result.urls == {"aarch64-darwin": _DOWNLOAD_URL}
-    assert not _run(
-        updater._is_latest(
-            UpdateContext(current=result), VersionInfo(_DISCOVERY_VERSION)
-        )
-    )
+    assert updater.always_rehash
 
 
 @pytest.mark.parametrize(

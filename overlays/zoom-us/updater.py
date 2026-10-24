@@ -5,14 +5,14 @@ import re
 from typing import TYPE_CHECKING, ClassVar
 from urllib.parse import urlparse
 
-import aiohttp
-
-from lib.http_utils import HTTP_BAD_REQUEST
+from lib.update.net import request
 from lib.update.updaters import DownloadHashUpdater, VersionInfo, register_updater
 from lib.update.updaters.core import verify_platform_versions
 from lib.update.updaters.metadata import NO_METADATA
 
 if TYPE_CHECKING:
+    import aiohttp
+
     from lib.update.updaters.core import UpdateContext
 
 _VERSION_PATTERN = re.compile(r"/prod/(?P<version>[^/]+)/")
@@ -47,37 +47,20 @@ class ZoomUsUpdater(DownloadHashUpdater):
             raise RuntimeError(msg)
         return version
 
-    async def _resolve_latest_url(
-        self, session: aiohttp.ClientSession, latest_url: str
-    ) -> str:
-        timeout = aiohttp.ClientTimeout(total=self.config.default_timeout)
-        async with session.request(
-            "HEAD",
-            latest_url,
-            allow_redirects=True,
-            timeout=timeout,
-        ) as response:
-            if response.status >= HTTP_BAD_REQUEST:
-                msg = (
-                    f"Failed to resolve Zoom latest URL {latest_url}: "
-                    f"HTTP {response.status} {response.reason}"
-                )
-                raise RuntimeError(msg)
-            return str(response.url)
-
     async def fetch_latest(
         self, session: aiohttp.ClientSession, *, context: UpdateContext
     ) -> VersionInfo:
         """Resolve the latest stable Zoom version from the platform redirect URLs."""
         _ = context
-        resolved_pairs = await asyncio.gather(
+        responses = await asyncio.gather(
             *(
-                self._resolve_platform_latest(session, platform, latest_url)
-                for platform, latest_url in self._LATEST_URLS.items()
+                request(session, latest_url, method="HEAD", config=self.config)
+                for latest_url in self._LATEST_URLS.values()
             )
         )
         versions = {
-            platform: self._extract_version(url) for platform, url in resolved_pairs
+            platform: self._extract_version(response.url)
+            for platform, response in zip(self._LATEST_URLS, responses, strict=True)
         }
         return VersionInfo(
             version=verify_platform_versions(
@@ -86,14 +69,6 @@ class ZoomUsUpdater(DownloadHashUpdater):
             ),
             metadata=NO_METADATA,
         )
-
-    async def _resolve_platform_latest(
-        self,
-        session: aiohttp.ClientSession,
-        platform: str,
-        latest_url: str,
-    ) -> tuple[str, str]:
-        return platform, await self._resolve_latest_url(session, latest_url)
 
     def get_download_url(self, platform: str, info: VersionInfo) -> str:
         """Return the pinned version-specific Zoom download URL for ``platform``."""

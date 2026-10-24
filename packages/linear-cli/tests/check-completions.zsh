@@ -1,4 +1,6 @@
 #!/usr/bin/env zsh
+# ShellCheck cannot parse Zsh; the package check executes this test with Zsh.
+# shellcheck disable=SC1071
 set -euo pipefail
 
 fpath=("$1/share/zsh/site-functions" $fpath)

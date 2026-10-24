@@ -3,7 +3,6 @@
 import asyncio
 import io
 import os
-import re
 import tarfile
 import tempfile
 from pathlib import Path
@@ -27,11 +26,11 @@ from lib.update.events import (
     UpdateEvent,
     raise_failed_command,
 )
+from lib.update.failures import is_retryable_nix_network_failure
 from lib.update.nix import (
-    _build_fetch_from_github_expr,
     _build_flake_attr_expr,
-    is_retryable_nix_network_failure,
 )
+from lib.update.npm_semver import release_version_triplet
 from lib.update.paths import get_repo_file, local_flake_url
 from lib.update.process import RunCommandOptions, run_command
 from lib.update.updaters import (
@@ -46,17 +45,8 @@ def _local_flake_url(root: Path) -> str:
     return local_flake_url(root)
 
 
-_ZIG_VERSION_PATTERN = re.compile(
-    r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
-)
-
-
 def _zig_version_triplet(version: str, *, context: str) -> tuple[int, int, int]:
-    if _ZIG_VERSION_PATTERN.fullmatch(version) is None:
-        msg = f"neutils {context} must be an exact semantic version, got {version!r}"
-        raise RuntimeError(msg)
-    major, minor, patch = version.split(".")
-    return int(major), int(minor), int(patch)
+    return release_version_triplet(version, context=f"neutils {context}")
 
 
 @register_updater
@@ -84,14 +74,6 @@ class NeutilsUpdater(GitHubReleaseUpdater):
         "Command timed out",
         "timed out",
     )
-
-    @staticmethod
-    def _src_expr(commit: str) -> str:
-        return _build_fetch_from_github_expr(
-            "deevus",
-            "neutils",
-            rev=commit,
-        )
 
     @classmethod
     def _archive_url(cls, commit: str) -> str:

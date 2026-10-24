@@ -18,23 +18,26 @@ flowchart TD
   upd --> updci["update/ci.md<br/>hosted builders"]
   upd --> updrt["update/runtime.md<br/>durable execution"]
   upd --> updsafe["update/safety.md<br/>safety invariants"]
+  upd --> updfree["update/free-tier-ceiling.md<br/>runner time budget"]
   pkg --> examples["package READMEs<br/>codex, waku, zed, goose"]
 ```
 
 ## Documents
 
-| Document                                           | Topic                                                             |
-| -------------------------------------------------- | ----------------------------------------------------------------- |
-| [architecture.md](architecture.md)                 | Repository layout, flake outputs, module layers, and the CLI      |
-| [framework.md](framework.md)                       | Public API version 2, exported modules, and downstream usage      |
-| [development.md](development.md)                   | Dev shell, formatting, quality gates, and the validation ladder   |
-| [packaging.md](packaging.md)                       | Package and overlay discovery, crate2nix packages, app packaging  |
-| [source-modifications.md](source-modifications.md) | Decision ladder for editing unpacked upstream source trees        |
-| [appearance.md](appearance.md)                     | macOS appearance bridging for tools without paired-theme settings |
-| [update/README.md](update/README.md)               | Update pipeline, entry points, and promotion boundary             |
-| [update/ci.md](update/ci.md)                       | Update workflow on disposable GitHub-hosted builders              |
-| [update/runtime.md](update/runtime.md)             | Durable execution, admission, scheduling, and observability       |
-| [update/safety.md](update/safety.md)               | Executable safety invariants, each with its owning code and test  |
+| Document                                                   | Topic                                                              |
+| ---------------------------------------------------------- | ------------------------------------------------------------------ |
+| [architecture.md](architecture.md)                         | Repository layout, flake outputs, module layers, and the CLI       |
+| [framework.md](framework.md)                               | Public API version 2, exported modules, and downstream usage       |
+| [development.md](development.md)                           | Dev shell, formatting, quality gates, and the validation ladder    |
+| [packaging.md](packaging.md)                               | Package and overlay discovery, crate2nix packages, app packaging   |
+| [source-modifications.md](source-modifications.md)         | Decision ladder for editing unpacked upstream source trees         |
+| [interactive-toolchains.md](interactive-toolchains.md)     | Go, uv, and Python toolchains selected for George's Darwin profile |
+| [appearance.md](appearance.md)                             | macOS appearance bridging for tools without paired-theme settings  |
+| [update/README.md](update/README.md)                       | Update pipeline, entry points, and promotion boundary              |
+| [update/ci.md](update/ci.md)                               | Update workflow on disposable GitHub-hosted builders               |
+| [update/runtime.md](update/runtime.md)                     | Durable execution, admission, scheduling, and observability        |
+| [update/safety.md](update/safety.md)                       | Executable safety invariants, each with its owning code and test   |
+| [update/free-tier-ceiling.md](update/free-tier-ceiling.md) | Measured Update wall clock against the free-tier runner ceiling    |
 
 ## Reading paths
 

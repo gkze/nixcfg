@@ -2,6 +2,7 @@
   pkgs,
   inputs,
   lib,
+  mkMacAppPassthru,
   selfSource,
   bash-dynamic-pipe-heredoc,
   symlinkJoin,
@@ -723,13 +724,9 @@ else
       inherit cargoNix crateOverrides patchedSrc;
       zedDrv = guardedZedDrv;
     }
-    // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
-      macApp = {
-        bundleName = "Zed Nightly.app";
-        bundleRelPath = "Applications/Zed Nightly.app";
-        installMode = "copy";
-      };
-    };
+    // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin (mkMacAppPassthru {
+      bundleName = "Zed Nightly.app";
+    });
 
     meta = {
       description = "High-performance, multiplayer code editor from the creators of Atom and Tree-sitter";

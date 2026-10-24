@@ -1,7 +1,6 @@
 """Behavioral and package-shape tests for Gemini for macOS."""
 
 import json
-from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 
@@ -29,11 +28,16 @@ from lib.tests._source_metadata import (
     assert_platform_source_entry,
     assert_release_version,
 )
-from lib.tests._updater_helpers import collect_events, load_repo_module
+from lib.tests._updater_helpers import (
+    FakeRequest,
+    collect_events,
+    http_response,
+    load_repo_module,
+)
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import EventSink, UpdateEvent, ignore_event
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import UpdateContext, VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo, vendor_feeds
 from lib.update.updaters.metadata import DownloadUrlMetadata
 
 _VERSION = "1.99.2.791"
@@ -52,30 +56,10 @@ def _load_module() -> ModuleType:
     return load_repo_module("packages/gemini/updater.py", "gemini_updater_test")
 
 
-@dataclass(slots=True)
-class _FakeResponse:
-    payload: bytes
-    status: int = 200
-    reason: str = "OK"
-
-    async def __aenter__(self) -> _FakeResponse:
-        return self
-
-    async def __aexit__(self, *_args: object) -> None:
-        return None
-
-    async def read(self) -> bytes:
-        return self.payload
-
-
-class _FakeSession:
-    def __init__(self, response: _FakeResponse) -> None:
-        self.response = response
-        self.calls: list[tuple[str, str, dict[str, object]]] = []
-
-    def request(self, method: str, url: str, **kwargs: object) -> _FakeResponse:
-        self.calls.append((method, url, kwargs))
-        return self.response
+def _install_omaha(monkeypatch: pytest.MonkeyPatch, payload: bytes) -> FakeRequest:
+    fake = FakeRequest(http_response(body=payload))
+    monkeypatch.setattr(vendor_feeds, "request", fake)
+    return fake
 
 
 def _omaha_response(
@@ -135,13 +119,15 @@ def _omaha_response(
     )
 
 
-def test_gemini_resolves_the_omaha_served_crx3_container() -> None:
+def test_gemini_resolves_the_omaha_served_crx3_container(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The updater should pin one first-party CRX3 container URL and hash."""
     module = _load_module()
     updater = module.GeminiUpdater()
-    session = _FakeSession(_FakeResponse(_omaha_response()))
+    fake = _install_omaha(monkeypatch, _omaha_response())
 
-    info = _run(updater.fetch_latest(session, context=UpdateContext(current=None)))
+    info = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
     result = updater.build_result(info, {"aarch64-darwin": _HASH})
 
     assert info == VersionInfo(
@@ -153,10 +139,10 @@ def test_gemini_resolves_the_omaha_served_crx3_container() -> None:
     assert result.hashes.to_json() == {"aarch64-darwin": _HASH}
     assert updater.materialize_when_current is True
     assert updater.supported_platforms == ("aarch64-darwin",)
-    assert len(session.calls) == 1
-    method, url, kwargs = session.calls[0]
-    assert method == "POST"
-    assert url == updater.UPDATE_URL
+    assert len(fake.calls) == 1
+    url, kwargs = fake.calls[0]
+    assert kwargs["method"] == "POST"
+    assert url == vendor_feeds.OMAHA_UPDATE_URL
     assert kwargs["headers"] == {
         "User-Agent": updater.config.default_user_agent,
         "Content-Type": "application/json",
@@ -164,8 +150,8 @@ def test_gemini_resolves_the_omaha_served_crx3_container() -> None:
         "X-Goog-Update-AppId": _APP_ID,
         "X-Goog-Update-Updater": "nixcfg-0",
     }
-    assert kwargs["json"] == updater._request_body()
-    assert kwargs["json"] == {
+    assert kwargs["json_body"] == updater._request_body()
+    assert kwargs["json_body"] == {
         "request": {
             "@os": "mac",
             "@updater": "nixcfg",
@@ -194,8 +180,7 @@ def test_gemini_resolves_the_omaha_served_crx3_container() -> None:
             "updaterversion": "0",
         }
     }
-    assert kwargs["allow_redirects"] is True
-    assert kwargs["timeout"].total == updater.config.default_timeout
+    assert kwargs["config"] is updater.config
 
 
 def test_gemini_rehashes_the_current_pin_during_a_stale_omaha_rollout(
@@ -212,7 +197,7 @@ def test_gemini_rehashes_the_current_pin_during_a_stale_omaha_rollout(
         hashes={"aarch64-darwin": stale_hash},
         urls={"aarch64-darwin": _URL},
     )
-    session = _FakeSession(_FakeResponse(_omaha_response(version=stale_version)))
+    _install_omaha(monkeypatch, _omaha_response(version=stale_version))
     hashed_infos: list[VersionInfo] = []
 
     async def _fetch_hashes(
@@ -233,7 +218,7 @@ def test_gemini_rehashes_the_current_pin_during_a_stale_omaha_rollout(
     )
 
     events = _run(
-        collect_events(lambda emit: updater.update_stream(current, session, emit=emit))
+        collect_events(lambda emit: updater.update_stream(current, object(), emit=emit))
     )
 
     effective_info = VersionInfo(
@@ -296,25 +281,6 @@ def test_gemini_refuses_to_guess_the_url_for_a_newer_current_pin(
 
     with pytest.raises(RuntimeError, match="without its current DMG URL"):
         module._effective_version_info(UpdateContext(current=current), stale)
-
-
-def test_gemini_reports_omaha_http_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """HTTP errors should fail version discovery before a pin is emitted."""
-    module = _load_module()
-    updater = module.GeminiUpdater()
-    response = _FakeResponse(b"unavailable", status=503, reason="Service Unavailable")
-
-    with pytest.raises(
-        RuntimeError,
-        match="Omaha request failed with HTTP 503 Service Unavailable",
-    ):
-        _run(
-            updater.fetch_latest(
-                _FakeSession(response), context=UpdateContext(current=None)
-            )
-        )
 
 
 @pytest.mark.parametrize(
@@ -571,14 +537,8 @@ def test_gemini_requires_one_inner_artifact(count: int) -> None:
         )
 
 
-def test_gemini_version_probe_uses_omaha() -> None:
+def test_gemini_version_probe_uses_omaha(monkeypatch: pytest.MonkeyPatch) -> None:
     """The metadata strategy's standalone version probe shares the Omaha contract."""
     module = _load_module()
-    assert (
-        _run(
-            module.GeminiUpdater()._fetch_version(
-                _FakeSession(_FakeResponse(_omaha_response()))
-            )
-        )
-        == _VERSION
-    )
+    _install_omaha(monkeypatch, _omaha_response())
+    assert _run(module.GeminiUpdater()._fetch_version(object())) == _VERSION

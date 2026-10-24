@@ -224,8 +224,7 @@ in
           diff.colorMoved = "default";
           fetch.prune = true;
           init.defaultBranch = "main";
-          rebase.pull = true;
-          url."ssh://gitlab.gnome.org".insteadOf = "https://gitlab.gnome.org";
+          pull.rebase = true;
         }
         // lib.optionalAttrs (cfg.signingKey != null) {
           user.signingkey = cfg.signingKey;

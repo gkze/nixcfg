@@ -6,6 +6,7 @@ import pytest
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.codemods.errors import CodemodError
 from lib.import_utils import load_module_from_path
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
 from lib.update.paths import REPO_ROOT
@@ -441,5 +442,5 @@ def test_normalize_updates_every_dependency_kind_without_changing_git_source() -
 
 def test_normalize_rejects_a_non_function_generator_root() -> None:
     """A recognizable source marker does not authorize a malformed Cargo API."""
-    with pytest.raises(ValueError, match="GitButler Cargo.nix to have a function body"):
+    with pytest.raises(CodemodError, match="parseable Nix function"):
         _load_normalizer_module().normalize("# rootSrc ? ./.\n{}")

@@ -9,6 +9,9 @@
   ...
 }:
 
+# Not mkDmgApp/mkPkgApp: the output is a filesystem layer (Library/, usr/,
+# a preference pane) expanded from pkgs inside the DMG, with the uninstaller
+# app as a side artifact. It is not a managed app bundle and has no macApp.
 stdenvNoCC.mkDerivation {
   pname = "macfuse";
   inherit (selfSource) version;

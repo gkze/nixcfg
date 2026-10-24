@@ -21,6 +21,9 @@ outputs:
   devshell:
     description: Pinned development environment
     value: ${{ steps.runtime.outputs.devshell }}
+  nixpkgs:
+    description: Pinned nixpkgs source path for required semantic tests
+    value: ${{ steps.runtime.outputs.nixpkgs }}
 runs:
   using: composite
   steps:

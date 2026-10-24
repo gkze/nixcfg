@@ -39,9 +39,18 @@ let
     fileName = "crate2nix-src.nix";
   };
 
+  companionNameCollisions = builtins.filter (
+    name: builtins.elem name discoveredPackages.names
+  ) companionPackages.names;
+  companionCollisionGuard =
+    if companionNameCollisions == [ ] then
+      null
+    else
+      throw "packages/registry.nix: duplicate exported package names across ordinary and companion discovery: ${builtins.concatStringsSep ", " companionNameCollisions}";
+
   # Keep one internal metadata table so path discovery, helper exposure, and
   # platform guards cannot drift apart.
-  basePackageMetadata =
+  basePackageMetadata = builtins.seq companionCollisionGuard (
     builtins.listToAttrs (
       builtins.map (name: {
         inherit name;
@@ -57,7 +66,8 @@ let
           path = companionPackages.pathFor name;
         };
       }) companionPackages.names
-    );
+    )
+  );
 
   metadataFor =
     attrs: names:
@@ -72,11 +82,7 @@ let
 
   packageMetadataOverrides =
     let
-      helperPackages = [
-        "go-cli-wrapper"
-        "registry"
-        "t3code-workspace"
-      ];
+      helperPackages = [ "t3code-workspace" ];
       darwinPackages = [
         "airfoil"
         "arc"
@@ -198,18 +204,34 @@ let
       };
     };
 
-  packageMetadata = builtins.listToAttrs (
-    builtins.map (name: {
-      inherit name;
-      value = {
-        helper = false;
-        constraint = null;
-      }
-      // (if builtins.hasAttr name basePackageMetadata then basePackageMetadata.${name} else { })
-      // (
-        if builtins.hasAttr name packageMetadataOverrides then packageMetadataOverrides.${name} else { }
+  validatePackageMetadataOverrides =
+    baseMetadata: overrides:
+    let
+      unknownNames = builtins.filter (name: !(builtins.hasAttr name baseMetadata)) (
+        builtins.attrNames overrides
       );
-    }) (builtins.attrNames (basePackageMetadata // packageMetadataOverrides))
+    in
+    if unknownNames == [ ] then
+      overrides
+    else
+      throw "packages/registry.nix: packageMetadataOverrides names no package: ${builtins.concatStringsSep ", " unknownNames}";
+
+  validatedPackageMetadataOverrides = validatePackageMetadataOverrides basePackageMetadata packageMetadataOverrides;
+
+  packageMetadata = builtins.seq validatedPackageMetadataOverrides (
+    builtins.listToAttrs (
+      builtins.map (name: {
+        inherit name;
+        value = {
+          helper = false;
+          constraint = null;
+        }
+        // (if builtins.hasAttr name basePackageMetadata then basePackageMetadata.${name} else { })
+        // (
+          if builtins.hasAttr name packageMetadataOverrides then packageMetadataOverrides.${name} else { }
+        );
+      }) (builtins.attrNames (basePackageMetadata // packageMetadataOverrides))
+    )
   );
 
   supportsSystem =
@@ -237,16 +259,64 @@ let
     );
 
   packagePaths = packagePathsMatching (_meta: true);
-  helperEntries = packageNamesMatching (meta: meta.helper);
-  darwinOnly = packageNamesMatching (meta: meta.constraint == "darwin");
+  # Which packages `overlays.default` exposes (overlays/registry-packages.nix).
+  # The flake's own package set already contains every registry package; the
+  # bare overlay is what the default.nix compatibility API and the update
+  # probes in lib/update/nix.py apply. It carries the macOS packages, meaning
+  # every package that no Linux root system supports, on the systems the
+  # package's constraint allows.
+  overlayExposure = {
+    # Also exposed, on every system, although they build on Linux. Update
+    # probes evaluate baseten's dependency hash through the overlay
+    # (lib/update/updaters/core.py), and gh-current's vendorHash probe needs
+    # go-toolchain there (Update run 39760093470). The others were exposed
+    # before the registry owned this list. Every system is deliberate: on a system the
+    # registry does not support (codex and gitbutler on aarch64-linux) the
+    # attribute throws instead of silently falling back to the different
+    # nixpkgs package of the same name.
+    extraPackages = [
+      "baseten"
+      "codex"
+      "gitbutler"
+      "go-toolchain"
+      "opencode-desktop"
+      "pants-preview"
+    ];
+    # An overlay fragment (overlays/raycast, overlays/rio) or the tinyOverlays
+    # in overlays/default.nix (commander) already defines the attribute; the
+    # registry entry forwards to it, so exposing it again would collide.
+    overlayOwnedPackages = [
+      "commander"
+      "raycast"
+      "rio"
+    ];
+  };
+  linuxRootSystems = builtins.filter (hasKernel "linux") rootSystems;
+  isDarwinOnly =
+    constraint: constraint != null && !(builtins.any (supportsSystem constraint) linuxRootSystems);
+  unknownOverlayNames = builtins.filter (name: !(builtins.hasAttr name packagePaths)) (
+    overlayExposure.extraPackages ++ overlayExposure.overlayOwnedPackages
+  );
+  darwinOverlayPackageNames =
+    if unknownOverlayNames != [ ] then
+      throw "packages/registry.nix: overlayExposure names no package: ${builtins.concatStringsSep ", " unknownOverlayNames}"
+    else
+      builtins.filter (
+        name:
+        !(builtins.elem name overlayExposure.overlayOwnedPackages)
+        && !(builtins.elem name overlayExposure.extraPackages)
+      ) (packageNamesMatching (meta: meta ? path && !meta.helper && isDarwinOnly meta.constraint));
 in
 {
-  inherit
-    darwinOnly
-    helperEntries
-    packagePaths
-    sculptorSystems
-    ;
+  inherit packagePaths validatePackageMetadataOverrides;
 
   forSystem = system: packagePathsMatching (meta: supportsSystem meta.constraint system);
+
+  overlayPackageNamesFor =
+    system:
+    let
+      supported = packagePathsMatching (meta: supportsSystem meta.constraint system);
+    in
+    builtins.filter (name: builtins.hasAttr name supported) darwinOverlayPackageNames
+    ++ overlayExposure.extraPackages;
 }

@@ -1,7 +1,6 @@
 """Internal Python rendering and post-processing helpers."""
 
 import ast
-import importlib
 import json
 import re
 import tempfile
@@ -48,16 +47,7 @@ _rewrite_constr_type_hints = codegen_utils.rewrite_constr_type_hints
 _normalize_pydantic_imports = codegen_utils.normalize_pydantic_imports
 
 
-def _import_optional(module_name: str, *, feature: str) -> object:
-    """Import an optional dependency or raise a helpful runtime error."""
-    try:
-        return importlib.import_module(module_name)
-    except ModuleNotFoundError as exc:  # pragma: no cover -- exercised in live CLI
-        msg = (
-            f"{feature} requires optional dependency {module_name!r}. "
-            "Install the `codegen` extra to use this command."
-        )
-        raise RuntimeError(msg) from exc
+_import_optional = codegen_utils.import_optional
 
 
 def normalize_entrypoint_name(entrypoint: str) -> str:

@@ -3,7 +3,7 @@
 import importlib.machinery
 import importlib.util
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -19,12 +19,17 @@ def load_module_from_path(path: Path, module_name: str) -> ModuleType:
         raise RuntimeError(msg)
 
     module = importlib.util.module_from_spec(spec)
+    missing = object()
+    previous = sys.modules.get(module_name, missing)
     sys.modules[module_name] = module
     try:
         spec.loader.exec_module(module)
-    except Exception:
+    except BaseException:
         if sys.modules.get(module_name) is module:
-            del sys.modules[module_name]
+            if previous is missing:
+                del sys.modules[module_name]
+            else:
+                sys.modules[module_name] = cast("ModuleType", previous)
         raise
     return module
 

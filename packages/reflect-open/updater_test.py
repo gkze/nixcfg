@@ -17,8 +17,10 @@ from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.codemods.errors import CodemodError
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
 from lib.tests._assertions import expect_instance
+from lib.tests._mac_app_passthru import mac_app_passthru_args
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     expect_binding,
@@ -554,24 +556,7 @@ def test_reflect_result_requires_one_structured_pnpm_source(
 
 def test_reflect_never_skips_dependency_closure_recomputation() -> None:
     """Even unchanged release metadata must refresh pnpm and Cargo closures."""
-    module = _load_updater_module()
-    info = VersionInfo(_VERSION, {"commit": _COMMIT, "tag": _TAG})
-    current = SourceEntry(
-        version=_VERSION,
-        commit=_COMMIT,
-        hashes=HashCollection.from_value([
-            HashEntry.create("srcHash", _SRC_HASH),
-            HashEntry.create("npmDepsHash", _NPM_DEPS_HASH),
-            HashEntry.create("cargoHash", _CARGO_HASH),
-        ]),
-    )
-
-    assert (
-        run_async(
-            module.ReflectOpenUpdater()._is_latest(UpdateContext(current=current), info)
-        )
-        is False
-    )
+    assert _load_updater_module().ReflectOpenUpdater.always_rehash
 
 
 def test_reflect_source_pin_contains_promoted_authoritative_hashes() -> None:
@@ -696,7 +681,12 @@ def test_reflect_nix_policy_rejects_drift_before_patching_any_source(
     )
     before = dict(drifted)
 
-    with pytest.raises(RuntimeError, match="expected one Reflect source anchor"):
+    # The anchor spans the declaration line too, so a duplicated or missing
+    # `supported` line leaves no exact match for the multi-line anchor.
+    with pytest.raises(
+        CodemodError,
+        match=rf"expected 1 match for {provider_path}, found 0$",
+    ):
         module.patch_sources(drifted, package_manager=_PACKAGE_MANAGER)
 
     assert drifted == before
@@ -723,7 +713,7 @@ def test_reflect_nix_policy_rejects_unaudited_updater_changes(
     drifted = dict(_UPSTREAM_PATCH_SOURCES)
     drifted[relative_path] = drifted[relative_path].replace(anchor, "unaudited")
 
-    with pytest.raises(RuntimeError, match="expected one Reflect source anchor"):
+    with pytest.raises(RuntimeError, match="expected 1 match for "):
         _load_patch_module().patch_sources(drifted, package_manager=_PACKAGE_MANAGER)
 
 
@@ -1021,25 +1011,10 @@ def test_reflect_internal_package_preserves_the_managed_arm64_app_contract() -> 
         expect_binding(arguments.values, "passthru").value,
         AttributeSet,
     )
-    mac_app = expect_instance(
-        expect_binding(passthru.values, "macApp").value,
-        AttributeSet,
-    )
+    mac_app = mac_app_passthru_args(passthru)
     assert_nix_ast_equal(
-        expect_binding(mac_app.values, "bundleId").value,
-        Identifier(name="appId"),
-    )
-    assert_nix_ast_equal(
-        expect_binding(mac_app.values, "bundleName").value,
-        Identifier(name="appBundleName"),
-    )
-    assert_nix_ast_equal(
-        expect_binding(mac_app.values, "bundleRelPath").value,
-        '"Applications/${appBundleName}"',
-    )
-    assert_nix_ast_equal(
-        expect_binding(mac_app.values, "installMode").value,
-        '"copy"',
+        mac_app,
+        "{ bundleName = appBundleName; macApp.bundleId = appId; }",
     )
     metadata = expect_instance(
         expect_binding(arguments.values, "meta").value,

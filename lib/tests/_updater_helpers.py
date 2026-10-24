@@ -13,6 +13,7 @@ from typing import Final, Protocol
 
 from lib.import_utils import load_module_from_path
 from lib.update.events import EventSink, UpdateEvent, ignore_event
+from lib.update.net import HTTPResponse
 from lib.update.paths import REPO_ROOT
 
 NO_FIXED_HASH_VALUE: Final = object()
@@ -20,6 +21,36 @@ NO_FIXED_HASH_VALUE: Final = object()
 
 class _MonkeyPatch(Protocol):
     def setattr(self, target: str, value: object, *, raising: bool = True) -> None: ...
+
+
+def http_response(
+    *,
+    status: int = 200,
+    url: str = "https://example.com",
+    headers: dict[str, str] | None = None,
+    body: bytes = b"",
+) -> HTTPResponse:
+    """Build one ``lib.update.net.request`` result."""
+    return HTTPResponse(status=status, url=url, headers=headers or {}, body=body)
+
+
+class FakeRequest:
+    """Stand in for ``lib.update.net.request``: record calls, replay responses.
+
+    The last queued response repeats once the queue drains.
+    """
+
+    def __init__(self, *responses: HTTPResponse) -> None:
+        """Queue the responses to replay."""
+        self.responses = list(responses)
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def __call__(
+        self, _session: object, url: str, **kwargs: object
+    ) -> HTTPResponse:
+        """Record one request and return the next queued response."""
+        self.calls.append((url, kwargs))
+        return self.responses.pop(0) if len(self.responses) > 1 else self.responses[0]
 
 
 def run_async[T](coro: Coroutine[object, object, T]) -> T:

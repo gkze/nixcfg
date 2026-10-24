@@ -1,18 +1,12 @@
 """Updater for the fully rolled-out Google Chrome stable releases."""
 
 import asyncio
-import base64
-import json
 import platform as host_platform
 import re
 from dataclasses import dataclass
-from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, ClassVar
 
-import aiohttp
-
 from lib import json_utils
-from lib.http_utils import HTTP_BAD_REQUEST
 from lib.update.events import EventSink, ignore_event
 from lib.update.net import fetch_json, fetch_url
 from lib.update.updaters import (
@@ -22,8 +16,16 @@ from lib.update.updaters import (
     register_updater,
 )
 from lib.update.updaters.metadata import MappingMetadata
+from lib.update.updaters.vendor_feeds import (
+    fetch_omaha_payload,
+    parse_debian_packages,
+    parse_omaha_updatecheck,
+    sha256_hex_to_sri,
+)
 
 if TYPE_CHECKING:
+    import aiohttp
+
     from lib.nix.models.sources import SourceEntry, SourceHashes
 
 _VERSION_HISTORY_URL = (
@@ -32,18 +34,14 @@ _VERSION_HISTORY_URL = (
     "?filter=endtime%3Dnone%2Cfraction%3D1"
     "&order_by=starttime%20desc&page_size=100"
 )
-_OMAHA_URL = "https://update.googleapis.com/service/update2/json"
 _LINUX_PACKAGES_URL = (
     "https://dl.google.com/linux/chrome/deb/dists/stable/main/binary-amd64/Packages"
 )
 _LINUX_REPOSITORY_URL = "https://dl.google.com/linux/chrome/deb/"
 _CHROME_APP_ID = "com.google.Chrome"
-_ANTI_XSSI_PREFIX = b")]}'\n"
 _VERSION_PATTERN = re.compile(r"[0-9]+(?:\.[0-9]+){3}")
 _OS_VERSION_PATTERN = re.compile(r"[0-9]+(?:\.[0-9]+){0,3}")
 _DEBIAN_REVISION_PATTERN = re.compile(r"[A-Za-z0-9.+~]+")
-_DEBIAN_PATH_COMPONENT_PATTERN = re.compile(r"[A-Za-z0-9._+~-]+")
-_SHA256_PATTERN = re.compile(r"[0-9a-fA-F]{64}")
 _DARWIN_ARCHITECTURES = frozenset({"arm64", "x86_64"})
 _DARWIN_ARTIFACT_PATTERN = re.compile(
     r"https://dl\.google\.com/release2/chrome/"
@@ -192,75 +190,15 @@ def _object_list(value: object, *, context: str) -> list[dict[str, object]]:
     ]
 
 
-def _sri_sha256(value: str, *, context: str) -> str:
-    if _SHA256_PATTERN.fullmatch(value) is None:
-        msg = f"Invalid SHA-256 in {context}: {value!r}"
-        raise RuntimeError(msg)
-    digest = bytes.fromhex(value)
-    return f"sha256-{base64.b64encode(digest).decode()}"
-
-
 def _parse_omaha_artifact(
     payload: bytes,
     *,
     expected_version: str,
 ) -> _ResolvedOmahaArtifact:
     """Return the immutable DMG URL when Omaha agrees with VersionHistory."""
-    if not payload.startswith(_ANTI_XSSI_PREFIX):
-        msg = "Google Chrome Omaha response omitted its anti-XSSI prefix"
-        raise RuntimeError(msg)
-    try:
-        payload_value = json.loads(payload.removeprefix(_ANTI_XSSI_PREFIX))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        msg = "Google Chrome Omaha response was not valid JSON"
-        raise RuntimeError(msg) from exc
-
-    payload_object = json_utils.as_object_dict(
-        payload_value,
-        context="Google Chrome Omaha response",
+    updatecheck = parse_omaha_updatecheck(
+        payload, app_id=_CHROME_APP_ID, apps_key="app", label="Google Chrome"
     )
-    response = json_utils.as_object_dict(
-        payload_object.get("response"),
-        context="Google Chrome Omaha response.response",
-    )
-    apps = _object_list(
-        response.get("app"),
-        context="Google Chrome Omaha response apps",
-    )
-    matching_apps = [
-        app
-        for app in apps
-        if json_utils.get_required_str(
-            app,
-            "appid",
-            context="Google Chrome Omaha app",
-        )
-        == _CHROME_APP_ID
-    ]
-    if len(matching_apps) != 1:
-        msg = f"Chrome Omaha response contained {len(matching_apps)} matching apps"
-        raise RuntimeError(msg)
-    app = matching_apps[0]
-    app_status = json_utils.get_required_str(
-        app,
-        "status",
-        context="Google Chrome Omaha app",
-    )
-    if app_status != "ok":
-        msg = f"Chrome Omaha app returned status {app_status!r}"
-        raise RuntimeError(msg)
-    updatecheck = json_utils.as_object_dict(
-        app.get("updatecheck"),
-        context="Google Chrome Omaha updatecheck",
-    )
-    update_status = json_utils.get_required_str(
-        updatecheck,
-        "status",
-        context="Google Chrome Omaha updatecheck",
-    )
-    if update_status != "ok":
-        msg = f"Chrome Omaha updatecheck returned status {update_status!r}"
-        raise RuntimeError(msg)
     manifest = json_utils.as_object_dict(
         updatecheck.get("manifest"),
         context="Google Chrome Omaha manifest",
@@ -337,32 +275,11 @@ def _parse_omaha_artifact(
         raise RuntimeError(msg)
     return _ResolvedOmahaArtifact(
         url=artifact_urls.pop(),
-        sri_hash=_sri_sha256(
+        sri_hash=sha256_hex_to_sri(
             package_hash,
             context="Google Chrome Omaha package",
         ),
     )
-
-
-def _parse_debian_fields(stanza: str) -> dict[str, list[str]]:
-    fields: dict[str, list[str]] = {}
-    for line in stanza.splitlines():
-        if not line or line[0].isspace():
-            continue
-        name, separator, value = line.partition(":")
-        if not separator:
-            msg = f"Malformed Google Chrome apt metadata line: {line!r}"
-            raise RuntimeError(msg)
-        fields.setdefault(name, []).append(value.strip())
-    return fields
-
-
-def _required_debian_field(fields: dict[str, list[str]], name: str) -> str:
-    values = fields.get(name, [])
-    if len(values) != 1 or not values[0]:
-        msg = f"Google Chrome apt metadata has invalid {name!r} field"
-        raise RuntimeError(msg)
-    return values[0]
 
 
 def _parse_linux_artifact(
@@ -371,69 +288,35 @@ def _parse_linux_artifact(
     expected_version: str,
 ) -> _ResolvedOmahaArtifact:
     """Return the immutable DEB URL matching VersionHistory and apt metadata."""
-    try:
-        text = payload.decode()
-    except UnicodeDecodeError as exc:
-        msg = "Google Chrome apt Packages metadata is not UTF-8"
-        raise RuntimeError(msg) from exc
-    stanzas = [
-        _parse_debian_fields(stanza)
-        for stanza in re.split(r"\r?\n\r?\n+", text.strip())
-        if stanza.strip()
-    ]
-    candidates = [
-        fields
-        for fields in stanzas
-        if fields.get("Package") == ["google-chrome-stable"]
-        and fields.get("Architecture") == ["amd64"]
-    ]
+    candidates = parse_debian_packages(
+        payload,
+        package="google-chrome-stable",
+        architecture="amd64",
+        label="Google Chrome apt metadata",
+    )
     if len(candidates) != 1:
         msg = (
             "Google Chrome apt metadata contained "
             f"{len(candidates)} stable amd64 packages"
         )
         raise RuntimeError(msg)
-    fields = candidates[0]
-    package_version = _required_debian_field(fields, "Version")
-    chrome_version, separator, revision = package_version.rpartition("-")
+    package = candidates[0]
+    chrome_version, separator, revision = package.version.rpartition("-")
     if not separator or _DEBIAN_REVISION_PATTERN.fullmatch(revision) is None:
         msg = (
             "Chrome apt package does not match the fully rolled-out Linux "
-            f"version: expected {expected_version}, observed {package_version!r}"
+            f"version: expected {expected_version}, observed {package.version!r}"
         )
         raise RuntimeError(msg)
-
-    filename = _required_debian_field(fields, "Filename")
-    path = PurePosixPath(filename)
-    expected_name = f"google-chrome-stable_{package_version}_amd64.deb"
-    if (
-        path.is_absolute()
-        or path.as_posix() != filename
-        or not path.parts
-        or path.parts[0] != "pool"
-        or path.name != expected_name
-        or any(
-            component in {".", ".."}
-            or _DEBIAN_PATH_COMPONENT_PATTERN.fullmatch(component) is None
-            for component in path.parts
-        )
-    ):
-        msg = f"Google Chrome apt metadata has invalid Filename: {filename!r}"
-        raise RuntimeError(msg)
-    package_hash = _required_debian_field(fields, "SHA256")
-    sri_hash = _sri_sha256(
-        package_hash,
-        context="Google Chrome apt package",
-    )
     if chrome_version != expected_version:
         msg = (
             "Chrome apt package does not match the fully rolled-out Linux "
-            f"version: expected {expected_version}, observed {package_version!r}"
+            f"version: expected {expected_version}, observed {package.version!r}"
         )
         raise ChromeLinuxRolloutLagError(msg)
     return _ResolvedOmahaArtifact(
-        url=f"{_LINUX_REPOSITORY_URL}{filename}",
-        sri_hash=sri_hash,
+        url=f"{_LINUX_REPOSITORY_URL}{package.filename}",
+        sri_hash=package.sri_hash,
     )
 
 
@@ -473,33 +356,16 @@ class GoogleChromeUpdater(Updater):
         expected_version: str,
     ) -> _ResolvedOmahaArtifact:
         os_version, os_arch = _darwin_host_identity()
-        headers = {
-            "User-Agent": self.config.default_user_agent,
-            "Content-Type": "application/json",
-            "X-Goog-Update-Interactivity": "fg",
-            "X-Goog-Update-AppId": _CHROME_APP_ID,
-            "X-Goog-Update-Updater": "nixcfg-0",
-        }
-        timeout = aiohttp.ClientTimeout(total=self.config.default_timeout)
-        async with session.request(
-            "POST",
-            _OMAHA_URL,
-            headers=headers,
-            json=_omaha_request(
+        payload = await fetch_omaha_payload(
+            session,
+            app_id=_CHROME_APP_ID,
+            body=_omaha_request(
                 target_version=expected_version,
                 os_version=os_version,
                 os_arch=os_arch,
             ),
-            allow_redirects=True,
-            timeout=timeout,
-        ) as response:
-            payload = await response.read()
-            if response.status >= HTTP_BAD_REQUEST:
-                msg = (
-                    "Google Chrome Omaha request failed with "
-                    f"HTTP {response.status} {response.reason}"
-                )
-                raise RuntimeError(msg)
+            config=self.config,
+        )
         return _parse_omaha_artifact(payload, expected_version=expected_version)
 
     async def _fetch_linux_artifact(

@@ -1,6 +1,5 @@
 """Resolve exact Electron versions from immutable flake-input manifests."""
 
-import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, override
 
@@ -9,6 +8,7 @@ from lib.nix.models.flake_lock import (
     FlakeLockNode,  # noqa: TC001 -- candidate metadata is validated at runtime
 )
 from lib.update.locked_source import locked_github_source, resolve_locked_source
+from lib.update.npm_semver import require_exact_semantic_version
 from lib.update.updaters.metadata import MappingMetadata
 
 if TYPE_CHECKING:
@@ -16,9 +16,6 @@ if TYPE_CHECKING:
 
     from lib.update.config import UpdateConfig
 
-_EXACT_VERSION_PATTERN = re.compile(
-    r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
-)
 _MAX_MANIFEST_BYTES = 1024 * 1024
 
 
@@ -62,9 +59,9 @@ def electron_manifest_contract(
         "electron",
         context=f"{context} {dependency_group}",
     )
-    if _EXACT_VERSION_PATTERN.fullmatch(spec) is None:
-        msg = f"{context} Electron dependency must resolve exactly, got {spec!r}"
-        raise RuntimeError(msg)
+    require_exact_semantic_version(
+        spec, context=f"{context} Electron dependency", release_only=True
+    )
     return version, spec
 
 

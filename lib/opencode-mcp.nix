@@ -143,23 +143,41 @@ let
 
   mkServerAssertions =
     optionPath: servers:
-    mapAttrsToList (
-      name: server:
-      let
-        isLocal = (server.type or "local") == "local";
-        command = server.command or [ ];
-        url = server.url or null;
-        isValid = if isLocal then command != [ ] else url != null;
-      in
-      {
-        assertion = isValid;
-        message =
-          if isLocal then
-            "${optionPath}.${name}: local servers require a non-empty command."
-          else
-            "${optionPath}.${name}: remote servers require a non-null url.";
-      }
-    ) servers;
+    builtins.concatLists (
+      mapAttrsToList (
+        name: server:
+        let
+          serverType = server.type or null;
+          command = server.command or [ ];
+          url = server.url or null;
+          transportAssertion = {
+            assertion = builtins.elem serverType [
+              "local"
+              "remote"
+            ];
+            message = "${optionPath}.${name}: type must be either \"local\" or \"remote\".";
+          };
+          transportRequirements =
+            if serverType == "local" then
+              [
+                {
+                  assertion = builtins.isList command && command != [ ];
+                  message = "${optionPath}.${name}: local servers require a non-empty command.";
+                }
+              ]
+            else if serverType == "remote" then
+              [
+                {
+                  assertion = url != null;
+                  message = "${optionPath}.${name}: remote servers require a non-null url.";
+                }
+              ]
+            else
+              [ ];
+        in
+        [ transportAssertion ] ++ transportRequirements
+      ) servers
+    );
 
   mkProfileOverlayConfig =
     baseServers: profile:

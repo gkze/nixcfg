@@ -64,7 +64,6 @@ def test_update_runtime_has_no_cross_job_version_transport_surface() -> None:
             updater_metadata.AssetURLsMetadata,
             updater_metadata.DownloadUrlMetadata,
             updater_metadata.FlakeInputMetadata,
-            updater_metadata.GranolaFeedMetadata,
             updater_metadata.GitHubRawFileMetadata,
             updater_metadata.GitHubReleaseMetadata,
             updater_metadata.NoMetadata,

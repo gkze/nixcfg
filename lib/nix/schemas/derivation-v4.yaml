@@ -1,4 +1,3 @@
----
 "$schema": "http://json-schema.org/draft-04/schema"
 "$id": "https://nix.dev/manual/nix/latest/protocols/json/schema/derivation-v4.json"
 title: Derivation
@@ -12,6 +11,7 @@ description: |
   > This JSON format is currently
   > [**experimental**](@docroot@/development/experimental-features.md#xp-feature-nix-command)
   > and subject to change.
+
 type: object
 required:
   - name
@@ -29,6 +29,7 @@ properties:
     description: |
       The name of the derivation.
       Used when calculating store paths for the derivation’s outputs.
+
   version:
     const: 4
     title: Format version (must be 4)
@@ -52,26 +53,28 @@ properties:
         - Use canonical content address JSON format for floating content addressed derivation outputs.
 
       Note that while this format is experimental, the maintenance of versions is best-effort, and not promised to identify every change.
+
   outputs:
     type: object
     title: Output specifications
     description: |
-      Information about the output paths of the derivation.
-      This is a JSON object with one member per output, where the key is the output name and the value is a JSON object as described.
+     Information about the output paths of the derivation.
+     This is a JSON object with one member per output, where the key is the output name and the value is a JSON object as described.
 
-       > **Example**
-       >
-       > ```json
-       > "outputs": {
-       >   "out": {
-       >     "method": "nar",
-       >     "hashAlgo": "sha256",
-       >     "hash": "6fc80dcc62179dbc12fc0b5881275898f93444833d21b89dfe5f7fbcbb1d0d62"
-       >   }
-       > }
-       > ```
+      > **Example**
+      >
+      > ```json
+      > "outputs": {
+      >   "out": {
+      >     "method": "nar",
+      >     "hashAlgo": "sha256",
+      >     "hash": "6fc80dcc62179dbc12fc0b5881275898f93444833d21b89dfe5f7fbcbb1d0d62"
+      >   }
+      > }
+      > ```
     additionalProperties:
       "$ref": "#/$defs/output/overall"
+
   inputs:
     type: object
     title: Derivation inputs
@@ -119,16 +122,18 @@ properties:
             description: |
               A store path to a derivation, mapped to the outputs of that derivation.
             oneOf:
-              - "$ref": "#/$defs/outputNames"
-              - "$ref": "#/$defs/dynamicOutputs"
+            - "$ref": "#/$defs/outputNames"
+            - "$ref": "#/$defs/dynamicOutputs"
         additionalProperties: false
     additionalProperties: false
+
   system:
     type: string
     title: Build system type
     description: |
       The system type on which this derivation is to be built
       (e.g. `x86_64-linux`).
+
   builder:
     type: string
     title: Build program path
@@ -136,6 +141,7 @@ properties:
       Absolute path of the program used to perform the build.
       Typically this is the `bash` shell
       (e.g. `/nix/store/p4xlj4imjbnm4v0x5jf4qysvyjjlgq1d-bash-4.4-p23/bin/bash`).
+
   args:
     type: array
     title: Builder arguments
@@ -143,6 +149,7 @@ properties:
       Command-line arguments passed to the `builder`.
     items:
       type: string
+
   env:
     type: object
     title: Environment variables
@@ -150,6 +157,7 @@ properties:
       Environment variables passed to the `builder`.
     additionalProperties:
       type: string
+
   structuredAttrs:
     title: Structured attributes
     description: |
@@ -157,6 +165,7 @@ properties:
       Structured attributes are JSON, and thus embedded as-is.
     type: object
     additionalProperties: true
+
 "$defs":
   output:
     overall:
@@ -169,6 +178,7 @@ properties:
         - "$ref": "#/$defs/output/caFloating"
         - "$ref": "#/$defs/output/deferred"
         - "$ref": "#/$defs/output/impure"
+
     inputAddressed:
       title: Input-Addressed Output
       description: |
@@ -186,6 +196,7 @@ properties:
           description: |
             The output path determined from the derivation itself.
       additionalProperties: false
+
     caFixed:
       title: Fixed Content-Addressed Output
       description: |
@@ -205,6 +216,7 @@ properties:
           description: |
             The expected content hash.
       additionalProperties: false
+
     caFloating:
       title: Floating Content-Addressed Output
       description: |
@@ -228,6 +240,7 @@ properties:
           description: |
             What hash algorithm to use for the given method of content-addressing.
       additionalProperties: false
+
     deferred:
       title: Deferred Output
       description: |
@@ -236,6 +249,7 @@ properties:
       type: object
       properties: {}
       additionalProperties: false
+
     impure:
       title: Impure Output
       description: |
@@ -258,16 +272,19 @@ properties:
           description: |
             How the serialization will be hashed.
       additionalProperties: false
+
   outputName:
     type: string
     title: Output name
     description: Name of the derivation output to depend on
+
   outputNames:
     type: array
     title: Output Names
     description: Set of names of derivation outputs to depend on
     items:
       "$ref": "#/$defs/outputName"
+
   dynamicOutputs:
     type: object
     title: Dynamic Outputs
@@ -279,4 +296,4 @@ properties:
       outputs:
         "$ref": "#/$defs/outputNames"
       dynamicOutputs:
-        "$ref": "#/$defs/dynamicOutputs"
+          "$ref": "#/$defs/dynamicOutputs"

@@ -15,11 +15,16 @@ on:
         description: Allow one agent repair and a fresh fully validated attempt
         type: boolean
         default: true
+      repair_commit:
+        description: Internal approved repair commit; pins follow-up checkouts and no-op publication
+        type: string
+        default: ""
       canary_warm_rust:
         description: >
           Dispatch-only. Realize specified rust-warmup slot(s) or crate
-          family against the current plan on this branch. Skips prepare,
-          Linux validate, Darwin roots, publish, and coverage. The push
+          family against a freshly prepared current plan on this branch.
+          Runs prepare/plan producers; skips Linux validate, Darwin roots,
+          publish, and coverage. The push
           and schedule no-skip run is still the done-bar proof.
         type: boolean
         default: false
@@ -35,14 +40,13 @@ on:
     - cron: "17 7 * * 1"
   # workflow_dispatch is unavailable to the Cursor GitHub App token
   # (HTTP 403, missing actions:write). Touching .github/update-kick on
-  # main or a listed feature branch queues one Update run. Prefer
+  # main queues one Update run. Prefer
   # `gh workflow run` when the App has Actions write.
   # lib/update/** also queues so a pipeline fix can start Update
   # without a kick-file bump.
   push:
     branches:
       - main
-      - cursor/no-skip-darwin-shards-6614
     paths:
       - .github/update-kick
       - lib/update/**
@@ -65,10 +69,6 @@ jobs:
   # #1263 force-local dry-runs the will-be-built set so a 406-drv
   # bootstrap compile fails the slot immediately.
   prepare-pins:
-    if: |-
-      github.event_name != 'workflow_dispatch' ||
-      (inputs.canary_warm_rust != true && inputs.canary_warm_rust != 'true' &&
-      inputs.canary_slots == '' && inputs.canary_crates == '')
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04
@@ -215,7 +215,10 @@ jobs:
     needs: prepare-merge
     if: |-
       always() && !cancelled() &&
-      needs.prepare-merge.result == 'success'
+      needs.prepare-merge.result == 'success' &&
+      (github.event_name != 'workflow_dispatch' ||
+      (inputs.canary_warm_rust != true && inputs.canary_warm_rust != 'true' &&
+      inputs.canary_slots == '' && inputs.canary_crates == ''))
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04-arm
@@ -227,7 +230,10 @@ jobs:
     needs: prepare-merge
     if: |-
       always() && !cancelled() &&
-      needs.prepare-merge.result == 'success'
+      needs.prepare-merge.result == 'success' &&
+      (github.event_name != 'workflow_dispatch' ||
+      (inputs.canary_warm_rust != true && inputs.canary_warm_rust != 'true' &&
+      inputs.canary_slots == '' && inputs.canary_crates == ''))
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04
@@ -251,6 +257,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: ${{ github.event.inputs.repair_commit || github.sha }}
           persist-credentials: false
       - name: Compute canary rust-warmup matrix
         id: slots
@@ -353,11 +360,13 @@ jobs:
   canary-warm-rust:
     needs:
       - canary-slots
+      - prepare-merge
       - plan-darwin-closures
       - canary-darwin-fods
     if: |-
       always() && !cancelled() &&
       needs.canary-slots.result == 'success' &&
+      needs.prepare-merge.result == 'success' &&
       needs.plan-darwin-closures.result == 'success' &&
       needs.canary-darwin-fods.result == 'success' &&
       needs.canary-slots.outputs.enabled == 'true'
@@ -403,7 +412,10 @@ jobs:
       always() && !cancelled() &&
       needs.prepare-merge.result == 'success' &&
       needs.plan-darwin-closures.result == 'success' &&
-      needs.canary-darwin-fods.result == 'success'
+      needs.canary-darwin-fods.result == 'success' &&
+      (github.event_name != 'workflow_dispatch' ||
+      (inputs.canary_warm_rust != true && inputs.canary_warm_rust != 'true' &&
+      inputs.canary_slots == '' && inputs.canary_crates == ''))
     strategy:
       fail-fast: false
       max-parallel: 5
@@ -448,7 +460,10 @@ jobs:
       needs.canary-darwin-fods.result == 'success' &&
       (needs.canary-warm-rust.result == 'success' ||
       needs.canary-warm-rust.result == 'skipped' ||
-      needs.canary-warm-rust.result == 'failure')
+      needs.canary-warm-rust.result == 'failure') &&
+      (github.event_name != 'workflow_dispatch' ||
+      (inputs.canary_warm_rust != true && inputs.canary_warm_rust != 'true' &&
+      inputs.canary_slots == '' && inputs.canary_crates == ''))
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -619,6 +634,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: ${{ github.event.inputs.repair_commit || github.sha }}
           persist-credentials: false
       - uses: ./.github/actions/update-runtime
         id: runtime
@@ -669,7 +685,10 @@ jobs:
         env:
           NIXCFG_RUNTIME: ${{ steps.runtime.outputs.runtime }}
           NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
+          NIXCFG_NIXPKGS_PATH: ${{ steps.runtime.outputs.nixpkgs }}
+          NIXCFG_REQUIRE_NIX_EVAL: "true"
           NIXCFG_CI_STAGE: certify
+          NIXCFG_REPAIR_COMMIT: ${{ inputs.repair_commit || '' }}
         run: |
           import runpy
           runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
@@ -689,6 +708,7 @@ jobs:
           # This job already has contents:write and pull-requests:write.
           GH_TOKEN: ${{ github.token }}
           UPDATE_BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          NIXCFG_REPAIR_COMMIT: ${{ inputs.repair_commit || '' }}
           NIXCFG_CI_STAGE: publish
         run: |
           import runpy
@@ -703,6 +723,8 @@ jobs:
           runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
         shell: python
   repair:
+    outputs:
+      tree: ${{ steps.proposal.outputs.tree }}
     needs:
       - prepare-pins
       - prepare-darwin
@@ -728,21 +750,24 @@ jobs:
       (inputs.canary_warm_rust != true && inputs.canary_warm_rust != 'true' &&
       inputs.canary_slots == '' && inputs.canary_crates == '')
     # The repair gate runs the Darwin-maintained Python suite, as publish does.
+    # The agent runs with --allow-all-tools on untrusted failure logs, so this
+    # job holds read-only tokens and no Cachix or signing credentials. The
+    # start-repair job owns every write.
     runs-on: macos-15
     timeout-minutes: 120
     permissions:
-      actions: write
-      contents: write
+      actions: read
+      contents: read
       copilot-requests: write
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: ${{ github.event.inputs.repair_commit || github.sha }}
           persist-credentials: false
       - uses: ./.github/actions/update-runtime
         id: runtime
         with:
-          github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
-          cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          github-token: ${{ github.token }}
           cache-generators: "true"
           light-image-reclaim: "true"
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
@@ -764,9 +789,12 @@ jobs:
         env:
           NIXCFG_CI_STAGE: install-agent
       - name: Propose one repair
+        id: proposal
         env:
           NIXCFG_RUNTIME: ${{ steps.runtime.outputs.runtime }}
           NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
+          NIXCFG_NIXPKGS_PATH: ${{ steps.runtime.outputs.nixpkgs }}
+          NIXCFG_REQUIRE_NIX_EVAL: "true"
           GITHUB_TOKEN: ${{ github.token }}
           COPILOT_MODEL: gpt-6-astra
           COPILOT_AUTO_UPDATE: 'false'
@@ -782,10 +810,37 @@ jobs:
           name: repair
           path: |
             ${{ runner.temp }}/repair.patch
+            ${{ runner.temp }}/repair-receipt.json
             ${{ runner.temp }}/repair-evidence/repair.log
           if-no-files-found: warn
           overwrite: true
           retention-days: 30
+  start-repair:
+    needs: repair
+    if: needs.repair.result == 'success'
+    # This environment must have required reviewers in GitHub settings. The
+    # approval gates this exact artifact before any write or credentialed run.
+    environment: update-repair-approval
+    # Commit and dispatch only; the repair job already ran the Darwin gates.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      actions: write
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.inputs.repair_commit || github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/update-runtime
+        id: runtime
+        with:
+          github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          light-image-reclaim: "true"
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: repair
+          path: ${{ runner.temp }}
       - uses: crazy-max/ghaction-import-gpg@e89d40939c28e39f97cf32126055eeae86ba74ec # v6
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
@@ -795,17 +850,11 @@ jobs:
       - name: Start a fresh attempt with repair disabled
         env:
           NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
+          NIXCFG_RUNTIME: ${{ steps.runtime.outputs.runtime }}
           GH_TOKEN: ${{ github.token }}
           NIXCFG_CI_STAGE: start-repair
+          NIXCFG_REPAIR_TREE: ${{ needs.repair.outputs.tree }}
           NIXCFG_UPDATE_TARGETS: ${{ inputs.targets || '' }}
-        run: |
-          import runpy
-          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
-        shell: python
-      - name: Flush Cachix daemon
-        if: always()
-        env:
-          NIXCFG_CI_STAGE: flush-cachix
         run: |
           import runpy
           runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")

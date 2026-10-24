@@ -6,7 +6,7 @@ from nix_manipulator.expressions.parenthesis import Parenthesis
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.tests._assertions import expect_instance
-from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding
+from lib.tests._nix_ast import assert_nix_ast_equal, binding_map, expect_binding
 from lib.tests._nix_source import nix_file_expr
 
 
@@ -25,12 +25,9 @@ def _override_attrs() -> AttributeSet:
     return expect_instance(override.output, AttributeSet)
 
 
-def test_openai_cli_skips_upstream_checks_only_for_pinned_versions() -> None:
-    """v1.38.0 and v1.39.0 checkPhase fail in upstream tests after the build succeeds."""
-    assert_nix_ast_equal(
-        expect_binding(_override_attrs().values, "doCheck").value,
-        'old.version != "1.38.0" && old.version != "1.39.0"',
-    )
+def test_openai_cli_runs_upstream_checks() -> None:
+    """The 1.38.0/1.39.0 skips expired; checks run unless mkGoCli disables them."""
+    assert "doCheck" not in binding_map(_override_attrs().values)
 
 
 def test_openai_cli_check_support_covers_native_darwin_tests() -> None:

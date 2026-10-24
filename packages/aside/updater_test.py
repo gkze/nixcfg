@@ -25,9 +25,13 @@ class _FakeResponse:
     status: int = 302
     reason: str = "Found"
     headers: dict[str, str] = field(default_factory=dict)
+    url: str = "https://aside.com/api/download/macos"
 
     async def __aenter__(self) -> _FakeResponse:
         return self
+
+    async def read(self) -> bytes:
+        return b""
 
     async def __aexit__(self, *_args: object) -> None:
         return None
@@ -40,8 +44,8 @@ class _FakeSession:
         self.responses = responses
         self.calls: list[tuple[str, dict[str, object]]] = []
 
-    def head(self, url: str, **kwargs: object) -> _FakeResponse:
-        self.calls.append((url, kwargs))
+    def request(self, method: str, url: str, **kwargs: object) -> _FakeResponse:
+        self.calls.append((url, {"method": method, **kwargs}))
         return self.responses.get(
             url, _FakeResponse(headers={"Location": _LANDING_URL})
         )
@@ -80,6 +84,7 @@ def test_aside_resolves_and_persists_per_architecture_artifacts() -> None:
         f"{module._DOWNLOAD_URL}?arch=x64",
     ]
     for _url, kwargs in session.calls:
+        assert kwargs["method"] == "HEAD"
         assert kwargs["allow_redirects"] is False
         assert kwargs["timeout"].total == updater.config.default_timeout
 
@@ -146,8 +151,8 @@ def test_aside_rejects_mismatched_architecture_versions() -> None:
 @pytest.mark.parametrize(
     ("response", "message"),
     [
-        (_FakeResponse(status=200, reason="OK"), "Expected Aside download redirect"),
-        (_FakeResponse(), "omitted Location"),
+        (_FakeResponse(status=200, reason="OK"), "Expected a redirect"),
+        (_FakeResponse(), "did not include Location"),
     ],
 )
 def test_aside_reports_invalid_download_endpoint_responses(

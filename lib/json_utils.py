@@ -55,6 +55,21 @@ def get_required_str(mapping: dict[str, object], key: str, *, context: str) -> s
         raise TypeError(msg) from exc
 
 
+def get_required_nonempty_str(
+    mapping: dict[str, object], key: str, *, context: str
+) -> str:
+    """Return required non-empty string field ``key`` from ``mapping``.
+
+    Upstream metadata fields such as versions, URLs, and tags carry no meaning
+    when empty, so an empty string fails like a missing field.
+    """
+    value = get_required_str(mapping, key, context=context)
+    if not value:
+        msg = f"Expected non-empty string field {key!r} in {context}"
+        raise TypeError(msg)
+    return value
+
+
 def coerce_json_value(value: object, *, context: str) -> JsonValue:
     """Convert arbitrary JSON-compatible data to :data:`JsonValue`."""
     if isinstance(value, (str, int, float, bool)) or value is None:

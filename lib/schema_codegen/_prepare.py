@@ -1,6 +1,5 @@
 """Internal schema loading, registry, and preparation helpers."""
 
-import importlib
 import json
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -10,7 +9,7 @@ from urllib.parse import urlparse
 
 import yaml
 
-from lib import json_utils
+from lib import codegen_utils, json_utils
 from lib.schema_codegen.config import (
     AliasStrategy,
     CodegenTarget,
@@ -91,16 +90,7 @@ _coerce_json_object = json_utils.coerce_json_object
 _coerce_json_value = json_utils.coerce_json_value
 
 
-def _import_optional(module_name: str, *, feature: str) -> object:
-    """Import an optional dependency or raise a helpful runtime error."""
-    try:
-        return importlib.import_module(module_name)
-    except ModuleNotFoundError as exc:  # pragma: no cover -- exercised in live CLI
-        msg = (
-            f"{feature} requires optional dependency {module_name!r}. "
-            "Install the `codegen` extra to use this command."
-        )
-        raise RuntimeError(msg) from exc
+_import_optional = codegen_utils.import_optional
 
 
 def _parse_schema_text(text: str, *, fmt: SchemaFormat, context: str) -> JsonValue:
@@ -266,43 +256,34 @@ def build_registry(
 
 
 def _merge_allof_extras(result: JsonObject, branch: JsonObject) -> None:
-    excluded = frozenset({"properties", "required", "type", "title", "description"})
+    excluded = frozenset({"properties", "required", "title", "description"})
     for key, value in branch.items():
         if key in excluded or key in result:
             continue
         result[key] = value
 
 
-def _merge_allof_properties(result: JsonObject, merged: JsonObject) -> None:
-    """Merge ``allOf`` branch properties into the parent object schema.
-
-    A parent may carry placeholder entries (``id: {}``) for properties its
-    branches constrain. Taking the parent first would keep the placeholder and
-    silently degrade the field to ``Any`` in the generated model, so the
-    constrained side wins and independent keywords combine.
-    """
+def _merge_allof_properties(result: JsonObject, merged: JsonObject) -> bool:
+    """Merge properties only when their intersection needs no schema rewriting."""
     if not merged:
-        return
+        return True
     existing = result.get("properties")
+    if existing is not None and not isinstance(existing, dict):
+        return False
     properties: JsonObject = (
         _coerce_json_object(existing, context="schema properties")
         if isinstance(existing, dict)
         else {}
     )
     for key, value in merged.items():
-        current = properties.get(key)
-        if current is None or current == {}:
+        if key not in properties or properties[key] == {}:
             properties[key] = value
-        elif value in ({}, current):
+        elif value == {} or value == properties[key]:
             continue
-        elif isinstance(current, dict) and isinstance(value, dict):
-            properties[key] = {
-                **_coerce_json_object(current, context="property schema"),
-                **_coerce_json_object(value, context="property schema"),
-            }
         else:
-            properties[key] = value
+            return False
     result["properties"] = properties
+    return True
 
 
 def _merge_allof_required(result: JsonObject, merged: list[str]) -> None:
@@ -321,40 +302,92 @@ def _merge_allof_required(result: JsonObject, merged: list[str]) -> None:
     result["required"] = required
 
 
+def _collect_allof_merge(
+    all_of: list[JsonValue],
+) -> tuple[JsonObject, list[str], list[JsonValue]] | None:
+    """Collect a flat merge plan, or return ``None`` when it is not provably safe."""
+    mergeable_keys = frozenset({
+        "description",
+        "properties",
+        "required",
+        "title",
+        "type",
+    })
+    merged_properties: JsonObject = {}
+    merged_required: list[str] = []
+    merged_types: list[JsonValue] = []
+    for branch in all_of:
+        if not isinstance(branch, dict):
+            return None
+        branch_dict = _coerce_json_object(branch, context="allOf branch")
+        if any(key not in mergeable_keys for key in branch_dict):
+            return None
+        props_obj = branch_dict.get("properties")
+        if not isinstance(props_obj, dict):
+            return None
+        required_obj = branch_dict.get("required", [])
+        if not isinstance(required_obj, list) or any(
+            not isinstance(item, str) for item in required_obj
+        ):
+            return None
+        if "type" in branch_dict:
+            merged_types.append(branch_dict["type"])
+        merged_required.extend(item for item in required_obj if isinstance(item, str))
+        for key, value in props_obj.items():
+            if key not in merged_properties or merged_properties[key] == {}:
+                merged_properties[key] = value
+            elif value == {} or value == merged_properties[key]:
+                continue
+            else:
+                return None
+    return merged_properties, merged_required, merged_types
+
+
 def _merge_allof_branches(result: JsonObject) -> None:
-    """Inline object-shaped ``allOf`` branches into their parent object."""
+    """Inline only ``allOf`` intersections with a semantics-preserving flat form."""
     all_of = result.get("allOf")
     if not isinstance(all_of, list):
         return
 
-    merged_properties: JsonObject = {}
-    merged_required: list[str] = []
-    remaining: list[JsonValue] = []
-    for branch in all_of:
-        if not isinstance(branch, dict):
-            remaining.append(branch)
-            continue
-        branch_dict = _coerce_json_object(branch, context="allOf branch")
-        props_obj = branch_dict.get("properties")
-        if not isinstance(props_obj, dict):
-            remaining.append(branch)
-            continue
-        merged_properties.update(
-            _coerce_json_object(props_obj, context="allOf properties")
-        )
-        required_obj = branch_dict.get("required")
-        if isinstance(required_obj, list):
-            merged_required.extend(
-                item for item in required_obj if isinstance(item, str)
-            )
-        _merge_allof_extras(result, branch_dict)
+    existing_required = result.get("required")
+    if existing_required is not None and (
+        not isinstance(existing_required, list)
+        or any(not isinstance(item, str) for item in existing_required)
+    ):
+        return
 
-    _merge_allof_properties(result, merged_properties)
-    _merge_allof_required(result, merged_required)
-    if remaining:
-        result["allOf"] = remaining
+    merge_plan = _collect_allof_merge(all_of)
+    if merge_plan is None:
+        return
+    merged_properties, merged_required, merged_types = merge_plan
+    if merged_types and (
+        any(value != merged_types[0] for value in merged_types[1:])
+        or ("type" in result and result["type"] != merged_types[0])
+    ):
+        return
+
+    existing_properties = result.get("properties")
+    if isinstance(existing_properties, dict):
+        new_properties = merged_properties.keys() - existing_properties.keys()
     else:
-        result.pop("allOf", None)
+        new_properties = merged_properties.keys()
+    property_sensitive_keys = frozenset({
+        "additionalProperties",
+        "patternProperties",
+        "unevaluatedProperties",
+    })
+    if new_properties and any(key in result for key in property_sensitive_keys):
+        return
+
+    if not _merge_allof_properties(result, merged_properties):
+        return
+    _merge_allof_required(result, merged_required)
+    for branch in all_of:
+        _merge_allof_extras(
+            result,
+            _coerce_json_object(branch, context="allOf branch"),
+        )
+    result.pop("allOf", None)
 
 
 def _apply_schema_transforms(

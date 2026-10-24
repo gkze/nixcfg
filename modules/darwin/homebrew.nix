@@ -117,26 +117,30 @@ in
     };
   };
 
-  config = mkIf cfg.enable {
-    assertions = [
-      {
-        assertion = resolvedUser != null;
-        message = "nixcfg.darwin.homebrew.user must be set (or provide primaryUser via lib.mkSystem/lib.mkDarwinHost).";
-      }
-    ];
+  config = lib.mkMerge [
+    # Declare nix-homebrew's taps in nix-darwin's Brewfile as well.
+    { homebrew.taps = builtins.attrNames config.nix-homebrew.taps; }
+    (mkIf cfg.enable {
+      assertions = [
+        {
+          assertion = resolvedUser != null;
+          message = "nixcfg.darwin.homebrew.user must be set (or provide primaryUser via lib.mkSystem/lib.mkDarwinHost).";
+        }
+      ];
 
-    nix-homebrew = {
-      enable = true;
-      inherit (cfg)
-        enableRosetta
-        mutableTaps
-        taps
-        ;
-      user = resolvedUser;
-    }
-    // optionalAttrs (patchedBrewPackage != null) {
-      package = patchedBrewPackage;
-      patchBrew = false;
-    };
-  };
+      nix-homebrew = {
+        enable = true;
+        inherit (cfg)
+          enableRosetta
+          mutableTaps
+          taps
+          ;
+        user = resolvedUser;
+      }
+      // optionalAttrs (patchedBrewPackage != null) {
+        package = patchedBrewPackage;
+        patchBrew = false;
+      };
+    })
+  ];
 }

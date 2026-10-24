@@ -1,8 +1,10 @@
 """Exercise Python Actions jobs with real processes and Git boundaries."""
 
 import ast
+import hashlib
 import json
 import os
+import runpy
 import signal
 import subprocess
 import sys
@@ -29,6 +31,28 @@ SCRIPT = ROOT / "lib/update/ci/jobs.py"
 def test_job_launcher_supports_hosted_runner_python() -> None:
     """Bootstrap must parse before Nix supplies the project's Python runtime."""
     ast.parse(SCRIPT.read_text(), filename=str(SCRIPT), feature_version=(3, 12))
+
+
+def test_job_launcher_imports_shared_policy_without_project_pythonpath(
+    tmp_path: Path,
+) -> None:
+    """The direct bootstrap loads only the dependency-free shared policy module."""
+    runpy.run_path(str(SCRIPT), run_name="bootstrap_probe")
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    result = subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            "-c",
+            f"import runpy; runpy.run_path({str(SCRIPT)!r}, run_name='bootstrap_probe')",
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.fixture
@@ -143,11 +167,6 @@ def invoke(env: dict[str, str], checkout: Path) -> subprocess.CompletedProcess[s
         text=True,
         check=False,
     )
-
-
-def _allow_hosted_github_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Let flush rewrite an isolated GITHUB_ENV as the hosted job does."""
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
 
 
 @pytest.mark.parametrize("exit_code", [0, 17])
@@ -677,7 +696,6 @@ def test_flush_cachix_stops_daemon_and_republishes_receipts(
     monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
     monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
     monkeypatch.setenv("GITHUB_ENV", str(github_env))
-    _allow_hosted_github_env(monkeypatch)
     monkeypatch.chdir(checkout)
     assert jobs.main("flush-cachix") == 0
     assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
@@ -883,7 +901,6 @@ def test_flush_cachix_pushes_drain_timeout_leftovers(native_job, monkeypatch) ->
     monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
     monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
     monkeypatch.setenv("GITHUB_ENV", str(github_env))
-    _allow_hosted_github_env(monkeypatch)
     monkeypatch.setenv("TEST_CACHE_STOP_EXIT", "3")
     monkeypatch.setenv("TEST_CACHE_STOP_STDERR", "Failed to push some store paths")
     monkeypatch.chdir(checkout)
@@ -929,7 +946,6 @@ def test_flush_cachix_pushes_realized_roots_after_leftover_recovery(
     monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
     monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
     monkeypatch.setenv("GITHUB_ENV", str(github_env))
-    _allow_hosted_github_env(monkeypatch)
     monkeypatch.setenv("TEST_CACHE_STOP_EXIT", "3")
     monkeypatch.setenv("TEST_CACHE_STOP_STDERR", "Failed to push some store paths")
     monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path == store)
@@ -971,7 +987,6 @@ def test_flush_cachix_fails_closed_on_drain_timeout_without_named_leftovers(
         monkeypatch.setenv(key, value)
     monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
     monkeypatch.setenv("GITHUB_ENV", str(github_env))
-    _allow_hosted_github_env(monkeypatch)
     monkeypatch.setenv("TEST_CACHE_STOP_EXIT", "3")
     monkeypatch.setenv("TEST_CACHE_STOP_STDERR", "Failed to push some store paths")
     monkeypatch.chdir(checkout)
@@ -1003,7 +1018,6 @@ def test_flush_cachix_fails_closed_when_leftover_push_fails(
         monkeypatch.setenv(key, value)
     monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
     monkeypatch.setenv("GITHUB_ENV", str(github_env))
-    _allow_hosted_github_env(monkeypatch)
     monkeypatch.setenv("TEST_CACHE_STOP_EXIT", "3")
     monkeypatch.setenv("TEST_CACHE_STOP_STDERR", "Failed to push some store paths")
     monkeypatch.setenv("TEST_CACHE_EXIT", "1")
@@ -1078,8 +1092,16 @@ def test_remember_realized_installable_paths_writes_receipt(
     installable = "path:/tmp/repo#checks.aarch64-darwin.root-closure-darwin-argus"
 
     def run(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        assert args[:4] == ("nix", "eval", "--raw", "--no-write-lock-file")
-        assert args[4:] == (f"{installable}.outPath",)
+        assert args[:7] == (
+            "nix",
+            "eval",
+            "--raw",
+            "--no-write-lock-file",
+            "--option",
+            "allow-import-from-derivation",
+            "false",
+        )
+        assert args[7:] == (f"{installable}.outPath",)
         return subprocess.CompletedProcess(args, 0, stdout=f"{store}\n", stderr="")
 
     monkeypatch.setattr(jobs, "_run", run)
@@ -1146,7 +1168,6 @@ def test_flush_cachix_pushes_realized_root_paths(native_job, monkeypatch) -> Non
     monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
     monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
     monkeypatch.setenv("GITHUB_ENV", str(github_env))
-    _allow_hosted_github_env(monkeypatch)
     monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path == store)
     monkeypatch.setattr(
         jobs, "_realized_root_path_in_cachix", lambda path: path == store
@@ -1186,7 +1207,6 @@ def test_flush_cachix_pins_substituted_linux_builder_image(
     monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
     monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
     monkeypatch.setenv("GITHUB_ENV", str(github_env))
-    _allow_hosted_github_env(monkeypatch)
     monkeypatch.setenv("RUNNER_ARCH", "ARM64")
     monkeypatch.setenv("RUNNER_OS", "Linux")
     monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path == store)
@@ -1265,8 +1285,16 @@ def test_remember_records_eval_outpath_not_stale_path_info(
         seen.append(args)
         if args[:2] == ("nix", "path-info"):
             return subprocess.CompletedProcess(args, 0, stdout=f"{stale}\n", stderr="")
-        assert args[:4] == ("nix", "eval", "--raw", "--no-write-lock-file")
-        assert args[4:] == (f"{installable}.outPath",)
+        assert args[:7] == (
+            "nix",
+            "eval",
+            "--raw",
+            "--no-write-lock-file",
+            "--option",
+            "allow-import-from-derivation",
+            "false",
+        )
+        assert args[7:] == (f"{installable}.outPath",)
         return subprocess.CompletedProcess(args, 0, stdout=f"{wanted}\n", stderr="")
 
     monkeypatch.setattr(jobs, "_run", run)
@@ -1349,7 +1377,6 @@ def test_flush_does_not_fail_closed_on_warmup_fod_remote_miss(
     monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
     monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
     monkeypatch.setenv("GITHUB_ENV", str(github_env))
-    _allow_hosted_github_env(monkeypatch)
     monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path in {fod, root})
     monkeypatch.setattr(
         jobs, "_realized_root_path_in_cachix", lambda path: path == root
@@ -1391,7 +1418,6 @@ def test_flush_continues_when_warmup_leftover_push_fails(
     monkeypatch.setenv("GITHUB_ENV", str(github_env))
     monkeypatch.setenv("TEST_CACHE_STOP_EXIT", "0")
     monkeypatch.setenv("TEST_CACHE_EXIT", "1")
-    _allow_hosted_github_env(monkeypatch)
     monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path == fod)
     monkeypatch.chdir(checkout)
     assert jobs.main("flush-cachix") == 0
@@ -1463,7 +1489,6 @@ def test_cachix_daemon_helpers_tolerate_missing_or_busy_paths(
     (busy / "daemon.pid").mkdir()
     monkeypatch.setenv("CACHIX_DAEMON_DIR", str(busy))
     monkeypatch.setenv("NIXCFG_CI_STAGE", "flush-cachix")
-    _allow_hosted_github_env(monkeypatch)
     jobs._release_cachix_daemon_dir()
     assert (busy / "daemon.sock").is_dir()
     assert "CACHIX_DAEMON_DIR=\n" in github_env.read_text()
@@ -1490,7 +1515,6 @@ def test_clear_cachix_daemon_env_is_the_action_post_hook_skip(
     monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
     monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(socket))
     monkeypatch.setenv("GITHUB_ENV", str(github_env))
-    _allow_hosted_github_env(monkeypatch)
     jobs._clear_cachix_daemon_env()
     assert "CACHIX_DAEMON_DIR" not in os.environ
     assert "CACHIX_DAEMON_SOCKET" not in os.environ
@@ -1504,11 +1528,6 @@ def test_clear_cachix_daemon_env_is_the_action_post_hook_skip(
     poisoned = tmp_path / "poisoned-env"
     poisoned.write_text("KEEP=1\n")
     monkeypatch.setenv("GITHUB_ENV", str(poisoned))
-    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
-    jobs._clear_cachix_daemon_env()
-    assert poisoned.read_text() == "KEEP=1\n"
-    monkeypatch.setenv("NIXCFG_CI_STAGE", "flush-cachix")
-    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_clear_cachix_daemon_env")
     monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
     jobs._clear_cachix_daemon_env()
     assert poisoned.read_text() == "KEEP=1\n"
@@ -1937,6 +1956,14 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
     assert "NIXCFG_CLOSURE_YIELD" not in step["env"]
     assert "warmup_artifact" in native["on"]["workflow_call"]["inputs"]
     assert "previous_third" in native["on"]["workflow_call"]["inputs"]
+    checkout = next(
+        step
+        for step in native["jobs"]["native"]["steps"]
+        if str(step.get("uses", "")).startswith("actions/checkout@")
+    )
+    assert checkout["with"]["ref"] == (
+        "${{ github.event.inputs.repair_commit || github.sha }}"
+    )
     assert step["env"]["NIXCFG_MERGE_EXTRA"].startswith("${{ inputs.previous_third")
     downloads = [
         step
@@ -1951,6 +1978,14 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
     assert (
         native["on"]["workflow_call"]["outputs"]["darwin_closure_shards"]["value"]
         == "${{ jobs.native.outputs.darwin_closure_shards }}"
+    )
+
+
+def test_native_fault_evidence_and_artifact_contract() -> None:
+    """Fault evidence precedes retention and artifact names exclude faulted candidates."""
+    native = yaml.load(
+        (ROOT / ".github/workflows/update-native.yml").read_text(),
+        Loader=yaml.BaseLoader,
     )
     flush = next(
         step
@@ -2073,9 +2108,11 @@ def _assert_canary_jobs(workflow_jobs: dict) -> None:
     canary = workflow_jobs["canary-warm-rust"]
     assert set(canary["needs"]) == {
         "canary-slots",
+        "prepare-merge",
         "plan-darwin-closures",
         "canary-darwin-fods",
     }
+    assert "prepare-merge.result == 'success'" in canary["if"]
     assert "canary-darwin-fods.result == 'success'" in canary["if"]
     rust = workflow_jobs["validate-darwin-warm-rust"]
     assert "canary-darwin-fods.result == 'success'" in rust["if"]
@@ -2372,7 +2409,12 @@ def test_cachix_flush_proof_requires_partial_presence_after_designed_failure() -
         if str(step.get("uses", "")).startswith("actions/upload-artifact@")
     )
     assert "proof-path-after.txt" in upload["with"]["path"]
-    assert workflow["jobs"]["assert-partial"]["if"] == "always()"
+    partial_if = " ".join(workflow["jobs"]["assert-partial"]["if"].split())
+    assert "always() && !cancelled()" in partial_if
+    assert (
+        "github.event.pull_request.head.repo.full_name == github.repository"
+        in partial_if
+    )
     proof_if = " ".join(workflow["jobs"]["proof"]["if"].split())
     assert "always() && !cancelled()" in proof_if
     assert_source = next(
@@ -2385,6 +2427,45 @@ def test_cachix_flush_proof_requires_partial_presence_after_designed_failure() -
     assert workflow["jobs"]["assert-partial"]["steps"][-1]["name"] == (
         "Flush Cachix daemon"
     )
+
+
+def test_cachix_flush_proof_keeps_fork_validation_read_only_and_required() -> None:
+    """Fork PRs get a green read proof, never an upload attempt or target event."""
+    path = ROOT / ".github/workflows/cachix-flush-proof.yml"
+    workflow = yaml.load(path.read_text(), Loader=yaml.BaseLoader)
+    assert "pull_request_target" not in workflow["on"]
+    assert "pull_request" in workflow["on"]
+    jobs = workflow["jobs"]
+    trusted_condition = (
+        "github.event_name == 'workflow_dispatch' || "
+        "github.event.pull_request.head.repo.full_name == github.repository"
+    )
+    assert jobs["fail-after-push"]["if"] == trusted_condition
+    fork = jobs["fork-read-only"]
+    assert "github.event_name == 'pull_request'" in fork["if"]
+    assert "!= github.repository" in fork["if"]
+    fork_text = json.dumps(fork)
+    assert "secrets." not in fork_text
+    assert "CACHIX_AUTH_TOKEN" not in fork_text
+    runtime = next(step for step in fork["steps"] if step.get("id") == "runtime")
+    assert runtime["with"]["cachix-token"] == ""
+    read = next(
+        step
+        for step in fork["steps"]
+        if step.get("name") == "Validate read-only Cachix access"
+    )
+    assert "nix" in read["run"]
+    assert "store" in read["run"]
+    assert "ping" in read["run"]
+    assert "runCommand" not in read["run"]
+    assert set(jobs["proof"]["needs"]) == {
+        "fail-after-push",
+        "fork-read-only",
+        "assert-partial",
+    }
+    proof = jobs["proof"]["steps"][-1]["run"]
+    assert "needs.fork-read-only.result" in proof
+    assert 'not trusted and fork_read != "success"' in proof
 
 
 def _uses_update_runtime_with_cachix(steps: list[object]) -> bool:
@@ -2425,9 +2506,9 @@ def test_cachix_flush_is_last_step_of_every_update_runtime_cachix_job() -> None:
     assert sorted(checked) == [
         "cachix-flush-proof.yml:assert-partial",
         "cachix-flush-proof.yml:fail-after-push",
+        "cachix-flush-proof.yml:fork-read-only",
         "update-native.yml:native",
         "update.yml:publish",
-        "update.yml:repair",
     ]
 
 
@@ -2442,10 +2523,7 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
         workflow["concurrency"]["cancel-in-progress"]
         == "${{ github.ref_name != github.event.repository.default_branch }}"
     )
-    assert workflow["on"]["push"]["branches"] == [
-        "main",
-        "cursor/no-skip-darwin-shards-6614",
-    ]
+    assert workflow["on"]["push"]["branches"] == ["main"]
     assert workflow["on"]["push"]["paths"] == [
         ".github/update-kick",
         "lib/update/**",
@@ -2501,19 +2579,6 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     } <= set(jobs["repair"]["needs"])
     assert set(cache_jobs) <= set(jobs["repair"]["needs"])
     assert set(cache_jobs).isdisjoint(jobs["publish"]["needs"])
-    assert jobs["repair"]["permissions"] == {
-        "actions": "write",
-        "contents": "write",
-        "copilot-requests": "write",
-    }
-    agent = next(
-        step
-        for step in jobs["repair"]["steps"]
-        if step.get("name") == "Propose one repair"
-    )
-    assert agent["env"]["GITHUB_TOKEN"] == "${{ github.token }}"  # noqa: S105 -- Actions expression, not a credential.
-    assert agent["env"]["COPILOT_MODEL"] == "gpt-6-astra"
-    assert not {"COPILOT_GITHUB_TOKEN", "GH_TOKEN"} & agent["env"].keys()
     assert workflow["on"]["workflow_dispatch"]["inputs"]["repair"]["default"] == "true"
     assert "canary_slots" in workflow["on"]["workflow_dispatch"]["inputs"]
     assert "canary_crates" in workflow["on"]["workflow_dispatch"]["inputs"]
@@ -2535,6 +2600,115 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
             if step.get("env", {}).get("NIXCFG_CI_STAGE") == stage
         )
         assert step["env"]["GH_TOKEN"] == "${{ github.token }}"  # noqa: S105 -- Actions expression, not a credential.
+
+
+def _canary_skip_guard(job: dict) -> bool:
+    condition = " ".join(job.get("if", "").split())
+    return (
+        "github.event_name != 'workflow_dispatch'" in condition
+        and "inputs.canary_warm_rust != true" in condition
+        and "inputs.canary_slots == ''" in condition
+        and "inputs.canary_crates == ''" in condition
+    )
+
+
+def test_canary_dispatch_event_graph_produces_current_plan_and_skips_publish() -> None:
+    """The dispatch event has a successful producer path and no publish path."""
+    workflow = yaml.load(
+        (ROOT / ".github/workflows/update.yml").read_text(), Loader=yaml.BaseLoader
+    )
+    jobs = workflow["jobs"]
+    producers = (
+        "prepare-pins",
+        "prepare-darwin",
+        "prepare-arm",
+        "prepare-x86",
+        "prepare-merge",
+        "plan-darwin-closures",
+        "canary-darwin-fods",
+        "canary-slots",
+    )
+    for name in producers:
+        assert not _canary_skip_guard(jobs[name]), name
+    assert "if" not in jobs["prepare-pins"]
+    canary = jobs["canary-warm-rust"]
+    assert set(canary["needs"]) == {
+        "canary-slots",
+        "prepare-merge",
+        "plan-darwin-closures",
+        "canary-darwin-fods",
+    }
+    # Model the dispatch with every declared producer succeeding. The canary
+    # has all required inputs and therefore executes rather than going green
+    # as a skipped job with missing artifacts.
+    results = dict.fromkeys(producers, "success")
+    assert all(results[need] == "success" for need in canary["needs"])
+    assert "needs.prepare-merge.result == 'success'" in canary["if"]
+    assert "needs.canary-slots.outputs.enabled == 'true'" in canary["if"]
+    assert canary["with"]["previous"] == "prepare-x86_64-linux"
+    assert canary["with"]["warmup_artifact"] == "plan-shards-x86_64-linux"
+    results["canary-warm-rust"] = "success"
+    for name in (
+        "validate-arm",
+        "validate-x86",
+        "validate-darwin-warm-rust",
+        "canary-warm-cascade",
+        "publish",
+    ):
+        assert _canary_skip_guard(jobs[name]), name
+        results[name] = "skipped"
+    assert results["canary-warm-rust"] == "success"
+    assert results["publish"] == "skipped"
+
+
+def test_repair_agent_job_holds_no_write_credentials() -> None:
+    """The agent runs untrusted tools; only start-repair can write."""
+    jobs = yaml.load(
+        (ROOT / ".github/workflows/update.yml").read_text(), Loader=yaml.BaseLoader
+    )["jobs"]
+    assert jobs["repair"]["permissions"] == {
+        "actions": "read",
+        "contents": "read",
+        "copilot-requests": "write",
+    }
+    assert "secrets." not in json.dumps(jobs["repair"])
+    assert jobs["start-repair"]["needs"] == "repair"
+    assert jobs["start-repair"]["environment"] == "update-repair-approval"
+    assert jobs["start-repair"]["permissions"] == {
+        "actions": "write",
+        "contents": "write",
+    }
+    assert jobs["repair"]["outputs"]["tree"] == "${{ steps.proposal.outputs.tree }}"
+    proposal = next(
+        step for step in jobs["repair"]["steps"] if step.get("id") == "proposal"
+    )
+    assert proposal["name"] == "Propose one repair"
+    upload = next(
+        step
+        for step in jobs["repair"]["steps"]
+        if str(step.get("uses", "")).startswith("actions/upload-artifact@")
+    )
+    assert "repair-receipt.json" in upload["with"]["path"]
+    for job in jobs.values():
+        for step in job.get("steps", []):
+            if str(step.get("uses", "")).startswith("actions/checkout@"):
+                assert step["with"]["ref"] == (
+                    "${{ github.event.inputs.repair_commit || github.sha }}"
+                )
+    start = next(
+        step
+        for step in jobs["start-repair"]["steps"]
+        if step.get("env", {}).get("NIXCFG_CI_STAGE") == "start-repair"
+    )
+    assert start["env"]["NIXCFG_REPAIR_TREE"] == ("${{ needs.repair.outputs.tree }}")
+    agent = next(
+        step
+        for step in jobs["repair"]["steps"]
+        if step.get("name") == "Propose one repair"
+    )
+    assert agent["env"]["GITHUB_TOKEN"] == "${{ github.token }}"  # noqa: S105 -- Actions expression, not a credential.
+    assert agent["env"]["COPILOT_MODEL"] == "gpt-6-astra"
+    assert not {"COPILOT_GITHUB_TOKEN", "GH_TOKEN"} & agent["env"].keys()
 
 
 def test_agent_check_limits_permissions_and_uses_selected_model() -> None:
@@ -2774,6 +2948,19 @@ def test_generator_cache_is_scoped_to_disposable_accelerators() -> None:
     )
     assert repair["with"]["cache-generators"] == "true"
     assert repair["with"]["light-image-reclaim"] == "true"
+    assert (
+        action["outputs"]["nixpkgs"]["value"] == "${{ steps.runtime.outputs.nixpkgs }}"
+    )
+    for name, stage in (("repair", "repair"), ("publish", "certify")):
+        step = next(
+            step
+            for step in workflow["jobs"][name]["steps"]
+            if step.get("env", {}).get("NIXCFG_CI_STAGE") == stage
+        )
+        assert step["env"]["NIXCFG_NIXPKGS_PATH"] == (
+            "${{ steps.runtime.outputs.nixpkgs }}"
+        )
+        assert step["env"]["NIXCFG_REQUIRE_NIX_EVAL"] == "true"
 
 
 @pytest.mark.parametrize(
@@ -2846,6 +3033,35 @@ def job_repository(tmp_path, monkeypatch) -> Path:
     }.items():
         monkeypatch.setenv(key, value)
     return root
+
+
+def _write_certified_identity(
+    runner_temp: Path,
+    *,
+    base_tree: str = "certified-base",
+    tree: str = "certified-tree",
+) -> None:
+    """Record the candidate identity the publish job reads back from evidence."""
+    evidence = runner_temp / "evidence" / "prepare-x86_64-linux"
+    evidence.mkdir(parents=True, exist_ok=True)
+    (evidence / "candidate.json").write_text(
+        json.dumps({"base_tree": base_tree, "tree": tree})
+    )
+
+
+def _published_stdout(
+    args: tuple[str, ...], *, target_tree: str = "certified-base"
+) -> str:
+    """Return the git plumbing answers one publish run reads."""
+    if args[:2] == ("git", "write-tree"):
+        return "certified-tree\n"
+    if args[:2] == ("git", "rev-parse"):
+        if args[2] == "HEAD":
+            return "repair-commit\n"
+        if args[2] == "HEAD^{tree}":
+            return "certified-tree\n"
+        return f"{target_tree}\n"
+    return ""
 
 
 @pytest.mark.parametrize("failure", [None, "prek", "coverage", "untracked"])
@@ -2959,19 +3175,28 @@ def test_publication_uses_signed_commit_and_bounded_repair(
             monkeypatch.setenv(
                 name, value.replace("${{ steps.runtime.outputs.devshell }}", "/tools")
             )
-    monkeypatch.setenv(
-        "GITHUB_REF_NAME", "codex/update-repair-100-1" if changed else "main"
-    )
+    monkeypatch.setenv("GITHUB_REF_NAME", "main")
+    monkeypatch.delenv("NIXCFG_REPAIR_COMMIT", raising=False)
     monkeypatch.setenv("NIXCFG_UPDATE_TARGETS", "example")
+    if operation == "start-repair":
+        monkeypatch.setenv("NIXCFG_REPAIR_TREE", "certified-tree")
+        repair_patch = tmp_path / "repair.patch"
+        repair_patch.write_bytes(b"approved repair patch\n")
+        (tmp_path / "repair-receipt.json").write_text(
+            json.dumps({
+                "tree": "certified-tree",
+                "patchSha256": hashlib.sha256(repair_patch.read_bytes()).hexdigest(),
+            })
+        )
+    _write_certified_identity(tmp_path)
     calls = []
 
     def run(*args, capture=False, check=True):
         calls.append(args)
-        stdout = "certified-tree\n" if args[:2] == ("git", "write-tree") else ""
         return subprocess.CompletedProcess(
             args,
             int(changed) if args[:2] == ("git", "diff") else 0,
-            stdout=stdout,
+            stdout=_published_stdout(args),
         )
 
     monkeypatch.setattr(jobs, "_run", run)
@@ -3015,10 +3240,120 @@ def test_publication_uses_signed_commit_and_bounded_repair(
         )
     else:
         assert ("git", "fetch", "origin", "main") not in calls
+        apply = ("git", "apply", "--index", "--binary", str(tmp_path / "repair.patch"))
+        assert calls[0] == apply
+        assert calls[1][-3:] == ("ci", "update", "check-repair")
         assert calls[-1][:3] == ("gh", "workflow", "run")
         assert "repair=false" in calls[-1]
+        assert "repair_commit=repair-commit" in calls[-1]
         assert "validate_all_packages=true" in calls[-1]
         assert "targets=example" in calls[-1]
+        assert calls[-1][calls[-1].index("--ref") + 1].startswith(
+            "codex/update-repair-"
+        )
+
+
+def test_start_repair_rejects_unapproved_artifact_before_writes(
+    job_repository, tmp_path, monkeypatch
+) -> None:
+    """A changed artifact cannot cross the approval boundary into credentialed writes."""
+    patch = tmp_path / "repair.patch"
+    patch.write_bytes(b"unapproved patch\n")
+    (tmp_path / "repair-receipt.json").write_text(
+        json.dumps({
+            "tree": "certified-tree",
+            "patchSha256": "0" * 64,
+        })
+    )
+    monkeypatch.setenv("NIXCFG_REPAIR_TREE", "certified-tree")
+
+    def forbidden(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("unapproved repair reached git or dispatch")
+
+    monkeypatch.setattr(jobs, "_run", forbidden)
+    with pytest.raises(ValueError, match="approved tree and patch"):
+        jobs.main("start-repair")
+
+
+@pytest.mark.parametrize(
+    "mode", ["missing-env", "empty-env", "missing-receipt", "malformed-receipt"]
+)
+def test_start_repair_requires_approved_tree_and_readable_receipt(
+    job_repository, tmp_path, monkeypatch, mode
+) -> None:
+    """Approval and receipt failures happen before any credentialed operation."""
+    patch = tmp_path / "repair.patch"
+    patch.write_bytes(b"approved repair patch\n")
+    monkeypatch.delenv("NIXCFG_REPAIR_TREE", raising=False)
+    if mode not in {"missing-env", "empty-env"}:
+        monkeypatch.setenv("NIXCFG_REPAIR_TREE", "certified-tree")
+    elif mode == "empty-env":
+        monkeypatch.setenv("NIXCFG_REPAIR_TREE", "  ")
+    if mode == "malformed-receipt":
+        (tmp_path / "repair-receipt.json").write_text("{not json\n")
+
+    def forbidden(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("invalid repair approval reached git or dispatch")
+
+    monkeypatch.setattr(jobs, "_run", forbidden)
+    message = (
+        "NIXCFG_REPAIR_TREE is required"
+        if mode in {"missing-env", "empty-env"}
+        else "missing its tree receipt"
+    )
+    with pytest.raises(ValueError, match=message):
+        jobs.main("start-repair")
+
+
+def test_repair_rejects_an_empty_producer_tree(
+    job_repository, tmp_path, monkeypatch
+) -> None:
+    """An empty write-tree result cannot become an approval receipt."""
+    (tmp_path / "repair.patch").write_bytes(b"repair proposal\n")
+
+    def run(*args, capture=False, check=True):
+        return subprocess.CompletedProcess(args, 0, stdout="")
+
+    monkeypatch.setattr(jobs, "_run", run)
+    with pytest.raises(ValueError, match="did not produce a Git tree receipt"):
+        jobs.main("repair")
+    assert not (tmp_path / "repair-receipt.json").exists()
+    assert not (tmp_path / "outputs").exists()
+
+
+@pytest.mark.parametrize("mismatch", ["applied", "committed"])
+def test_start_repair_rejects_tree_drift_before_dispatch(
+    job_repository, tmp_path, monkeypatch, mismatch
+) -> None:
+    """Applied and committed trees must both equal the approved repair tree."""
+    patch = tmp_path / "repair.patch"
+    patch.write_bytes(b"approved repair patch\n")
+    (tmp_path / "repair-receipt.json").write_text(
+        json.dumps({
+            "tree": "certified-tree",
+            "patchSha256": hashlib.sha256(patch.read_bytes()).hexdigest(),
+        })
+    )
+    monkeypatch.setenv("NIXCFG_REPAIR_TREE", "certified-tree")
+    calls: list[tuple[str, ...]] = []
+
+    def run(*args, capture=False, check=True):
+        calls.append(args)
+        stdout = _published_stdout(args)
+        if mismatch == "applied" and args[:2] == ("git", "write-tree"):
+            stdout = "different-tree\n"
+        if mismatch == "committed" and args[:3] == (
+            "git",
+            "rev-parse",
+            "HEAD^{tree}",
+        ):
+            stdout = "different-tree\n"
+        return subprocess.CompletedProcess(args, 0, stdout=stdout)
+
+    monkeypatch.setattr(jobs, "_run", run)
+    with pytest.raises(ValueError, match=f"{mismatch.capitalize()} repair"):
+        jobs.main("start-repair")
+    assert not any(args[:3] == ("gh", "workflow", "run") for args in calls)
 
 
 def test_commit_and_push_from_base_requires_a_certified_tree(
@@ -3029,17 +3364,30 @@ def test_commit_and_push_from_base_requires_a_certified_tree(
         jobs._commit_and_push("x", "msg", base="main")
 
 
-def test_publication_from_a_feature_branch_still_targets_default_branch(
+def test_repair_publication_requires_its_branch_and_original_base(
     job_repository, monkeypatch
+) -> None:
+    """Repair follow-ups cannot publish onto an arbitrary or base-less head."""
+    monkeypatch.setenv("GITHUB_REF_NAME", "main")
+    with pytest.raises(ValueError, match="repair branch as the PR head"):
+        jobs._commit_and_push("x", "msg", repair_commit="repair-commit")
+
+    monkeypatch.setenv("GITHUB_REF_NAME", "codex/update-repair-123-2")
+    with pytest.raises(ValueError, match="requires its original base"):
+        jobs._commit_and_push("x", "msg", repair_commit="repair-commit")
+
+
+def test_publication_from_a_feature_branch_still_targets_default_branch(
+    job_repository, tmp_path, monkeypatch
 ) -> None:
     """Exercise runs must not merge into the reviewed branch; the product PR is on main."""
     monkeypatch.setenv("GITHUB_REF_NAME", "feature")
+    _write_certified_identity(tmp_path)
     calls = []
 
     def run(*args, capture=False, check=True):
         calls.append(args)
-        stdout = "certified-tree\n" if args[:2] == ("git", "write-tree") else ""
-        return subprocess.CompletedProcess(args, 0, stdout=stdout)
+        return subprocess.CompletedProcess(args, 0, stdout=_published_stdout(args))
 
     monkeypatch.setattr(jobs, "_run", run)
     assert jobs.main("publish") == 0
@@ -3055,14 +3403,14 @@ def test_publication_from_a_feature_branch_still_targets_default_branch(
 
 
 def test_publish_merges_immediately_when_the_pull_request_is_already_clean(
-    job_repository, monkeypatch
+    job_repository, tmp_path, monkeypatch
 ) -> None:
     """A clean certified PR must merge now; --auto cannot queue without checks."""
+    _write_certified_identity(tmp_path)
     calls: list[tuple[str, ...]] = []
 
     def run(*args, capture=False, check=True):
         calls.append(args)
-        stdout = "certified-tree\n" if args[:2] == ("git", "write-tree") else ""
         if args[:3] == ("gh", "pr", "merge") and "--auto" in args:
             return subprocess.CompletedProcess(
                 args,
@@ -3071,7 +3419,7 @@ def test_publish_merges_immediately_when_the_pull_request_is_already_clean(
                 stderr="GraphQL: Pull request Pull request is in clean status "
                 "(enablePullRequestAutoMerge)\n",
             )
-        return subprocess.CompletedProcess(args, 0, stdout=stdout)
+        return subprocess.CompletedProcess(args, 0, stdout=_published_stdout(args))
 
     monkeypatch.setattr(jobs, "_run", run)
     assert jobs.main("publish") == 0
@@ -3081,11 +3429,13 @@ def test_publish_merges_immediately_when_the_pull_request_is_already_clean(
     assert merges[1][4:] == ("--squash",)
 
 
-def test_publish_raises_other_auto_merge_failures(job_repository, monkeypatch) -> None:
+def test_publish_raises_other_auto_merge_failures(
+    job_repository, tmp_path, monkeypatch
+) -> None:
     """A real merge failure must still fail publication."""
+    _write_certified_identity(tmp_path)
 
     def run(*args, capture=False, check=True):
-        stdout = "certified-tree\n" if args[:2] == ("git", "write-tree") else ""
         if args[:3] == ("gh", "pr", "merge"):
             return subprocess.CompletedProcess(
                 args,
@@ -3093,13 +3443,185 @@ def test_publish_raises_other_auto_merge_failures(job_repository, monkeypatch) -
                 stdout="",
                 stderr="GraphQL: Protected branch rules not configured\n",
             )
-        return subprocess.CompletedProcess(args, 0, stdout=stdout)
+        return subprocess.CompletedProcess(args, 0, stdout=_published_stdout(args))
 
     monkeypatch.setattr(jobs, "_run", run)
     with pytest.raises(subprocess.CalledProcessError) as exc_info:
         jobs.main("publish")
     assert exc_info.value.returncode == 1
     assert "Protected branch" in exc_info.value.stderr
+
+
+_TEST_GIT_IDENTITY = (
+    *("-c", "user.name=Test", "-c", "user.email=test@example.invalid"),
+    *("-c", "commit.gpgSign=false"),
+)
+
+
+def test_repair_publication_rejects_a_commit_from_another_candidate(
+    job_repository, tmp_path, monkeypatch
+) -> None:
+    """The approved repair commit must own the repair baseline in the evidence."""
+    _write_certified_identity(tmp_path)
+    monkeypatch.setenv("GITHUB_REF_NAME", "codex/update-repair-123-2")
+    monkeypatch.setenv("NIXCFG_REPAIR_COMMIT", "repair-commit")
+
+    def run(*args, capture=False, check=True):
+        stdout = (
+            "another-tree\n"
+            if args[:2] == ("git", "rev-parse")
+            else _published_stdout(args)
+        )
+        return subprocess.CompletedProcess(args, 0, stdout=stdout)
+
+    monkeypatch.setattr(jobs, "_run", run)
+    with pytest.raises(
+        ValueError, match="does not match the candidate repair baseline"
+    ):
+        jobs.main("publish")
+
+
+@pytest.mark.parametrize("base_moved", [False, True])
+def test_publish_lands_the_certified_tree_only_on_its_certified_base(
+    job_repository, tmp_path, monkeypatch, base_moved
+) -> None:
+    """Real Git: a base that advanced after certification is never reverted (#240)."""
+    root = job_repository
+    origin = tmp_path / "origin.git"
+    git(root, "branch", "-M", "main")
+    git(root, "clone", "--bare", "--quiet", str(root), str(origin))
+    git(root, "remote", "add", "origin", str(origin))
+    base = git(root, "write-tree").decode().strip()
+    (root / "packages/example/sources.json").write_text("new\n")
+    git(root, "add", ".")
+    tree = git(root, "write-tree").decode().strip()
+    _write_certified_identity(tmp_path, base_tree=base, tree=tree)
+    if base_moved:
+        other = tmp_path / "other"
+        git(tmp_path, "clone", "--quiet", str(origin), str(other))
+        (other / "hand-authored.txt").write_text("landed after certification\n")
+        git(other, "add", ".")
+        git(other, *_TEST_GIT_IDENTITY, "commit", "--quiet", "-m", "hand-authored")
+        git(other, "push", "--quiet", "origin", "main")
+    moved_main = git(origin, "rev-parse", "main").decode()
+    real_run = jobs._run
+
+    def run(*args, capture=False, check=True):
+        if args[0] == "gh":
+            return subprocess.CompletedProcess(args, 0, stdout="")
+        if args[0] == "nix":  # the devshell's signed commit, unsigned here
+            command = args[args.index("--command") + 2 :]
+            args = ("git", *_TEST_GIT_IDENTITY, *(a for a in command if a != "-S"))
+        return real_run(*args, capture=capture, check=check)
+
+    monkeypatch.setattr(jobs, "_run", run)
+    if base_moved:
+        with pytest.raises(ValueError, match="certified baseline"):
+            jobs.main("publish")
+        assert git(origin, "for-each-ref", "--format=%(refname)").decode() == (
+            "refs/heads/main\n"
+        )
+    else:
+        assert jobs.main("publish") == 0
+        branch = "codex/update-123-2"
+        assert git(origin, "rev-parse", f"{branch}^{{tree}}").decode().strip() == tree
+        assert git(origin, "rev-parse", f"{branch}^").decode() == moved_main
+    assert git(origin, "rev-parse", "main").decode() == moved_main
+
+
+def _prepare_repair_publication_checkout(
+    root: Path, runner_temp: Path, *, changed: bool
+) -> tuple[Path, str, str, str]:
+    """Create an approved repair branch and a detached follow-up checkout."""
+    origin = runner_temp / "repair-origin.git"
+    repair_branch = "codex/update-repair-100-1"
+    git(root, "branch", "-M", "main")
+    git(root, "clone", "--bare", "--quiet", str(root), str(origin))
+    git(root, "remote", "add", "origin", str(origin))
+    original_main_tree = git(root, "rev-parse", "main^{tree}").decode().strip()
+    git(root, "switch", "-c", repair_branch)
+    (root / "approved-repair.txt").write_text("approved repair\n")
+    git(root, "add", ".")
+    git(root, *_TEST_GIT_IDENTITY, "commit", "--quiet", "-m", "approved repair")
+    repair_commit = git(root, "rev-parse", "HEAD").decode().strip()
+    repair_tree = git(root, "rev-parse", "HEAD^{tree}").decode().strip()
+    assert repair_tree != original_main_tree
+    git(root, "push", "--quiet", "--set-upstream", "origin", repair_branch)
+
+    # actions/checkout pins a detached repair_commit and has no local head branch.
+    git(root, "switch", "--detach", repair_commit)
+    git(root, "branch", "-D", repair_branch)
+    final_tree = repair_tree
+    if changed:
+        (root / "packages/example/sources.json").write_text("follow-up update\n")
+        git(root, "add", ".")
+        final_tree = git(root, "write-tree").decode().strip()
+        assert final_tree != repair_tree
+    _write_certified_identity(runner_temp, base_tree=repair_tree, tree=final_tree)
+    return origin, repair_branch, repair_commit, final_tree
+
+
+@pytest.mark.parametrize("mode", ["noop", "changed", "moved-main"])
+def test_repair_publication_uses_original_main_baseline_and_repair_head(
+    job_repository, tmp_path, monkeypatch, mode
+) -> None:
+    """Real Git: repair no-ops and updates publish without moving the main baseline."""
+    origin, repair_branch, repair_commit, final_tree = (
+        _prepare_repair_publication_checkout(
+            job_repository, tmp_path, changed=mode == "changed"
+        )
+    )
+    monkeypatch.setenv("GITHUB_REF_NAME", repair_branch)
+    monkeypatch.setenv("NIXCFG_REPAIR_COMMIT", repair_commit)
+
+    if mode == "moved-main":
+        other = tmp_path / "repair-other"
+        git(tmp_path, "clone", "--quiet", str(origin), str(other))
+        (other / "hand-authored.txt").write_text("landed after repair approval\n")
+        git(other, "add", ".")
+        git(other, *_TEST_GIT_IDENTITY, "commit", "--quiet", "-m", "hand-authored")
+        git(other, "push", "--quiet", "origin", "main")
+
+    expected_main = git(origin, "rev-parse", "main").decode().strip()
+    expected_main_tree = git(origin, "rev-parse", "main^{tree}").decode().strip()
+    gh_calls: list[tuple[str, ...]] = []
+    real_run = jobs._run
+
+    def run(*args, capture=False, check=True):
+        if args[0] == "gh":
+            gh_calls.append(args)
+            return subprocess.CompletedProcess(args, 0, stdout="")
+        if args[0] == "nix":  # the devshell's signed commit, unsigned here
+            command = args[args.index("--command") + 2 :]
+            args = ("git", *_TEST_GIT_IDENTITY, *(a for a in command if a != "-S"))
+        return real_run(*args, capture=capture, check=check)
+
+    monkeypatch.setattr(jobs, "_run", run)
+    if mode == "moved-main":
+        with pytest.raises(ValueError, match="certified baseline"):
+            jobs.main("publish")
+        assert git(origin, "rev-parse", repair_branch).decode().strip() == repair_commit
+        assert not gh_calls
+    else:
+        assert jobs.main("publish") == 0
+        published_commit = git(origin, "rev-parse", repair_branch).decode().strip()
+        assert git(
+            origin, "rev-parse", f"{repair_branch}^{{tree}}"
+        ).decode().strip() == (final_tree)
+        if mode == "noop":
+            assert published_commit == repair_commit
+        else:
+            assert published_commit != repair_commit
+            assert git(origin, "rev-parse", f"{repair_branch}^1").decode().strip() == (
+                repair_commit
+            )
+        create = next(args for args in gh_calls if args[:3] == ("gh", "pr", "create"))
+        assert create[create.index("--base") + 1] == "main"
+        assert create[create.index("--head") + 1] == repair_branch
+    assert git(origin, "rev-parse", "main").decode().strip() == expected_main
+    assert (
+        git(origin, "rev-parse", "main^{tree}").decode().strip() == expected_main_tree
+    )
 
 
 def test_bootstrap_falls_back_after_stalled_substitutes(
@@ -3110,7 +3632,8 @@ def test_bootstrap_falls_back_after_stalled_substitutes(
 
     def run(*args: str, **_kwargs: object):
         calls.append(args)
-        return subprocess.CompletedProcess(args, 0, stdout="")
+        stdout = "/nix/store/pinned-nixpkgs\n" if args[:2] == ("nix", "eval") else ""
+        return subprocess.CompletedProcess(args, 0, stdout=stdout)
 
     monkeypatch.setattr(jobs, "_run", run)
     assert jobs.main("bootstrap") == 0
@@ -3129,6 +3652,17 @@ def test_bootstrap_falls_back_after_stalled_substitutes(
     )
 
 
+def test_bootstrap_rejects_empty_nixpkgs(job_repository, monkeypatch) -> None:
+    """An empty evaluator result must not become a runtime input."""
+    monkeypatch.setattr(
+        jobs,
+        "_run",
+        lambda *args, **_kwargs: subprocess.CompletedProcess(args, 0, stdout=""),
+    )
+    with pytest.raises(ValueError, match="Pinned nixpkgs path is empty"):
+        jobs.bootstrap()
+
+
 def test_bootstrap_and_failure_evidence(job_repository, tmp_path, monkeypatch) -> None:
     calls = []
 
@@ -3137,6 +3671,10 @@ def test_bootstrap_and_failure_evidence(job_repository, tmp_path, monkeypatch) -
         stdout = ""
         if args[0] == "/runtime/bin/nixcfg":
             stdout = '{"include": []}'
+        elif args[:2] == ("nix", "eval"):
+            stdout = "/nix/store/pinned-nixpkgs\n"
+        elif args[:2] == ("git", "write-tree"):
+            stdout = "certified-tree\n"
         elif args[:2] == ("gh", "api"):
             if "--paginate" in args:
                 stdout = "10\n11\n"
@@ -3146,6 +3684,7 @@ def test_bootstrap_and_failure_evidence(job_repository, tmp_path, monkeypatch) -
         return subprocess.CompletedProcess(args, 0, stdout=stdout)
 
     monkeypatch.setattr(jobs, "_run", run)
+    (tmp_path / "repair.patch").write_bytes(b"repair proposal\n")
     for stage in ("bootstrap", "collect-evidence", "install-agent", "repair"):
         assert jobs.main(stage) == 0
     outputs = dict(
@@ -3153,6 +3692,7 @@ def test_bootstrap_and_failure_evidence(job_repository, tmp_path, monkeypatch) -
     )
     assert Path(outputs["runtime"]).parent == tmp_path
     assert Path(outputs["devshell"]).parent == tmp_path
+    assert outputs["nixpkgs"] == "/nix/store/pinned-nixpkgs"
     assert {p.name for p in (tmp_path / "repair-evidence").iterdir()} == {
         "job-10.log",
         "job-11.log",
@@ -3160,14 +3700,21 @@ def test_bootstrap_and_failure_evidence(job_repository, tmp_path, monkeypatch) -
     assert (tmp_path / "repair-evidence/job-10.log").read_text() == (
         "\x1b[31mupstream failure\x1b[0m\n"
     )
-    assert calls[-2] == (
+    assert calls[-3] == (
         "git",
         "apply",
         "--index",
         "--binary",
         str(tmp_path / "repair.patch"),
     )
-    assert calls[-1][-3:] == ("python", "lib/update/ci/jobs.py", "quality")
+    assert calls[-2][-3:] == ("python", "lib/update/ci/jobs.py", "quality")
+    assert calls[-1] == ("git", "write-tree")
+    receipt = json.loads((tmp_path / "repair-receipt.json").read_text())
+    assert receipt["tree"] == "certified-tree"
+    assert (
+        receipt["patchSha256"]
+        == hashlib.sha256((tmp_path / "repair.patch").read_bytes()).hexdigest()
+    )
 
 
 @pytest.mark.parametrize(
@@ -4320,22 +4867,24 @@ def test_restore_canary_plan_downloads_latest_warmup_artifact(
             if run_id == "1":
                 return subprocess.CompletedProcess(args, 1, stdout="", stderr="missing")
             dest.mkdir(parents=True, exist_ok=True)
-            (dest / "warmup-plan.json").write_text("{}", encoding="utf-8")
+            (dest / "warmup-plan.json").write_text(
+                json.dumps({"tree": "a" * 40}), encoding="utf-8"
+            )
             return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
         raise AssertionError(args)
 
     monkeypatch.setenv("GITHUB_REPOSITORY", "gkze/nixcfg")
-    monkeypatch.setenv("GITHUB_REF_NAME", "cursor/no-skip-darwin-shards-6614")
-    assert jobs.restore_canary_plan(dest=dest, run=run) == dest
+    monkeypatch.setenv("GITHUB_REF_NAME", "main")
+    assert jobs.restore_canary_plan(dest=dest, run=run, expected_tree="a" * 40) == dest
     assert (dest / "warmup-plan.json").is_file()
     assert calls[1][:4] == ("gh", "run", "download", "1")
     assert calls[2][:4] == ("gh", "run", "download", "2")
 
 
-def test_restore_canary_plan_falls_back_to_no_skip_parent(
+def test_restore_canary_plan_falls_back_to_default_branch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Feature-branch Zed kicks reuse the parent Update plan artifact."""
+    """Feature-branch Zed kicks reuse the default branch's Update plan artifact."""
     dest = tmp_path / "canary-plan"
     listed: list[str] = []
 
@@ -4353,16 +4902,18 @@ def test_restore_canary_plan_falls_back_to_no_skip_parent(
             )
         if args[:3] == ("gh", "run", "download"):
             dest.mkdir(parents=True, exist_ok=True)
-            (dest / "warmup-plan.json").write_text("{}", encoding="utf-8")
+            (dest / "warmup-plan.json").write_text(
+                json.dumps({"tree": "a" * 40}), encoding="utf-8"
+            )
             return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
         raise AssertionError(args)
 
     monkeypatch.setenv("GITHUB_REPOSITORY", "gkze/nixcfg")
     monkeypatch.setenv("GITHUB_REF_NAME", "cursor/zed-family-tree-sitter-fa49")
-    assert jobs.restore_canary_plan(dest=dest, run=run) == dest
+    assert jobs.restore_canary_plan(dest=dest, run=run, expected_tree="a" * 40) == dest
     assert listed == [
         "cursor/zed-family-tree-sitter-fa49",
-        "cursor/no-skip-darwin-shards-6614",
+        "main",
     ]
     assert (dest / "warmup-plan.json").is_file()
 
@@ -4372,25 +4923,113 @@ def test_restore_canary_plan_fails_closed_without_current_plan(
 ) -> None:
     monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
     monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
+    with pytest.raises(
+        ValueError, match="could not determine the checked-out Git tree"
+    ):
+        jobs.restore_canary_plan(dest=tmp_path / "empty-tree", expected_tree="")
     with pytest.raises(ValueError, match="GITHUB_REPOSITORY"):
-        jobs.restore_canary_plan(dest=tmp_path / "missing")
+        jobs.restore_canary_plan(dest=tmp_path / "missing", expected_tree="a" * 40)
     monkeypatch.setenv("GITHUB_REPOSITORY", "gkze/nixcfg")
-    monkeypatch.setenv("GITHUB_REF_NAME", "cursor/no-skip-darwin-shards-6614")
+    monkeypatch.setenv("GITHUB_REF_NAME", "main")
     monkeypatch.setenv("NIXCFG_CANARY_PLAN_DIR", str(tmp_path / "from-env"))
 
     def empty(*_args: str, **_kwargs: object) -> object:
         return subprocess.CompletedProcess(_args, 0, stdout="[]")
 
-    with pytest.raises(RuntimeError, match="No current warmup plan"):
-        jobs.restore_canary_plan(run=empty)
+    with pytest.raises(RuntimeError, match="No warmup plan artifact"):
+        jobs.restore_canary_plan(run=empty, expected_tree="a" * 40)
 
     def listed(*args: str, capture: bool = False, check: bool = True) -> object:
+        if args[:2] == ("git", "rev-parse"):
+            return subprocess.CompletedProcess(args, 0, stdout="a" * 40)
         if args[:3] == ("gh", "run", "list"):
             return json.dumps([{"databaseId": 9}])
         return subprocess.CompletedProcess(args, 1, stdout="", stderr="gone")
 
     monkeypatch.setattr(jobs, "_run", listed)
-    with pytest.raises(RuntimeError, match="No current warmup plan"):
+    with pytest.raises(RuntimeError, match="No warmup plan artifact"):
         jobs.main("restore-canary-plan")
     with pytest.raises(TypeError, match="JSON text"):
-        jobs.restore_canary_plan(dest=tmp_path / "bad", run=lambda *_a, **_k: 0)
+        jobs.restore_canary_plan(
+            dest=tmp_path / "bad", run=lambda *_a, **_k: 0, expected_tree="a" * 40
+        )
+
+
+def test_restore_canary_plan_skips_stale_tree_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A branch fallback cannot authorize outputs from a different Git tree."""
+    dest = tmp_path / "canary-plan"
+
+    def run(*args: str, **_kwargs: object) -> object:
+        if args[:3] == ("gh", "run", "list"):
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout=json.dumps([
+                    {"databaseId": 1, "status": "completed", "conclusion": "success"},
+                    {"databaseId": 2, "status": "completed", "conclusion": "success"},
+                ]),
+            )
+        if args[:3] == ("gh", "run", "download"):
+            tree = "b" * 40 if args[3] == "1" else "a" * 40
+            (dest / "warmup-plan.json").write_text(json.dumps({"tree": tree}))
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        raise AssertionError(args)
+
+    monkeypatch.setenv("GITHUB_REPOSITORY", "gkze/nixcfg")
+    monkeypatch.setenv("GITHUB_REF_NAME", "main")
+    assert jobs.restore_canary_plan(dest=dest, run=run, expected_tree="a" * 40) == dest
+    assert json.loads((dest / "warmup-plan.json").read_text())["tree"] == "a" * 40
+
+
+def test_restore_canary_plan_skips_malformed_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Malformed JSON is rejected before the next candidate is considered."""
+    dest = tmp_path / "canary-plan"
+    calls: list[str] = []
+
+    def run(*args: str, **_kwargs: object) -> object:
+        if args[:3] == ("gh", "run", "list"):
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout=json.dumps([
+                    {"databaseId": 1, "status": "completed", "conclusion": "success"},
+                    {"databaseId": 2, "status": "completed", "conclusion": "success"},
+                ]),
+            )
+        if args[:3] == ("gh", "run", "download"):
+            calls.append(args[3])
+            content = "{not json" if args[3] == "1" else json.dumps({"tree": "a" * 40})
+            (dest / "warmup-plan.json").write_text(content, encoding="utf-8")
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        raise AssertionError(args)
+
+    monkeypatch.setenv("GITHUB_REPOSITORY", "gkze/nixcfg")
+    monkeypatch.setenv("GITHUB_REF_NAME", "main")
+    assert jobs.restore_canary_plan(dest=dest, run=run, expected_tree="a" * 40) == dest
+    assert calls == ["1", "2"]
+
+
+def test_restore_canary_plan_fails_when_every_artifact_is_stale(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dest = tmp_path / "canary-plan"
+
+    def run(*args: str, **_kwargs: object) -> object:
+        if args[:3] == ("gh", "run", "list"):
+            return subprocess.CompletedProcess(
+                args, 0, stdout=json.dumps([{"databaseId": 1}])
+            )
+        if args[:3] == ("gh", "run", "download"):
+            (dest / "warmup-plan.json").write_text(json.dumps({"tree": "b" * 40}))
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        raise AssertionError(args)
+
+    monkeypatch.setenv("GITHUB_REPOSITORY", "gkze/nixcfg")
+    monkeypatch.setenv("GITHUB_REF_NAME", "main")
+    with pytest.raises(RuntimeError, match="matches checked-out tree"):
+        jobs.restore_canary_plan(dest=dest, run=run, expected_tree="a" * 40)
+    assert not (dest / "warmup-plan.json").exists()

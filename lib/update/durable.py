@@ -187,16 +187,16 @@ def source_task[T](
 
 def runtime_identity(root: Path) -> str:
     """Bind recovery to the complete updater/runtime source and SDK version."""
-    from lib.update.cli import (  # noqa: PLC0415 -- reuse the packaged runtime contract
-        _runtime_source_policy,
-        _runtime_source_relpaths,
+    from lib.update.runtime_source import (  # noqa: PLC0415 -- workspace lifecycle avoids import cycle
+        runtime_source_policy,
+        runtime_source_relpaths,
     )
 
     digest = hashlib.sha256(
         f"{sys.version}:{platform.system()}:{platform.machine()}:{version('dbos')}".encode()
     )
-    policy = _runtime_source_policy(root)
-    for relative in sorted(_runtime_source_relpaths(root, policy)):
+    policy = runtime_source_policy(root)
+    for relative in sorted(runtime_source_relpaths(root, policy)):
         path = root / relative
         digest.update(str(relative).encode() + b"\0")
         digest.update(hashlib.sha256(path.read_bytes()).digest())

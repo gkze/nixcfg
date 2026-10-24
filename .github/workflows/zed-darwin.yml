@@ -8,12 +8,11 @@ on:
         type: string
         default: ""
   # workflow_dispatch is unavailable to the Cursor GitHub App token
-  # (HTTP 403). Touching .github/zed-kick on this branch queues one
-  # Zed-only family build. Separate concurrency from Update so a kick
-  # here cannot cancel the no-skip run.
+  # (HTTP 403). Touching .github/zed-kick on a listed feature branch
+  # queues one Zed-only family build. Separate concurrency from Update so
+  # a kick here cannot cancel an Update run.
   push:
     branches:
-      - cursor/no-skip-darwin-shards-6614
       - "cursor/*-fa49"
     paths:
       - .github/zed-kick

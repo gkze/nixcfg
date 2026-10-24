@@ -1,7 +1,6 @@
 """Updater for the Rio source package."""
 
 from lib.update.derivation_validation import DerivationValidation
-from lib.update.nix import _build_fetch_from_github_expr
 from lib.update.updaters import (
     GitHubReleaseUpdater,
     SourceThenOverlayHashMixin,
@@ -25,12 +24,3 @@ class RioUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
             systems=("aarch64-darwin",),
         ),
     )
-
-    @staticmethod
-    def _src_expr(commit: str) -> str:
-        return _build_fetch_from_github_expr(
-            "raphamorim",
-            "rio",
-            rev=commit,
-            fetch_submodules=False,
-        )

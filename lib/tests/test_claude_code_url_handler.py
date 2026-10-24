@@ -11,6 +11,7 @@ from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.tests._assertions import expect_instance
+from lib.tests._mac_app_passthru import mac_app_passthru_args
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding
 from lib.tests._nix_source import nix_file_expr
 from lib.update.paths import REPO_ROOT
@@ -50,14 +51,7 @@ def test_package_wires_the_app_to_the_managed_claude_cli() -> None:
     )
     derivation = expect_instance(package.output, FunctionCall)
     attrs = expect_instance(derivation.argument, AttributeSet)
-    passthru = expect_instance(
-        expect_binding(attrs.values, "passthru").value,
-        AttributeSet,
-    )
-    mac_app = expect_instance(
-        expect_binding(passthru.values, "macApp").value,
-        AttributeSet,
-    )
+    mac_app = mac_app_passthru_args(expect_binding(attrs.values, "passthru").value)
     claude_executable = expect_instance(
         expect_binding(attrs.values, "claudeExecutable").value,
         FunctionCall,
@@ -87,11 +81,7 @@ def test_package_wires_the_app_to_the_managed_claude_cli() -> None:
     )
     assert_nix_ast_equal(
         mac_app,
-        """{
-          bundleName = "Claude Code URL Handler.app";
-          bundleRelPath = "Applications/Claude Code URL Handler.app";
-          installMode = "copy";
-        }""",
+        '{ bundleName = "Claude Code URL Handler.app"; }',
     )
 
 

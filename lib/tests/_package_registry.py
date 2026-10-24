@@ -83,6 +83,42 @@ def _grouped_override_metadata(
     return decoded
 
 
+def registry_overlay_exposure(registry_output: AttributeSet) -> dict[str, list[str]]:
+    """Decode the literal ``overlayExposure`` lists from packages/registry.nix."""
+    exposure = expect_instance(
+        expect_scope_binding(registry_output, "overlayExposure").value,
+        AttributeSet,
+    )
+    return {
+        expect_instance(binding, Binding).name: _string_list(
+            expect_instance(expect_instance(binding, Binding).value, NixList)
+        )
+        for binding in exposure.values
+    }
+
+
+def is_darwin_overlay_export(registry_output: AttributeSet, name: str) -> bool:
+    """Return whether ``overlays.default`` exposes *name* on aarch64-darwin.
+
+    This mirrors the rule ``overlayPackageNamesFor`` applies: macOS-only
+    packages, minus attributes another overlay layer owns, plus the explicit
+    extras. tests/nix/binary-darwin-apps-platforms evaluates the real rule.
+    """
+    exposure = registry_overlay_exposure(registry_output)
+    if name in exposure["extraPackages"]:
+        return True
+    if name in exposure["overlayOwnedPackages"]:
+        return False
+    constraint = (
+        registry_override_metadata(registry_output).get(name, {}).get("constraint")
+    )
+    if constraint == "darwin":
+        return True
+    return isinstance(constraint, list) and all(
+        system.endswith("-darwin") for system in constraint
+    )
+
+
 def registry_override_metadata(
     registry_output: AttributeSet,
 ) -> dict[str, dict[str, object]]:

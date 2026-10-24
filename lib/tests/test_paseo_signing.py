@@ -65,6 +65,20 @@ _EXPECTED_EXECUTABLE_MACHOS = (
     *_EXPECTED_ENTITLED_MACHOS,
     *_EXPECTED_UNENTITLED_EXECUTABLE_MACHOS,
 )
+_NATIVE_SYMLINK_TARGETS = {
+    "Contents/Frameworks/Electron Framework.framework/Electron Framework": (
+        "Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework"
+    ),
+    "Contents/Frameworks/Mantle.framework/Mantle": (
+        "Contents/Frameworks/Mantle.framework/Versions/A/Mantle"
+    ),
+    "Contents/Frameworks/ReactiveObjC.framework/ReactiveObjC": (
+        "Contents/Frameworks/ReactiveObjC.framework/Versions/A/ReactiveObjC"
+    ),
+    "Contents/Frameworks/Squirrel.framework/Squirrel": (
+        "Contents/Frameworks/Squirrel.framework/Versions/A/Squirrel"
+    ),
+}
 
 
 def _load_signature_validator() -> ModuleType:
@@ -111,6 +125,65 @@ def _materialize_reviewed_bundle(
     for index in range(nonexecutable_count):
         candidate = native_root / f"native-{index:03d}"
         candidate.write_bytes(b"fixture Mach-O\n")
+    return app, executable_paths, entitled_paths
+
+
+def _reviewed_physical_native_paths(manifest: Path) -> set[str]:
+    rows = [
+        row.split("\t", maxsplit=1)
+        for row in manifest.read_text(encoding="utf-8").splitlines()
+    ]
+    assert all(count == "1" for count, _path in rows)
+    physical_paths = {path for _count, path in rows if path.startswith("Contents/")}
+    archived_paths = {
+        path.removeprefix("app.asar/")
+        for _count, path in rows
+        if path.startswith("app.asar/")
+    }
+    unpacked_prefix = "Contents/Resources/app.asar.unpacked/"
+    unpacked_paths = {
+        path.removeprefix(unpacked_prefix)
+        for path in physical_paths
+        if path.startswith(unpacked_prefix)
+    }
+    assert len(rows) == len(physical_paths) + len(archived_paths)
+    assert archived_paths == unpacked_paths
+    assert set(_EXPECTED_EXECUTABLE_MACHOS) <= physical_paths
+    assert _NATIVE_SYMLINK_TARGETS.keys() <= physical_paths
+    assert set(_NATIVE_SYMLINK_TARGETS.values()) <= physical_paths
+    return physical_paths
+
+
+def _reviewed_nonexecutable_count(manifest: Path) -> int:
+    physical_paths = _reviewed_physical_native_paths(manifest)
+    return (
+        len(physical_paths)
+        - len(_NATIVE_SYMLINK_TARGETS)
+        - len(_EXPECTED_EXECUTABLE_MACHOS)
+    )
+
+
+def _materialize_reviewed_manifest(
+    tmp_path: Path, manifest: Path
+) -> tuple[Path, set[str], set[str]]:
+    app, executable_paths, entitled_paths = _materialize_reviewed_bundle(tmp_path, 0)
+    physical_paths = _reviewed_physical_native_paths(manifest)
+    aliases = set(_NATIVE_SYMLINK_TARGETS)
+    for relative_path in sorted(
+        physical_paths - aliases - set(_EXPECTED_EXECUTABLE_MACHOS)
+    ):
+        candidate = app / relative_path
+        candidate.parent.mkdir(parents=True, exist_ok=True)
+        candidate.write_bytes(b"fixture Mach-O\n")
+    for alias, target in _NATIVE_SYMLINK_TARGETS.items():
+        (app / alias).symlink_to(app / target)
+
+    regular_paths = {
+        candidate.relative_to(app).as_posix()
+        for candidate in app.rglob("*")
+        if candidate.is_file() and not candidate.is_symlink()
+    }
+    assert regular_paths == physical_paths - aliases
     return app, executable_paths, entitled_paths
 
 
@@ -275,18 +348,16 @@ def test_paseo_signature_policy_rejects_drifted_evidence(
         )
 
 
-@pytest.mark.parametrize(
-    ("manifest", "nonexecutable_count"),
-    [(_ORIGINAL_MANIFEST, 95), (_LATEST_MANIFEST, 96)],
-)
+@pytest.mark.parametrize("manifest", [_ORIGINAL_MANIFEST, _LATEST_MANIFEST])
 def test_paseo_signature_validator_accepts_only_the_reviewed_bundle_inventory(
-    tmp_path: Path, manifest: Path, nonexecutable_count: int
+    tmp_path: Path, manifest: Path
 ) -> None:
     """The realized bundle must cross every audited count and nested-signature gate."""
     module = _load_signature_validator()
-    app, executable_paths, entitled_paths = _materialize_reviewed_bundle(
-        tmp_path, nonexecutable_count
+    app, executable_paths, entitled_paths = _materialize_reviewed_manifest(
+        tmp_path, manifest
     )
+    nonexecutable_count = _reviewed_nonexecutable_count(manifest)
     runner, calls = _successful_codesign_runner(
         executable_paths=executable_paths,
         entitled_paths=entitled_paths,
@@ -296,6 +367,7 @@ def test_paseo_signature_validator_accepts_only_the_reviewed_bundle_inventory(
 
     file_calls = [call for call in calls if call[0] == "/usr/bin/file"]
     codesign_calls = [call for call in calls if call[0] == "/usr/bin/codesign"]
+    assert module.expected_nonexecutable_count(manifest) == nonexecutable_count
     assert len(file_calls) == 9 + nonexecutable_count
     macho_paths = {call[-1] for call in file_calls}
     assert macho_paths & entitled_paths == {
@@ -361,8 +433,10 @@ def test_paseo_signature_profiles_cover_all_reviewed_manifests() -> None:
     """Every checked-in manifest must have one exact signature inventory profile."""
     module = _load_signature_validator()
     expected = {
-        sha256(_ORIGINAL_MANIFEST.read_bytes()).hexdigest(): 95,
-        sha256(_LATEST_MANIFEST.read_bytes()).hexdigest(): 96,
+        sha256(manifest.read_bytes()).hexdigest(): _reviewed_nonexecutable_count(
+            manifest
+        )
+        for manifest in (_ORIGINAL_MANIFEST, _LATEST_MANIFEST)
     }
     assert expected == module.EXPECTED_NONEXECUTABLE_COUNTS
 

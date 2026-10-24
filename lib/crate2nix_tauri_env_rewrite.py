@@ -46,10 +46,10 @@ def _rewrite_nested_json_file(destination: Path, metadata_dir: Path, key: str) -
     rewritten: list[str] = []
     nested_dir = metadata_dir / f"{key}-files"
     nested_dir.mkdir(parents=True, exist_ok=True)
-    for item in payload:
+    for index, item in enumerate(payload):
         nested_source = Path(item)
         if nested_source.is_absolute() and nested_source.exists():
-            nested_dest = nested_dir / nested_source.name
+            nested_dest = nested_dir / f"{index}-{nested_source.name}"
             _copy_path(nested_source, nested_dest)
             rewritten.append(str(nested_dest))
         else:
@@ -65,7 +65,7 @@ def _materialize_metadata_path(source_path: Path, metadata_dir: Path, key: str) 
     return destination
 
 
-def _rewrite_line(line: str, metadata_dir: Path) -> str:
+def _rewrite_line(line: str, metadata_dir: Path, source: str) -> str:
     match = _EXPORT_RE.match(line)
     if match is None:
         return line
@@ -76,7 +76,7 @@ def _rewrite_line(line: str, metadata_dir: Path) -> str:
     value = raw_value[1:-1] if quoted else raw_value
     source_path = Path(value)
     normalized_name = name.replace(":", "_")
-    normalized_key = normalized_name.lower()
+    normalized_key = f"{source}-{normalized_name.lower()}"
 
     if (
         source_path.is_absolute()
@@ -91,12 +91,16 @@ def _rewrite_line(line: str, metadata_dir: Path) -> str:
     return f"{prefix}{normalized_name}{rendered_suffix}"
 
 
-def rewrite_env_file(env_path: Path, metadata_dir: Path) -> None:
-    """Rewrite one env export file in place."""
+def rewrite_env_file(
+    env_path: Path, metadata_dir: Path, *, source: str | None = None
+) -> None:
+    """Rewrite one env export file in place with source-scoped metadata names."""
     if not env_path.exists():
         return
+    source_identity = source or env_path.stem
     lines = [
-        _rewrite_line(line, metadata_dir) for line in env_path.read_text().splitlines()
+        _rewrite_line(line, metadata_dir, source_identity)
+        for line in env_path.read_text().splitlines()
     ]
     env_path.write_text("\n".join(lines) + "\n")
 
@@ -105,8 +109,11 @@ def main() -> int:
     """Rewrite the crate2nix Tauri env files named in the process environment."""
     metadata_dir = _env_path("TAURI_ENV_METADATA_DIR")
     metadata_dir.mkdir(parents=True, exist_ok=True)
-    for env_path in (_env_path("TAURI_ENV_OUT"), _env_path("TAURI_ENV_LIB")):
-        rewrite_env_file(env_path, metadata_dir)
+    for source, env_path in (
+        ("out", _env_path("TAURI_ENV_OUT")),
+        ("lib", _env_path("TAURI_ENV_LIB")),
+    ):
+        rewrite_env_file(env_path, metadata_dir, source=source)
     return 0
 
 

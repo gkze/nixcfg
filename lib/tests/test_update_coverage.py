@@ -363,6 +363,31 @@ def test_cachix_and_eval_helpers_fail_closed(tmp_path: Path) -> None:
     assert read_json(payload) == []
 
 
+def test_eval_check_out_path_disables_import_from_derivation(tmp_path: Path) -> None:
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert args == [
+            "nix",
+            "eval",
+            "--raw",
+            "--no-write-lock-file",
+            "--option",
+            "allow-import-from-derivation",
+            "false",
+            f"path:{tmp_path}#checks.aarch64-darwin.root-closure-darwin-argus.outPath",
+        ]
+        return subprocess.CompletedProcess(args, 0, "/nix/store/argus\n", "")
+
+    assert (
+        eval_check_out_path(
+            tmp_path,
+            "aarch64-darwin",
+            "root-closure-darwin-argus",
+            run=run,
+        )
+        == "/nix/store/argus"
+    )
+
+
 def test_paths_on_store_retries_then_treats_timeout_as_miss() -> None:
     """A hung 128-wide path-info is not a presence claim and is not sequential."""
     hit = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hit"

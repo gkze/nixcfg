@@ -33,6 +33,9 @@ class _NetrcNoGithub:
 
 
 class _AsyncResponse:
+    url = "https://example.com/"
+    history: tuple[object, ...] = ()
+
     def __init__(
         self,
         *,
@@ -67,7 +70,9 @@ class _FakeAsyncClient:
         headers: dict[str, str],
         cookies: object,
         timeout: float,
+        follow_redirects: bool = False,
     ) -> _AsyncResponse:
+        _ = follow_redirects
         self.calls.append((method, url, headers, cookies, timeout))
         response = self._responses.pop(0)
         if isinstance(response, Exception):
@@ -382,6 +387,23 @@ def test_render_helpers_cover_additional_branches(
     assert (
         _render.apply_python_transforms("code", target=target) == "code|constr|imports"
     )
+
+
+def test_codegen_utils_import_optional_reports_missing_extra(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing codegen dependency becomes an actionable RuntimeError."""
+    assert codegen_utils.import_optional("json", feature="x") is json
+
+    def _missing(name: str) -> object:
+        raise ModuleNotFoundError(name)
+
+    monkeypatch.setattr(codegen_utils.importlib, "import_module", _missing)
+    with pytest.raises(RuntimeError, match="schema code generation requires") as exc:
+        codegen_utils.import_optional("referencing", feature="schema code generation")
+    assert "'referencing'" in str(exc.value)
+    assert "`codegen` extra" in str(exc.value)
+    assert isinstance(exc.value.__cause__, ModuleNotFoundError)
 
 
 def test_codegen_utils_defensive_transform_branches(
@@ -822,6 +844,7 @@ def test_mac_apps_helper_additional_paths(  # noqa: PLR0915
             "--copy-unsafe-links",
             "--archive",
             "--delete",
+            "--filter=P /Icon\r",
             "--chmod=+w",
             "--no-group",
             "--no-owner",

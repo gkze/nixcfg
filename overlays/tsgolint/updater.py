@@ -2,7 +2,6 @@
 
 from lib.nix.models.sources import HashCollection
 from lib.update.derivation_validation import DerivationValidation
-from lib.update.nix import _build_fetch_from_github_expr
 from lib.update.updaters import (
     SourceThenOverlayHashMixin,
     UpdateContext,
@@ -26,15 +25,6 @@ class TsgolintUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
             mode="build",
         ),
     )
-
-    @staticmethod
-    def _src_expr(commit: str) -> str:
-        return _build_fetch_from_github_expr(
-            "oxc-project",
-            "tsgolint",
-            rev=commit,
-            fetch_submodules=False,
-        )
 
     async def _is_latest(
         self,

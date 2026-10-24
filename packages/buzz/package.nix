@@ -7,6 +7,7 @@
   inputs,
   ld64,
   lib,
+  mkMacAppPassthru,
   nativeLock ? builtins.fromJSON (builtins.readFile ./native-lock.json),
   nodejs_24,
   onnxruntime,
@@ -24,12 +25,11 @@
 assert stdenv.hostPlatform.system == "aarch64-darwin";
 let
   pname = "buzz";
-  expectedMacApp = {
-    bundleId = "xyz.block.buzz.app";
-    bundleName = "Buzz.app";
-    bundleRelPath = "Applications/Buzz.app";
-    installMode = "copy";
-  };
+  expectedMacApp =
+    (mkMacAppPassthru {
+      bundleName = "Buzz.app";
+      macApp.bundleId = "xyz.block.buzz.app";
+    }).macApp;
 
   buzzLock = nativeLock.buzz or { };
   pnpmLock = nativeLock.pnpm or { };
@@ -89,8 +89,7 @@ let
   inherit (source) version;
 
   hashEntryFor =
-    hashType: url:
-    lib.findFirst (entry: entry.hashType == hashType && (entry.url or null) == url) null source.hashes;
+    hashType: url: outputs.lib.selectSourceHashEntry source.hashes hashType { inherit url; };
   srcHashEntry = hashEntryFor "srcHash" source.urls.buzz;
   onnxRuntimeSrcHashEntry = hashEntryFor "srcHash" source.urls.onnxruntime;
   sherpaOnnxSrcHashEntry =
@@ -518,6 +517,7 @@ let
         inherit
           cctools
           lib
+          mkMacAppPassthru
           nativeLock
           python3
           stdenv

@@ -802,6 +802,7 @@ def test_rust_warmup_scope_realizes_slot_and_rejects_bad_args(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(cargo,),
@@ -915,6 +916,7 @@ def test_rust_warmup_realizes_gitbutler_family_even_when_path_info_says_cached(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(but, gpui),
@@ -990,6 +992,7 @@ def test_rust_warmup_realizes_crane_deps_before_svh_family(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(serde, settings),
@@ -1055,6 +1058,7 @@ def test_rust_warmup_skips_cached_stripe_without_gitbutler(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(serde,),
@@ -1131,6 +1135,7 @@ def test_rust_warmup_empty_plan_canaries_gitbutler_package_graph(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(),
@@ -1192,6 +1197,7 @@ def test_rust_warmup_skips_gitbutler_compile_when_substitute_hits(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(but,),
@@ -1256,6 +1262,7 @@ def test_cascade_warmup_realizes_uncached_stripe_per_derivation(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(),
@@ -1298,7 +1305,7 @@ def test_cascade_warmup_realizes_uncached_stripe_per_derivation(
         pipeline.validate_candidate(candidate, scope="cascade-warmup")
     with pytest.raises(ValueError, match="cascade-warmup requires a warmup plan"):
         pipeline._realize_requested_warmup(
-            "cascade-warmup", None, None, flake_root=tmp_path
+            "cascade-warmup", None, None, flake_root=tmp_path, expected_tree="a" * 40
         )
     candidate_path = tmp_path / "candidate.json"
     candidate_path.write_text(candidate.model_dump_json())
@@ -1371,6 +1378,7 @@ def test_cascade_canary_realizes_buzz_onnxruntime_once(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(),
@@ -1413,7 +1421,7 @@ def test_cascade_canary_realizes_buzz_onnxruntime_once(
         pipeline.validate_candidate(candidate, scope="cascade-canary")
     with pytest.raises(ValueError, match="cascade-canary requires a warmup plan"):
         pipeline._realize_requested_warmup(
-            "cascade-canary", None, None, flake_root=tmp_path
+            "cascade-canary", None, None, flake_root=tmp_path, expected_tree="a" * 40
         )
     candidate_path = tmp_path / "candidate.json"
     candidate_path.write_text(candidate.model_dump_json())
@@ -1561,6 +1569,7 @@ def test_cascade_warmup_skips_umbrella_over_shard_ceiling(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(),
@@ -1628,6 +1637,7 @@ def test_rust_warmup_defers_leaf_packages_from_others(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(cargo, goose, vendor),
@@ -1713,6 +1723,7 @@ def test_rust_warmup_retries_rusty_v8_after_others_hash_mismatch(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(goose,),
@@ -1790,6 +1801,7 @@ def test_rust_warmup_realizes_rusty_v8_family_on_exactly_one_slot(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=tuple(sorted((*family, *filler))),
@@ -1882,6 +1894,7 @@ def test_rust_warmup_keeps_rusty_v8_failure_when_fod_retry_misses(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(goose,),
@@ -1959,6 +1972,7 @@ def test_rust_warmup_settings_family_force_locals_content_cluster(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(other, content, settings),
@@ -2044,6 +2058,7 @@ def test_rust_warmup_peels_workspace_svh_before_others(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(serde, flags, settings),
@@ -2132,6 +2147,7 @@ def test_rust_warmup_settings_json_force_locals_tree_sitter(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(settings_json,),
@@ -2210,6 +2226,7 @@ def test_rust_warmup_settings_family_builds_patchutils_helper(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(content, settings),
@@ -2486,6 +2503,7 @@ def test_rust_warmup_retries_unknown_1drv_helper_after_max_jobs_zero(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(content, settings),
@@ -2577,6 +2595,7 @@ def test_rust_warmup_refuses_force_local_after_rustc_substitute_miss(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(settings,),
@@ -2659,6 +2678,7 @@ def test_compiler_rust_cache_miss_still_force_locals_family(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(settings,),
@@ -2743,6 +2763,7 @@ def test_zed_warmup_force_locals_whole_family_when_cachix_is_mixed(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(content, settings, rust_zed),
@@ -2829,6 +2850,7 @@ def test_zed_warmup_substitutes_whole_family_from_one_generation(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(settings, rust_zed),
@@ -2907,6 +2929,7 @@ def test_rust_warmup_canary_crates_realize_settings_off_slot_stripe(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(*filler, content, settings),
@@ -3001,6 +3024,7 @@ def test_rust_warmup_agent_ui_slot_realizes_agent_ui_last(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(language_models, other, agent_ui),
@@ -3049,6 +3073,7 @@ def test_rust_warmup_agent_ui_slot_realizes_agent_ui_last(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(other, agent_ui),
@@ -3092,6 +3117,7 @@ def test_rust_warmup_agent_ui_slot_realizes_agent_ui_last(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(language_models, agent_ui),
@@ -3126,6 +3152,7 @@ def test_rust_warmup_agent_ui_slot_realizes_agent_ui_last(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(other, agent_ui),
@@ -3210,6 +3237,7 @@ def test_rust_warmup_zed_slot_force_locals_extension_host_family(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(extension_host, activity, rust_zed),
@@ -3249,6 +3277,7 @@ def test_rust_warmup_zed_slot_force_locals_extension_host_family(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(extension_host, rust_zed),
@@ -3292,6 +3321,7 @@ def test_rust_warmup_zed_slot_force_locals_extension_host_family(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(rust_zed,),
@@ -3372,6 +3402,7 @@ def test_rust_warmup_zed_slot_force_locals_cached_collab_ui_from_layers(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(extension_host, collab_ui, rust_zed),
@@ -3457,6 +3488,7 @@ def test_rust_warmup_zed_slot_force_locals_collab_ui_from_input_drvs(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(rust_zed,),
@@ -3549,6 +3581,7 @@ def test_rust_warmup_zed_nightly_waits_for_family(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(extension_host, rust_zed, nightly),
@@ -3590,6 +3623,7 @@ def test_rust_warmup_zed_nightly_waits_for_family(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(nightly,),
@@ -3658,6 +3692,7 @@ def test_rust_warmup_zed_nightly_waits_for_family(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(extension_host, rust_zed),
@@ -3747,6 +3782,7 @@ def test_rust_warmup_downloads_source_fods_before_force_local(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=candidate.tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(extension_host, rust_zed),
@@ -4170,6 +4206,7 @@ def test_plan_shards_writes_generated_matrix(
 
         return WarmupPlan(
             schemaVersion=1,
+            tree=_kwargs["tree"],
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=("/nix/store/shared",),
@@ -4229,6 +4266,7 @@ def test_plan_shards_writes_generated_matrix(
     assert cache["rootPaths"]["darwin-argus"] == "/nix/store/argus"
     assert cache["manifest"]["roots"]
     warmup = json.loads(output.with_name("warmup-plan.json").read_text())
+    assert warmup["tree"] == candidate.tree
     assert warmup["warmupOutputs"] == ["/nix/store/shared"]
     assert "rustLayers" in warmup
     assert "darwin_closure_shards=" in github.read_text()
@@ -4829,14 +4867,16 @@ def test_realize_requested_warmup_fail_closed_without_plan(
 ) -> None:
     with pytest.raises(ValueError, match="rust-warmup requires a warmup plan"):
         pipeline._realize_requested_warmup(
-            "rust-warmup", None, None, flake_root=tmp_path
+            "rust-warmup", None, None, flake_root=tmp_path, expected_tree="a" * 40
         )
     with pytest.raises(ValueError, match="zed-warmup requires a warmup plan"):
         pipeline._realize_requested_warmup(
-            "zed-warmup", None, None, flake_root=tmp_path
+            "zed-warmup", None, None, flake_root=tmp_path, expected_tree="a" * 40
         )
     assert (
-        pipeline._realize_requested_warmup("packages", None, None, flake_root=tmp_path)
+        pipeline._realize_requested_warmup(
+            "packages", None, None, flake_root=tmp_path, expected_tree="a" * 40
+        )
         == ()
     )
 
@@ -4858,11 +4898,13 @@ def test_realize_zed_warmup_substitutes_or_compiles_the_family(
         "/nix/store/rlcwld41aaaaaaaaaaaaaaaaaaaaaaaaa-"
         "zed-editor-nightly-unstable-f16f965"
     )
+    tree = "a" * 40
     warmup_plan = tmp_path / "warmup-plan.json"
     write_warmup_plan(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(settings, rust_zed, nightly),
@@ -4901,7 +4943,12 @@ def test_realize_zed_warmup_substitutes_or_compiles_the_family(
     monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_a, **_k: ())
     monkeypatch.setattr(pipeline, "rustc_generation_ids", lambda *_a, **_k: ())
     monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: None)
-    assert pipeline._realize_zed_warmup(warmup_plan, flake_root=tmp_path) == ()
+    assert (
+        pipeline._realize_zed_warmup(
+            warmup_plan, flake_root=tmp_path, expected_tree=tree
+        )
+        == ()
+    )
     assert seen
     assert seen[0][1] is True
     seen.clear()
@@ -4920,7 +4967,12 @@ def test_realize_zed_warmup_substitutes_or_compiles_the_family(
         "_realize_logged_warmup",
         lambda drvs, **_k: logged.append(("logged", drvs)) or (),
     )
-    assert pipeline._realize_zed_warmup(warmup_plan, flake_root=tmp_path) == ()
+    assert (
+        pipeline._realize_zed_warmup(
+            warmup_plan, flake_root=tmp_path, expected_tree=tree
+        )
+        == ()
+    )
     assert ("family", (f"{settings}.drv",)) in logged
     assert ("logged", (f"{rust_zed}.drv",)) in logged
     assert ("logged", (f"{nightly}.drv",)) in logged
@@ -4938,15 +4990,16 @@ def test_realize_zed_warmup_substitutes_or_compiles_the_family(
 
     logged.clear()
     monkeypatch.setattr(pipeline, "_realize_svh_family", family_fail)
-    assert pipeline._realize_zed_warmup(warmup_plan, flake_root=tmp_path) == (
-        helper_fail,
-    )
+    assert pipeline._realize_zed_warmup(
+        warmup_plan, flake_root=tmp_path, expected_tree=tree
+    ) == (helper_fail,)
     assert logged == [("family-fail", (f"{settings}.drv",))]
     nightly_only = tmp_path / "nightly-plan.json"
     write_warmup_plan(
         nightly_only,
         WarmupPlan(
             schemaVersion=1,
+            tree=tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(nightly,),
@@ -4976,8 +5029,57 @@ def test_realize_zed_warmup_substitutes_or_compiles_the_family(
     )
     monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: True)
     seen.clear()
-    assert pipeline._realize_zed_warmup(nightly_only, flake_root=tmp_path) == ()
+    assert (
+        pipeline._realize_zed_warmup(
+            nightly_only, flake_root=tmp_path, expected_tree=tree
+        )
+        == ()
+    )
     assert parents == [(f"{nightly}.drv",)]
+
+
+def test_realize_zed_warmup_rejects_stale_source_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A restored Zed plan cannot realize outputs from another Git tree."""
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupError,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    path = tmp_path / "stale-plan.json"
+    write_warmup_plan(
+        path,
+        WarmupPlan(
+            schemaVersion=1,
+            tree="b" * 40,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(),
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=0, missing=0, warmup=0, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="stale fixture",
+        ),
+    )
+    with pytest.raises(WarmupError, match="source tree mismatch"):
+        pipeline._realize_zed_warmup(path, flake_root=tmp_path, expected_tree="a" * 40)
+    monkeypatch.setattr(pipeline, "git", lambda *_args: b"a" * 40)
+    with pytest.raises(WarmupError, match="source tree mismatch"):
+        pipeline._realize_zed_warmup(path, flake_root=tmp_path)
 
 
 def test_realize_cascade_paths_noops_when_filter_drops_every_drv(
@@ -4996,6 +5098,7 @@ def test_realize_cascade_paths_noops_when_filter_drops_every_drv(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree="a" * 40,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=(),
@@ -5025,7 +5128,11 @@ def test_realize_cascade_paths_noops_when_filter_drops_every_drv(
     monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: None)
     assert (
         pipeline._realize_cascade_paths(
-            warmup_plan, (path,), flake_root=tmp_path, label="cascade-warmup"
+            warmup_plan,
+            (path,),
+            flake_root=tmp_path,
+            label="cascade-warmup",
+            expected_tree="a" * 40,
         )
         == ()
     )
@@ -5964,6 +6071,7 @@ def test_validate_command_canary_uses_checkout_without_previous(
         warmup_plan,
         WarmupPlan(
             schemaVersion=1,
+            tree=pipeline.checkout_candidate(prepared_run[0]).tree,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=("/nix/store/shared",),

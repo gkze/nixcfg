@@ -28,10 +28,10 @@ from lib.update.events import (
     UpdateEventKind,
     ignore_event,
 )
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import VersionInfo, vendor_feeds
 from lib.update.updaters import strategies as updater_strategies
 from lib.update.updaters.core import UpdateContext
-from lib.update.updaters.metadata import GranolaFeedMetadata
+from lib.update.updaters.metadata import DownloadUrlMetadata
 from lib.update.updaters.vendor_feeds import SparkleAppcastItem
 
 
@@ -99,13 +99,15 @@ def test_granola_fetch_latest_and_download_url(monkeypatch: pytest.MonkeyPatch) 
         assert kwargs["config"] == updater.config
         return b"version: 2.3.4\npath: Granola-mac.zip\nsha512: deadbeef\n"
 
-    monkeypatch.setattr(module, "fetch_url", _fetch_url)
+    monkeypatch.setattr(vendor_feeds, "fetch_url", _fetch_url)
 
     latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     assert latest == VersionInfo(
         version="2.3.4",
-        metadata=GranolaFeedMetadata(path="Granola-mac.zip", sha512="deadbeef"),
+        metadata=DownloadUrlMetadata(
+            url="https://dr2v7l5emb758.cloudfront.net/2.3.4/Granola-mac.zip"
+        ),
     )
     assert (
         updater.get_download_url("aarch64-darwin", latest)
@@ -122,7 +124,7 @@ def test_granola_rejects_non_mapping_feed_payload(
     )
     updater = module.GranolaUpdater()
     monkeypatch.setattr(
-        module,
+        vendor_feeds,
         "fetch_url",
         lambda *_a, **_k: asyncio.sleep(0, result=b"- not\n- an\n- object\n"),
     )
@@ -193,91 +195,12 @@ def test_wispr_flow_platform_urls_and_required_tools(
     )
 
 
-def test_chatgpt_fetch_latest_and_download_urls(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Pick the newest common ChatGPT appcast release and preserve ZIP URLs."""
-    module = _load_updater("packages/chatgpt/updater.py", "chatgpt_updater_test")
-    updater = module.ChatGPTUpdater()
-    newer_arm_url = "https://example.invalid/ChatGPT-darwin-arm64-26.429.61741.zip"
-    deb_version = "26.429.20946"
-    arm_deb_name = f"pool/main/c/chatgpt/chatgpt_{deb_version}_arm64.deb"
-    x64_deb_name = f"pool/main/c/chatgpt/chatgpt_{deb_version}_amd64.deb"
-    urls = {
-        "aarch64-darwin": "https://example.invalid/ChatGPT-darwin-arm64-26.429.20946.zip",
-        "x86_64-darwin": "https://example.invalid/ChatGPT-darwin-x64-26.429.20946.zip",
-        "aarch64-linux": f"{updater.DEB_BASE_URL}/{arm_deb_name}",
-        "x86_64-linux": f"{updater.DEB_BASE_URL}/{x64_deb_name}",
-    }
-
-    def _item(version: str, build: str, download_url: str) -> str:
-        return f"""
-            <item>
-              <sparkle:version>{build}</sparkle:version>
-              <sparkle:shortVersionString>{version}</sparkle:shortVersionString>
-              <enclosure url="{download_url}" />
-            </item>
-        """
-
-    def _appcast(platform: str) -> bytes:
-        items = ""
-        if platform == "aarch64-darwin":
-            items += _item("26.429.61741", "2429", newer_arm_url)
-        items += _item("26.429.20946", "2312", urls[platform])
-        return f"""
-            <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
-              <channel>{items}</channel>
-            </rss>
-        """.encode()
-
-    def _deb_index(deb_arch: str) -> bytes:
-        return (
-            "Package: chatgpt\n"
-            f"Version: {deb_version}\n"
-            f"Filename: pool/main/c/chatgpt/chatgpt_{deb_version}_{deb_arch}.deb\n"
-            "\n"
-        ).encode()
-
-    async def _fetch_url(_session: object, url: str, **kwargs: object) -> bytes:
-        assert kwargs["request_timeout"] == updater.config.default_timeout
-        assert kwargs["config"] == updater.config
-        for platform, appcast_url in updater.APPCASTS.items():
-            if url == appcast_url:
-                assert kwargs["user_agent"] == "Sparkle/2.0"
-                return _appcast(platform)
-        if url == updater.DEB_INDEXES["aarch64-linux"]:
-            return _deb_index("arm64")
-        if url == updater.DEB_INDEXES["x86_64-linux"]:
-            return _deb_index("amd64")
-        raise AssertionError(url)
-
-    monkeypatch.setattr(module, "fetch_url", _fetch_url)
-
-    latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
-
-    assert latest.version == "26.429.20946-2312"
-    assert {
-        platform: updater.get_download_url(platform, latest)
-        for platform in updater.PLATFORMS
-    } == urls
-    assert updater.get_download_url(
-        "aarch64-darwin",
-        VersionInfo(version="26.429.20946-2312"),
-    ) == (
-        "https://persistent.oaistatic.com/codex-app-prod/"
-        "ChatGPT-darwin-arm64-26.429.20946.zip"
-    )
-
-
 @pytest.mark.parametrize(
     ("xml", "match"),
     [
-        ("<", "Invalid ChatGPT appcast XML"),
-        ("<rss><channel /></rss>", "No items found in ChatGPT appcast"),
-        (
-            "<rss><channel><item /></channel></rss>",
-            "No enclosure found in ChatGPT appcast",
-        ),
+        ("<", "Invalid Sparkle appcast XML"),
+        ("<rss><channel /></rss>", "No items found in Sparkle appcast"),
+        ("<rss><channel><item /></channel></rss>", "Missing version in ChatGPT"),
         (
             '<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
             "<channel><item>"
@@ -290,7 +213,7 @@ def test_chatgpt_fetch_latest_and_download_urls(
         (
             '<rss><channel><item><enclosure url="https://example.invalid" />'
             "</item></channel></rss>",
-            "No short version found in ChatGPT appcast",
+            "Missing version in ChatGPT appcast",
         ),
     ],
 )
@@ -303,7 +226,7 @@ def test_chatgpt_rejects_invalid_appcast_shapes(
     module = _load_updater("packages/chatgpt/updater.py", "chatgpt_updater_test_errors")
     updater = module.ChatGPTUpdater()
     monkeypatch.setattr(
-        module,
+        vendor_feeds,
         "fetch_url",
         lambda *_a, **_k: asyncio.sleep(0, result=xml.encode()),
     )

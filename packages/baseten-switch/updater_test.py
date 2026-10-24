@@ -9,16 +9,16 @@ from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.set import AttributeSet
 
-from lib.nix.models.sources import SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
-    darwin_guarded_exports,
+    binding_map,
     expect_binding,
     expect_scope_binding,
     parse_nix_expr,
 )
 from lib.tests._nix_source import nix_file_expr
+from lib.tests._package_registry import is_darwin_overlay_export
 from lib.tests._shell_ast import command_texts, indented_string_body, parse_shell
 from lib.tests._updater_helpers import load_repo_module
 from lib.update.nix import _build_fetch_from_github_call
@@ -37,19 +37,6 @@ def _load_module() -> ModuleType:
 
 def _run(coro):
     return asyncio.run(coro)
-
-
-def test_current_release_runs_checks_with_the_historical_skip_pin() -> None:
-    """Retaining a historical exception must not disable checks for the current app."""
-    module = _load_module()
-    updater = module.BasetenSwitchUpdater()
-    assert updater.compatibility_pins == {"checkSkipVersion": "0.5.1"}
-    source = SourceEntry.model_validate_json(
-        (REPO_ROOT / "packages/baseten-switch/sources.json").read_text(encoding="utf-8")
-    )
-    assert source.pins == updater.compatibility_pins
-    assert source.pins is not None
-    assert source.version != source.pins["checkSkipVersion"]
 
 
 def test_bulk_updates_resume_after_current_darwin_suite_passes() -> None:
@@ -72,8 +59,8 @@ def test_source_expression_tracks_the_immutable_upstream_commit() -> None:
     )
 
 
-def test_package_disables_checkphase_for_0_5_1_sigtrap() -> None:
-    """0.5.1's testUnsupportedStatusFallsBackWithoutRepeatedProbe SIGTRAPs on macos-15."""
+def test_package_runs_checkphase_for_every_version() -> None:
+    """The 0.5.1 SIGTRAP skip expired; no version-pinned check skip remains."""
     package = expect_instance(
         parse_nix_expr(
             (REPO_ROOT / "packages/baseten-switch/default.nix").read_text(
@@ -86,25 +73,18 @@ def test_package_disables_checkphase_for_0_5_1_sigtrap() -> None:
         expect_scope_binding(package.output, "package").value,
         FunctionCall,
     )
-    assert_nix_ast_equal(
-        expect_binding(
-            expect_instance(derivation.argument, AttributeSet).values,
-            "doCheck",
-        ).value,
-        "version != selfSource.pins.checkSkipVersion",
+    assert "doCheck" not in binding_map(
+        expect_instance(derivation.argument, AttributeSet).values
     )
 
 
 def test_overlay_does_not_restate_the_hosted_checkphase_skip() -> None:
-    """The Darwin overlay must not hand-write the version-specific check skip."""
-    overlay = expect_instance(
-        nix_file_expr("overlays/binary-darwin-apps.nix"),
-        FunctionDefinition,
+    """The Darwin overlay exposes the package itself, with no hand-written skip."""
+    registry = expect_instance(
+        nix_file_expr("packages/registry.nix"), FunctionDefinition
     )
-    exports = darwin_guarded_exports(overlay)
-    assert_nix_ast_equal(
-        expect_binding(exports.values, "baseten-switch").value,
-        'callDarwinAppPackage "baseten-switch"',
+    assert is_darwin_overlay_export(
+        expect_instance(registry.output, AttributeSet), "baseten-switch"
     )
 
 

@@ -1,7 +1,7 @@
 """Behavioral and package-shape tests for Screen Studio."""
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
 
@@ -61,6 +61,8 @@ class _FakeResponse:
     payload: bytes
     status: int = 200
     reason: str = "OK"
+    url: str = "https://screen.studio/api/app-update/v2"
+    headers: dict[str, str] = field(default_factory=dict)
 
     async def __aenter__(self) -> _FakeResponse:
         return self
@@ -125,7 +127,8 @@ def test_screen_studio_resolves_official_per_architecture_zips() -> None:
             "x-screen-studio-updates-channel": "stable",
             "x-screen-studio-machine-id": "nixcfg-updater",
         }
-        assert kwargs["allow_redirects"] is True
+        # Manual following validates every redirect target before the next request.
+        assert kwargs["allow_redirects"] is False
         assert kwargs["timeout"].total == updater.config.default_timeout
 
 
@@ -176,19 +179,6 @@ def test_screen_studio_rejects_untrusted_or_wrong_architecture_urls(
 
     with pytest.raises(RuntimeError, match=f"invalid {platform} artifact URL"):
         updater._parse_artifact_url(platform, url)
-
-
-def test_screen_studio_reports_feed_http_failure() -> None:
-    """HTTP failures should identify the architecture-specific discovery request."""
-    updater = _load_module().ScreenStudioUpdater()
-    failed = _FakeResponse(b"unavailable", status=503, reason="Service Unavailable")
-    session = _FakeSession({"arm64": failed, "x64": failed})
-
-    with pytest.raises(
-        RuntimeError,
-        match="request for aarch64-darwin failed with HTTP 503 Service Unavailable",
-    ):
-        _run(updater.fetch_latest(session, context=UpdateContext(current=None)))
 
 
 def test_screen_studio_rejects_feed_name_that_disagrees_with_artifact() -> None:

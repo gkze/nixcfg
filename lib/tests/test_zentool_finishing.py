@@ -447,7 +447,7 @@ def test_cmd_apply_applies_state_only_without_running_asset_sync(
     monkeypatch.setattr(
         zentool, "DeepDiff", lambda *_args, **_kwargs: FakeDiff("state diff")
     )
-    monkeypatch.setattr(zentool, "backup_session", lambda _path: backup_path)
+    monkeypatch.setattr(zentool, "backup_file", lambda _path, **_kw: backup_path)
     monkeypatch.setattr(
         zentool, "write_session", lambda path, state: writes.append((path, state))
     )

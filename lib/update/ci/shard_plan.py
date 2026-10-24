@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict, Field
 
 from lib.update.derivation_validation import (
+    NO_IMPORT_FROM_DERIVATION_ARGS,
     RootClosureManifest,
     RootClosureManifestRoot,
 )
@@ -249,6 +250,7 @@ def eval_root_closure_manifest(
             "eval",
             "--json",
             "--no-write-lock-file",
+            *NO_IMPORT_FROM_DERIVATION_ARGS,
             f"path:{root}#lib.rootClosureManifest",
         ],
         check=False,

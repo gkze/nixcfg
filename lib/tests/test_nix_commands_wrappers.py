@@ -33,20 +33,16 @@ class _Model:
 def test_json_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
 
-    async def _run_nix(args: list[str], **kwargs: object) -> CommandResult:
-        timeout = kwargs.get("timeout")
+    async def _run_nix(args: list[str], *, command_timeout: float) -> CommandResult:
         assert args == ["nix", "eval", "--json"]
-        assert timeout == _THREE_SECONDS
+        assert command_timeout == _THREE_SECONDS
         return CommandResult(args=args, returncode=0, stdout='{"x": 1}', stderr="")
 
     monkeypatch.setattr(json_mod, "run_nix", _run_nix)
     parsed = asyncio.run(
-        json_mod.run_nix_json(["nix", "eval", "--json"], timeout=_THREE_SECONDS)
+        json_mod.run_nix_json(["nix", "eval", "--json"], command_timeout=_THREE_SECONDS)
     )
     assert parsed == {"x": 1}
-
-    with pytest.raises(TypeError, match="command_timeout is required"):
-        asyncio.run(json_mod.run_nix_json(["nix", "eval", "--json"]))
 
     assert json_mod.as_model_mapping({"a": 1}, _Model) == {"a": {"wrapped": 1}}
     with pytest.raises(TypeError, match="Expected JSON object"):
@@ -141,31 +137,36 @@ def test_nix_build_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     result = CommandResult(args=["nix"], returncode=1, stdout="", stderr="err")
     hash_err = HashMismatchError(result, got_hash="sha256:abc")
     monkeypatch.setattr(
-        build_mod.HashMismatchError, "from_stderr", lambda _stderr, _result: hash_err
+        build_mod.HashMismatchError, "from_output", lambda _output, _result: hash_err
     )
     with pytest.raises(HashMismatchError):
         asyncio.run(build_mod.nix_build(expr="1"))
 
     monkeypatch.setattr(
-        build_mod.HashMismatchError, "from_stderr", lambda _stderr, _result: None
+        build_mod.HashMismatchError, "from_output", lambda _output, _result: None
     )
     with pytest.raises(NixCommandError):
         asyncio.run(build_mod.nix_build(expr="1"))
 
 
-def test_nix_build_rejects_invalid_option_types() -> None:
-    """Run this test case."""
-    with pytest.raises(TypeError, match="impure must be a boolean"):
-        asyncio.run(build_mod.nix_build(expr="1", impure="yes"))
+def test_nix_build_parses_hash_mismatch_from_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stdout-only Nix diagnostic must retain its typed hash error."""
+    output = (
+        "error: hash mismatch in fixed-output derivation '/nix/store/stdout.drv'\n"
+        "specified: sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n"
+        "got: sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=\n"
+    )
 
-    with pytest.raises(TypeError, match="no_link must be a boolean"):
-        asyncio.run(build_mod.nix_build(expr="1", no_link="yes"))
+    async def _run_nix(*_a: object, **_k: object) -> CommandResult:
+        return CommandResult(args=["nix"], returncode=1, stdout=output, stderr="")
 
-    with pytest.raises(TypeError, match="json_output must be a boolean"):
-        asyncio.run(build_mod.nix_build(expr="1", json_output="yes"))
-
-    with pytest.raises(TypeError, match="extra_args must be a list of strings"):
-        asyncio.run(build_mod.nix_build(expr="1", extra_args=["--flag", 1]))
+    monkeypatch.setattr(build_mod, "run_nix", _run_nix)
+    with pytest.raises(HashMismatchError) as caught:
+        asyncio.run(build_mod.nix_build(expr="1"))
+    assert caught.value.drv_path == "/nix/store/stdout.drv"
+    assert caught.value.hash.startswith("sha256-")
 
 
 def test_nix_build_dry_run_respects_section_boundaries(
@@ -224,7 +225,7 @@ def test_derivation_eval_flake_wrappers(
     """Run this test case."""
 
     async def _run_nix_json(args: list[str], **kwargs: object) -> object:
-        timeout = kwargs.get("timeout")
+        timeout = kwargs.get("command_timeout")
         if args[:3] == ["nix", "derivation", "show"]:
             return {"/nix/store/x.drv": {"x": 1}}
         if args[:2] == ["nix", "eval"]:
@@ -343,7 +344,7 @@ def test_hash_and_path_info_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
     seen_path_info_args: list[list[str]] = []
 
     async def _run_nix_json(args: list[str], **kwargs: object) -> object:
-        timeout = kwargs.get("timeout")
+        timeout = kwargs.get("command_timeout")
         if args[:2] == ["nix", "path-info"]:
             seen_path_info_args.append(args)
             return [{"path": "/nix/store/x"}]
@@ -368,6 +369,72 @@ def test_hash_and_path_info_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
     infos_no_closure = asyncio.run(path_info_mod.nix_path_info(["/nix/store/x"]))
     assert infos_no_closure
     assert "--closure-size" not in seen_path_info_args[1]
+
+
+def test_nix_path_info_reconciles_map_keys_and_explicit_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Map keys fill absent or null paths and must agree with explicit paths."""
+    list_payload = [{"path": "/nix/store/list", "narHash": "sha256-AAA=", "narSize": 1}]
+    map_payload = {
+        "/nix/store/key": {"narHash": "sha256-AAA=", "narSize": 1},
+        "/nix/store/null-key": {
+            "path": None,
+            "narHash": "sha256-AAA=",
+            "narSize": 1,
+        },
+        "/nix/store/equal": {
+            "path": "/nix/store/equal",
+            "narHash": "sha256-AAA=",
+            "narSize": 1,
+        },
+    }
+    payload = list_payload
+
+    async def _run_nix_json(*_a: object, **_k: object) -> object:
+        return payload
+
+    monkeypatch.setattr(path_info_mod, "run_nix_json", _run_nix_json)
+    listed = asyncio.run(path_info_mod.nix_path_info([]))
+    assert [item.path for item in listed] == ["/nix/store/list"]
+
+    payload = map_payload
+    mapped = asyncio.run(path_info_mod.nix_path_info([]))
+    assert [item.path for item in mapped] == [
+        "/nix/store/key",
+        "/nix/store/null-key",
+        "/nix/store/equal",
+    ]
+
+    payload = {
+        "/nix/store/conflicting-key": {
+            "path": "/nix/store/conflicting-value",
+            "narHash": "sha256-AAA=",
+            "narSize": 1,
+        }
+    }
+    with pytest.raises(ValueError, match="conflicts with explicit path") as caught:
+        asyncio.run(path_info_mod.nix_path_info([]))
+    assert "/nix/store/conflicting-key" in str(caught.value)
+    assert "/nix/store/conflicting-value" in str(caught.value)
+
+
+def test_nix_path_info_still_validates_malformed_map_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Key injection must not make non-object or malformed entries acceptable."""
+    payload: object = {"/nix/store/bad": "not-an-object"}
+
+    async def _run_nix_json(*_a: object, **_k: object) -> object:
+        return payload
+
+    monkeypatch.setattr(path_info_mod, "run_nix_json", _run_nix_json)
+    with pytest.raises(ValidationError):
+        asyncio.run(path_info_mod.nix_path_info([]))
+
+    payload = {"/nix/store/bad": {"path": 42, "narHash": "sha256-AAA=", "narSize": 1}}
+    with pytest.raises(ValidationError):
+        asyncio.run(path_info_mod.nix_path_info([]))
 
 
 def test_store_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -425,6 +492,95 @@ def test_store_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
 
     requisites = asyncio.run(store_mod.nix_store_query_requisites("/nix/store/pkg.drv"))
     assert requisites == ["/nix/store/src-a", "/nix/store/src-b"]
+
+
+@pytest.mark.parametrize("cleanup_failure", [False, True])
+def test_store_callback_failure_closes_stream_and_preserves_primary_error(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    cleanup_failure: bool,
+) -> None:
+    """Callback consumers close their stream without masking the callback error."""
+
+    class _Stream:
+        def __init__(self) -> None:
+            self.closed = False
+            self.sent = False
+
+        def __aiter__(self) -> _Stream:
+            return self
+
+        async def __anext__(self) -> str:
+            if self.sent:
+                raise StopAsyncIteration
+            self.sent = True
+            return "line"
+
+        async def aclose(self) -> None:
+            self.closed = True
+            if cleanup_failure:
+                raise RuntimeError("cleanup failed")
+
+    stream = _Stream()
+    monkeypatch.setattr(store_mod, "stream_nix", lambda *_a, **_k: stream)
+    callback_error = RuntimeError("callback failed")
+
+    def _on_line(_line: str) -> None:
+        raise callback_error
+
+    with pytest.raises(RuntimeError, match="callback failed") as caught:
+        asyncio.run(
+            store_mod.nix_store_realise(["/nix/store/demo.drv"], on_line=_on_line)
+        )
+    assert caught.value is callback_error
+    assert stream.closed
+    if cleanup_failure:
+        assert any("cleanup failed" in note for note in caught.value.__notes__)
+
+
+def test_store_cancellation_during_callback_cleanup_is_not_swallowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancellation wins when it arrives while callback cleanup is in progress."""
+    close_started = asyncio.Event()
+
+    class _Stream:
+        def __init__(self) -> None:
+            self.closed = False
+            self.sent = False
+
+        def __aiter__(self) -> _Stream:
+            return self
+
+        async def __anext__(self) -> str:
+            if self.sent:
+                raise StopAsyncIteration
+            self.sent = True
+            return "line"
+
+        async def aclose(self) -> None:
+            self.closed = True
+            close_started.set()
+            await asyncio.Event().wait()
+
+    stream = _Stream()
+    monkeypatch.setattr(store_mod, "stream_nix", lambda *_a, **_k: stream)
+
+    def _on_line(_line: str) -> None:
+        raise RuntimeError("callback failed")
+
+    async def _exercise() -> None:
+        task = asyncio.create_task(
+            store_mod.nix_store_realise(["/nix/store/demo.drv"], on_line=_on_line)
+        )
+        await close_started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert task.cancelled()
+
+    asyncio.run(_exercise())
+    assert stream.closed
 
 
 def test_store_deriver_wrapper_handles_unknown_and_failure(

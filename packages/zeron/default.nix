@@ -4,6 +4,7 @@
   imagemagick,
   lib,
   libicns,
+  mkMacAppPassthru,
   outputs,
   pkg-config,
   python3,
@@ -45,7 +46,9 @@ rustPlatform.buildRustPackage {
   env.ZERON_NIX_MANAGED = "1";
 
   postPatch = ''
-    ${lib.getExe python3} ${./patch_nix_managed.py} "$PWD"
+    PYTHONPATH=${
+      import ../../lib/codemods-pythonpath.nix { inherit lib; }
+    } ${lib.getExe python3} ${./patch_nix_managed.py} "$PWD"
   '';
 
   # The upstream workspace test matrix includes daemon, network, and Linux
@@ -126,11 +129,9 @@ rustPlatform.buildRustPackage {
     runHook postInstallCheck
   '';
 
-  passthru.macApp = {
-    bundleId = "sh.zeron.app";
+  passthru = mkMacAppPassthru {
     bundleName = "Zeron.app";
-    bundleRelPath = "Applications/Zeron.app";
-    installMode = "copy";
+    macApp.bundleId = "sh.zeron.app";
   };
 
   meta = {

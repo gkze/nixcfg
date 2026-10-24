@@ -202,6 +202,8 @@ sidecarsRustPlatform.buildRustPackage {
     "--bin"
     spec.binary
   ]) sidecarSpecs;
+  # cargoBuildFlags select only the sidecar binaries; the default cargo test
+  # would test the whole Buzz workspace. installCheckPhase gates the sidecars.
   doCheck = false;
   installPhase = ''
     runHook preInstall

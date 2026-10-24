@@ -5,12 +5,16 @@ import logging
 from pathlib import Path
 from typing import Self
 
+import httpx
 import pytest
 
 from lib import http_utils
 
 
 class _FakeResponse:
+    url = "https://example.com/"
+    history: tuple[object, ...] = ()
+
     def __init__(
         self,
         *,
@@ -38,8 +42,14 @@ class _FakeClient:
         return False
 
     def request(
-        self, method: str, url: str, *, headers: dict[str, str]
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str],
+        follow_redirects: bool = False,
     ) -> _FakeResponse:
+        _ = follow_redirects
         self.calls.append((method, url, headers))
         response = self._responses.pop(0)
         if isinstance(response, Exception):
@@ -253,3 +263,187 @@ def test_fetch_url_bytes_rejects_zero_attempts() -> None:
     """Require at least one request attempt."""
     with pytest.raises(RuntimeError, match="Expected at least one HTTP attempt"):
         http_utils.fetch_url_bytes("https://example.com/data", attempts=0)
+
+
+def _redirect_to(target: str) -> httpx.MockTransport:
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/start":
+            return httpx.Response(302, headers={"Location": target})
+        return httpx.Response(200, content=b"body")
+
+    return httpx.MockTransport(_handler)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("target", "allowed"),
+    [
+        ("https://example.com/final", True),
+        ("http://example.com/final", False),
+    ],
+)
+async def test_fetch_url_bytes_revalidates_redirect_targets(
+    monkeypatch: pytest.MonkeyPatch,
+    target: str,
+    *,
+    allowed: bool,
+) -> None:
+    """A redirect must not downgrade an HTTPS-only fetch to another scheme."""
+    real_client = httpx.Client
+    transport = _redirect_to(target)
+    monkeypatch.setattr(
+        http_utils.httpx,
+        "Client",
+        lambda **kwargs: real_client(transport=transport, **kwargs),
+    )
+    async_client = httpx.AsyncClient(transport=transport, follow_redirects=True)
+    start = "https://example.com/start"
+    if allowed:
+        assert http_utils.fetch_url_bytes(start)[0] == b"body"
+        payload, _ = await http_utils.fetch_url_bytes_async(start, client=async_client)
+        assert payload == b"body"
+        return
+    with pytest.raises(ValueError, match=f"Only absolute HTTPS URLs.*{target}"):
+        http_utils.fetch_url_bytes(start)
+    with pytest.raises(ValueError, match=f"Only absolute HTTPS URLs.*{target}"):
+        await http_utils.fetch_url_bytes_async(start, client=async_client)
+
+
+def test_next_redirect_request_rejects_missing_native_request() -> None:
+    """A redirect without httpx's native next request fails before dispatch."""
+    response = httpx.Response(
+        302,
+        headers={"Location": "/next"},
+        request=httpx.Request("GET", "https://example.com/start"),
+    )
+    with pytest.raises(RuntimeError, match="did not include a next request"):
+        http_utils._next_redirect_request(
+            response, allowed_schemes=frozenset({"https"})
+        )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "targets",
+    [
+        ["http://example.com/plain"],
+        ["https://example.com/allowed", "http://example.com/plain"],
+    ],
+)
+async def test_fetch_url_bytes_never_issues_insecure_redirect_requests(
+    monkeypatch: pytest.MonkeyPatch,
+    targets: list[str],
+) -> None:
+    """Validation must happen before every redirect hop, including chained hops."""
+    requests: list[httpx.Request] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/start":
+            return httpx.Response(302, headers={"Location": targets[0]})
+        if request.url.path == "/allowed" and len(targets) > 1:
+            return httpx.Response(302, headers={"Location": targets[1]})
+        return httpx.Response(200, content=b"unexpected")
+
+    transport = httpx.MockTransport(_handler)
+    real_client = httpx.Client
+    monkeypatch.setattr(
+        http_utils.httpx,
+        "Client",
+        lambda **kwargs: real_client(transport=transport, **kwargs),
+    )
+    start = "https://example.com/start"
+    with pytest.raises(ValueError, match="Only absolute HTTPS URLs"):
+        http_utils.fetch_url_bytes(start)
+    async with httpx.AsyncClient(transport=transport, follow_redirects=True) as client:
+        with pytest.raises(ValueError, match="Only absolute HTTPS URLs"):
+            await http_utils.fetch_url_bytes_async(start, client=client)
+    assert [str(request.url) for request in requests] == [
+        start,
+        *targets[:-1],
+        start,
+        *targets[:-1],
+    ]
+    assert targets[-1] not in [str(request.url) for request in requests]
+    assert all(request.url.scheme == "https" for request in requests)
+
+
+@pytest.mark.anyio
+async def test_fetch_url_bytes_preserves_native_redirect_request_semantics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Legitimate redirects retain headers while cross-origin credentials are stripped."""
+    requests: list[httpx.Request] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/start":
+            return httpx.Response(
+                302,
+                headers={"Location": "https://cdn.example.com/final"},
+            )
+        return httpx.Response(200, content=b"body")
+
+    transport = httpx.MockTransport(_handler)
+    real_client = httpx.Client
+    monkeypatch.setattr(
+        http_utils.httpx,
+        "Client",
+        lambda **kwargs: real_client(transport=transport, **kwargs),
+    )
+    start = "https://example.com/start"
+    headers = {"Authorization": "Bearer secret", "Cookie": "manual=1", "X-Test": "yes"}
+    assert (
+        http_utils.fetch_url_bytes(start, method="POST", headers=headers)[0] == b"body"
+    )
+    async with httpx.AsyncClient(transport=transport, follow_redirects=True) as client:
+        payload, _ = await http_utils.fetch_url_bytes_async(
+            start,
+            method="POST",
+            headers=headers,
+            client=client,
+        )
+    assert payload == b"body"
+    assert [request.method for request in requests] == ["POST", "GET", "POST", "GET"]
+    for request in (requests[1], requests[3]):
+        assert request.headers.get("Authorization") is None
+        assert request.headers.get("Cookie") is None
+        assert request.headers["X-Test"] == "yes"
+
+
+@pytest.mark.anyio
+async def test_fetch_url_bytes_bounds_manual_redirects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Manual handling retains the client's redirect limit on sync and async paths."""
+    requests: list[httpx.Request] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        next_path = "/one" if request.url.path == "/start" else "/two"
+        return httpx.Response(302, headers={"Location": next_path})
+
+    transport = httpx.MockTransport(_handler)
+    real_client = httpx.Client
+    monkeypatch.setattr(
+        http_utils.httpx,
+        "Client",
+        lambda **kwargs: real_client(transport=transport, max_redirects=1, **kwargs),
+    )
+    with pytest.raises(httpx.TooManyRedirects):
+        http_utils.fetch_url_bytes("https://example.com/start")
+    async with httpx.AsyncClient(
+        transport=transport,
+        follow_redirects=True,
+        max_redirects=1,
+    ) as client:
+        with pytest.raises(httpx.TooManyRedirects):
+            await http_utils.fetch_url_bytes_async(
+                "https://example.com/start", client=client
+            )
+    assert [request.url.path for request in requests] == [
+        "/start",
+        "/one",
+        "/start",
+        "/one",
+    ]

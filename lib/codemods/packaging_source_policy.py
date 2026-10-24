@@ -6,7 +6,6 @@ from dataclasses import dataclass, fields, is_dataclass
 from typing import TYPE_CHECKING, Final
 from urllib.parse import parse_qsl, unquote, urlsplit
 
-from nix_manipulator import parse
 from nix_manipulator.expressions.binary import BinaryExpression
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.identifier import Identifier
@@ -18,6 +17,7 @@ from nix_manipulator.expressions.select import Select
 
 from lib.check_python_compile import iter_target_paths
 from lib.codemods.errors import CodemodError
+from lib.codemods.nix_parse import parse_nix
 from lib.update.paths import REPO_ROOT
 
 if TYPE_CHECKING:
@@ -137,9 +137,6 @@ _REFERENCE_PIN_BINDINGS: Final = frozenset(
         "tag",
     },
 )
-_TRAILING_FORMAL_COMMA_PATTERN: Final = re.compile(
-    r",(?=\s*}(?:@[A-Za-z_][A-Za-z0-9_'-]*)?\s*:)",
-)
 _HTTP_URL_PATTERN: Final = re.compile(r"https?://")
 _SOURCE_ARCHIVE_SUFFIXES: Final = (
     ".tar.gz",
@@ -186,21 +183,16 @@ SOURCE_PATCH_SCRIPT_NAMES: Final = frozenset(
         "patch_allocator_weak_linkage.py",
         "patch_node_addon_api.py",
         "patch_node_addon_api_binding_gyp.py",
+        "patch_nix_managed.py",
         "patch_source.py",
         "patch_sources.py",
     },
 )
 
 
-def _rewrite_function_formals_for_parser(text: str) -> str:
-    return _TRAILING_FORMAL_COMMA_PATTERN.sub("", text)
-
-
 def parse_nix_expr_for_policy(source: str, *, context: str) -> NixExpression:
     """Parse a Nix expression for source-modification policy audits."""
-    parsed = parse(source)
-    if parsed.contains_error:
-        parsed = parse(_rewrite_function_formals_for_parser(source))
+    parsed, _verbatim = parse_nix(source)
     if parsed.contains_error or parsed.expr is None:
         msg = f"Unable to parse Nix source for policy audit: {context}"
         raise CodemodError(msg)

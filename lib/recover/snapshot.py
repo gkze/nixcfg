@@ -8,6 +8,7 @@ from typing import Final
 
 from lib.nix.commands import nix_store_query_deriver, nix_store_query_requisites
 from lib.recover._cli import emit_error, emit_success
+from lib.recover._common import is_git_executable
 
 DEFAULT_GENERATION: Final[str] = "/run/current-system"
 DEFAULT_MARKER_FILES: Final[tuple[str, ...]] = (
@@ -48,20 +49,26 @@ def _digest_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _snapshot_fingerprint(root: Path) -> tuple[tuple[str, str, str], ...]:
-    """Fingerprint all files and symlinks under *root*.
+def _snapshot_fingerprint(root: Path) -> tuple[tuple[str, str, str, bool], ...]:
+    """Fingerprint Git-relevant file state under *root*.
 
     This is only used to collapse duplicate matching source snapshots emitted
-    in the derivation closure.  Distinct trees must not compare equal here.
+    in the derivation closure. Distinct trees, including trees that differ only
+    in executable mode, must not compare equal here.
     """
-    entries: list[tuple[str, str, str]] = []
+    entries: list[tuple[str, str, str, bool]] = []
     for path in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
         relative = path.relative_to(root).as_posix()
         if path.is_symlink():
-            entries.append(("symlink", relative, path.readlink().as_posix()))
+            entries.append(("symlink", relative, path.readlink().as_posix(), False))
             continue
         if path.is_file():
-            entries.append(("file", relative, _digest_bytes(path.read_bytes())))
+            entries.append((
+                "file",
+                relative,
+                _digest_bytes(path.read_bytes()),
+                is_git_executable(path),
+            ))
     return tuple(entries)
 
 

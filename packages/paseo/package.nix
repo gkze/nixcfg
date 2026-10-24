@@ -12,10 +12,12 @@
   lib,
   libiconv,
   makeWrapper,
+  mkMacAppPassthru,
   nativeLock ? builtins.fromJSON (builtins.readFile ./native-lock.json),
   nixcfgElectron,
   nodejs_24,
   npmHooks,
+  outputs,
   pkg-config,
   python3,
   selfSource ? builtins.fromJSON (builtins.readFile ./sources.json),
@@ -63,10 +65,7 @@ let
   nodeAddonApiUrl = urls.nodeAddonApi or "";
 
   hashEntryFor =
-    hashType: url:
-    lib.findFirst (entry: entry.hashType == hashType && (entry.url or null) == url) null (
-      source.hashes or [ ]
-    );
+    hashType: url: outputs.lib.selectSourceHashEntry (source.hashes or [ ]) hashType { inherit url; };
 
   paseoSourceHash = hashEntryFor "srcHash" paseoUrl;
   sherpaSourceHash = hashEntryFor "srcHash" sherpaUrl;
@@ -311,13 +310,7 @@ let
 
     postPatch = ''
       PYTHONPATH=${
-        lib.fileset.toSource {
-          root = ../..;
-          fileset = lib.fileset.unions [
-            ../../lib/__init__.py
-            ../../lib/exact_text_patch.py
-          ];
-        }
+        import ../../lib/codemods-pythonpath.nix { inherit lib; }
       } ${lib.getExe python3} ${./patch_nix_managed.py} "$PWD" \
         --claude-code-executable "$CLAUDE_CODE_EXECUTABLE"
     '';
@@ -856,12 +849,13 @@ let
         sherpaExact
         sherpaNodeAddon
         ;
-      macApp = {
-        bundleId = appId;
-        bundleName = appBundleName;
-        bundleRelPath = "Applications/${appBundleName}";
-        installMode = "copy";
-      };
+      inherit
+        (mkMacAppPassthru {
+          bundleName = appBundleName;
+          macApp.bundleId = appId;
+        })
+        macApp
+        ;
     };
 
     meta = {

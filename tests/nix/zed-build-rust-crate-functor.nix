@@ -63,6 +63,11 @@ let
       else
         !(overriddenCrate.attrs ? dontStrip)
     ) "${label}: .override must keep Darwin rlib metadata";
+    # Linux rust_zed must not split out+lib (multi-output cycle); Darwin keeps
+    # the split so warmed hashes stay put.
+    assert lib.assertMsg (
+      (wrapped { crateName = "zed"; }).attrs.outputs or null == (if isDarwin then null else [ "out" ])
+    ) "${label}: zed output split policy is wrong";
     true;
 in
 assert checkPlatform {

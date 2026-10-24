@@ -45,6 +45,97 @@ Version 2 makes these changes:
 - `nixcfgLanguageBun`, `nixcfgLanguageGo`, `nixcfgLanguagePython`,
   `nixcfgLanguageRust`
 
+## Required module arguments
+
+Some exported modules read module arguments in addition to the standard
+`config`, `lib`, `pkgs`, and `options`. The constructors `mkSystem`,
+`mkDarwinHost`, and `mkHome` supply all of them. A consumer that imports a
+module directly into its own `homeManagerConfiguration`, `darwinSystem`, or
+`nixosSystem` must supply them through `specialArgs` or `extraSpecialArgs`.
+
+| Module                             | Argument                               | Required content                                                       |
+| ---------------------------------- | -------------------------------------- | ---------------------------------------------------------------------- |
+| `homeModules.nixcfgBase`           | `slib`                                 | This flake's `lib`: `homeDirBase`                                      |
+| `homeModules.nixcfgBase`           | `src`                                  | A source tree with a `NIXOS_VERSION` file                              |
+| `homeModules.nixcfgBase`           | `username`                             | The Home Manager user name                                             |
+| `homeModules.nixcfgGit`            | `inputs`                               | `catppuccin-delta`, read when `includeCatppuccinDeltaTheme` is enabled |
+| `homeModules.nixcfgStylix`         | `inputs`                               | `base16-schemes-src`, read when `base16Scheme` is null                 |
+| `homeModules.nixcfgZsh`            | `slib`                                 | This flake's `lib`: `srcDirBase`                                       |
+| `homeModules.nixcfgLanguagePython` | `slib`                                 | This flake's `lib`: `kernel`                                           |
+| `darwinModules.nixcfgBase`         | `primaryUser`                          | The primary Darwin user name                                           |
+| `darwinModules.nixcfgCommon`       | `inputs`, `slib`, `hostname`, `system` | Optional: flake registry entries, kernel lookup, and host name         |
+| `darwinModules.nixcfgHomebrew`     | `inputs`, `primaryUser`                | Optional: Homebrew source and taps, and the default Homebrew user      |
+
+Pass `slib = nixcfg.lib` and the flake inputs of this repository (or inputs
+with the same names) to satisfy them.
+
+`darwinModules.nixcfgHomebrew` also requires the `nix-homebrew` Darwin module.
+`mkDarwinHost` imports both. `mkSystem` imports neither, so a `mkSystem` host
+that wants managed Homebrew adds both to `systemModules`.
+
+### Home module composition
+
+The exported Home feature modules are composable fragments, not standalone
+configurations. For example, `nixcfgPackages` reads the options from
+`nixcfgFonts`; `nixcfgStylix` reads `nixcfgTheme` and `nixcfgFonts` and requires
+Stylix's Home Manager module. `nixcfgBase` supplies shared Home defaults, the
+platform module supplies platform-specific options, and downstream profile
+modules can also expect Nixvim's Home Manager module.
+
+Use `mkHome` for a complete standalone configuration, or `mkHomeModules` when
+supplying your own `homeManagerConfiguration` arguments. If you import feature
+modules directly instead, you must explicitly reproduce the required
+`nixcfgTheme`, `nixcfgFonts`, `nixcfgBase`, matching `nixcfgDarwin`/`nixcfgLinux`,
+Stylix, and Nixvim dependencies, in addition to the module arguments above.
+
+A direct `homeManagerConfiguration` composition using `mkHomeModules` looks like
+this:
+
+```nix
+{
+  outputs = { home-manager, nixcfg, ... }:
+    let
+      system = "aarch64-darwin";
+    in
+    {
+      homeConfigurations.alice = home-manager.lib.homeManagerConfiguration {
+        pkgs = nixcfg.pkgs.${system};
+        extraSpecialArgs = {
+          inherit system;
+          inputs = nixcfg.inputs;
+          outputs = nixcfg;
+          slib = nixcfg.lib;
+          src = nixcfg.outPath;
+          username = "alice";
+        };
+        modules = nixcfg.lib.mkHomeModules {
+          inherit system;
+          username = "alice";
+          includeDefaultUserModule = false;
+          extraModules = [
+            nixcfg.homeModules.nixcfgPackages
+            nixcfg.homeModules.nixcfgStylix
+            ./home/alice.nix
+          ];
+        };
+      };
+    };
+}
+```
+
+`mkHomeModules` already includes the base, theme, fonts, platform, Stylix, and
+Nixvim modules, so `extraModules` only adds the opt-in feature and downstream
+profile modules. Do not repeat the dependency modules there. For the shortest
+supported standalone form, pass `system`, `username`, and `modules` to `mkHome`,
+remove its `system` attribute, and pass the remaining attrset to
+`homeManagerConfiguration`.
+
+## Module-owned tooling
+
+`homeModules.nixcfgZen` packages its own `zentool` from `modules/home/zen/`.
+Override `nixcfg.zen.toolPackage` to supply a different build, or
+`nixcfg.zen.toolCommand` to run a command outside the Nix store.
+
 ## Constructors
 
 `lib/lib.nix` exports these constructors:
@@ -76,6 +167,9 @@ These options are intended for override in a downstream repository:
 - `nixcfg.common.nix.substituters`
 - `nixcfg.common.nix.trustedPublicKeys`
 - `nixcfg.darwin.homebrew.{user,taps,mutableTaps,enableRosetta}`
+- `darwinDefaults.appearance`: `"automatic"` (default) or `"dark"`
+- `nix.gc.options`: retention for the daily garbage collection that
+  `nixcfgCommon` schedules; the shared module sets none
 
 Site-specific policy, such as cache keys, org profile settings, and host or user
 modules, belongs in the consuming repository. The shared modules stay generic.

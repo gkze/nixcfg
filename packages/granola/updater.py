@@ -2,21 +2,25 @@
 
 from typing import TYPE_CHECKING, ClassVar
 
-import yaml
+from lib.update.updaters import (
+    DownloadUrlMetadataUpdater,
+    VersionInfo,
+    register_updater,
+)
+from lib.update.updaters.metadata import DownloadUrlMetadata
+from lib.update.updaters.vendor_feeds import (
+    fetch_electron_builder_manifest,
+    require_url,
+)
 
 if TYPE_CHECKING:
     import aiohttp
 
     from lib.update.updaters.core import UpdateContext
 
-from lib import json_utils
-from lib.update.net import fetch_url
-from lib.update.updaters import DownloadHashUpdater, VersionInfo, register_updater
-from lib.update.updaters.metadata import GranolaFeedMetadata, require_metadata_str
-
 
 @register_updater
-class GranolaUpdater(DownloadHashUpdater):
+class GranolaUpdater(DownloadUrlMetadataUpdater):
     """Resolve Granola versions from the Electron updater feed."""
 
     name = "granola"
@@ -26,50 +30,20 @@ class GranolaUpdater(DownloadHashUpdater):
         "aarch64-darwin": "darwin",
         "x86_64-darwin": "darwin",
     }
-
-    def get_download_url(self, platform: str, info: VersionInfo) -> str:
-        """Return the versioned universal zip URL for ``platform``."""
-        _ = platform
-        path = require_metadata_str(
-            info.metadata,
-            "path",
-            context="Granola metadata",
-        )
-        return f"{self.DOWNLOAD_BASE_URL}/{info.version}/{path}"
+    URL_METADATA_CONTEXT = "Granola metadata"
 
     async def fetch_latest(
         self, session: aiohttp.ClientSession, *, context: UpdateContext
     ) -> VersionInfo:
-        """Read version metadata from Granola's Electron updater feed."""
+        """Pin the versioned universal zip named by Granola's Electron feed."""
         _ = context
-        payload = await fetch_url(
-            session,
-            self.FEED_URL,
-            request_timeout=self.config.default_timeout,
-            config=self.config,
+        feed = await fetch_electron_builder_manifest(
+            session, self.FEED_URL, config=self.config
         )
-        loaded = yaml.safe_load(payload.decode())
-        data = json_utils.coerce_json_object(
-            loaded,
-            context="Granola updater feed",
-        )
-        payload_map = json_utils.as_object_dict(data, context="Granola feed")
-        version = json_utils.get_required_str(
-            payload_map,
-            "version",
-            context="Granola feed",
-        )
-        path = json_utils.get_required_str(
-            payload_map,
-            "path",
-            context="Granola feed",
-        )
-        sha512 = json_utils.get_required_str(
-            payload_map,
-            "sha512",
-            context="Granola feed",
-        )
+        path = require_url(feed.path, context=self.FEED_URL)
         return VersionInfo(
-            version=version,
-            metadata=GranolaFeedMetadata(path=path, sha512=sha512),
+            version=feed.version,
+            metadata=DownloadUrlMetadata(
+                url=f"{self.DOWNLOAD_BASE_URL}/{feed.version}/{path}"
+            ),
         )

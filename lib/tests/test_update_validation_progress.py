@@ -374,7 +374,7 @@ def test_update_async_host_single_sigint_reaps_before_snapshot_or_promotion(
     script = """
 import asyncio, json, os, pathlib, signal, sys, threading, time
 from contextlib import contextmanager
-from lib.update import cli, derivation_validation as validation
+from lib.update import cli, runtime_source, derivation_validation as validation
 from lib.update.persistence import UpdateValidationSnapshot
 root = pathlib.Path(sys.argv[1])
 mode = sys.argv[2]
@@ -416,7 +416,7 @@ def interrupt():
 
 cli.update_persistence.IsolatedUpdateWorkspace = Workspace
 cli._handle_preflight_requests = lambda *_: None
-cli._revalidate_runtime_source_snapshot = lambda *_: None
+runtime_source.revalidate_runtime_source_snapshot = lambda *_: None
 cli._build_run_plan = lambda *_: None
 cli._requires_root_closure_validation = lambda *_: True
 validation.validate_root_closures = roots
@@ -713,8 +713,11 @@ raise SystemExit(1)
 
 def test_validation_retries_vanished_build_input_and_daemon_disconnect(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Update 37522365810: vanished stdenv hook and daemon crash retry like EILSEQ."""
+    for name in ("recover_nix_store_after_fault", "repair_corrupt_nix_store_paths"):
+        monkeypatch.setattr(validation, name, lambda **_kwargs: True)
     marker = tmp_path / "attempt"
     script = """
 import pathlib, sys
@@ -756,12 +759,13 @@ def test_validation_restarts_nix_daemon_before_disconnect_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """#1257 isolation retried against a dead socket; kickstart first."""
-    recovered: list[object] = []
-    monkeypatch.setattr(
-        validation,
-        "recover_nix_store_after_fault",
-        lambda **kwargs: recovered.append(kwargs),
-    )
+    recovered: list[dict[str, object]] = []
+
+    def recover(**kwargs: object) -> bool:
+        recovered.append(kwargs)
+        return False
+
+    monkeypatch.setattr(validation, "recover_nix_store_after_fault", recover)
     marker = tmp_path / "attempt"
     script = """
 import pathlib, sys
@@ -779,16 +783,49 @@ if count == 1:
 print("complete")
 """
     sleeps: list[float] = []
+    seen: list[validation.ValidationProgressEvent] = []
     result = validation._run_validation_command(
         [sys.executable, "-c", script, str(marker)],
         cwd=tmp_path,
         timeout=5,
         run=None,
         sleep=sleeps.append,
+        progress=seen.append,
     )
     assert result.returncode == 0
-    assert recovered
+    assert 0 < cast("float", recovered[0]["timeout"]) <= 5
+    assert (
+        "Retrying transient Nix failure (attempt 2/3); Nix store recovery failed"
+        in seen
+    )
     assert sleeps == [1.0]
+
+
+def test_unbounded_validation_recovers_without_a_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Local unbounded validation gives store recovery no deadline either."""
+    recovered: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        validation,
+        "recover_nix_store_after_fault",
+        lambda **kwargs: recovered.append(kwargs) or True,
+    )
+    outputs = iter([
+        "error: cannot open connection to remote store 'daemon': "
+        "Nix daemon disconnected unexpectedly",
+        "",
+    ])
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        stderr = next(outputs)
+        return subprocess.CompletedProcess(args, 1 if stderr else 0, "", stderr)
+
+    result = validation._run_validation_command(
+        ["nix", "build"], cwd=tmp_path, timeout=None, run=run, sleep=lambda _: None
+    )
+    assert result.returncode == 0
+    assert recovered[0]["timeout"] is None
 
 
 def test_validation_repairs_leftover_pnpm_deps_before_fetcher_version_retry(
@@ -800,7 +837,7 @@ def test_validation_repairs_leftover_pnpm_deps_before_fetcher_version_retry(
     monkeypatch.setattr(
         validation,
         "repair_corrupt_nix_store_paths",
-        lambda **kwargs: repaired.append(kwargs),
+        lambda **kwargs: repaired.append(kwargs) or True,
     )
     pnpm_deps = "/nix/store/5xacb06gxg1yzpr852gkv57cxqlm6lpq-emdash-pnpm-deps"
     marker = tmp_path / "attempt"
@@ -1030,7 +1067,7 @@ def test_store_fault_past_the_deadline_does_not_sleep_into_another_build(
             run=run,
             sleep=sleeps.append,
         )
-    assert sleeps == [0.0]
+    assert sleeps == []
 
 
 def test_validation_progress_preserves_retry_diagnostics(tmp_path: Path) -> None:
@@ -1134,11 +1171,11 @@ def test_validation_retries_truncated_ranlib_write_eio(
     assert attempts["n"] == 1
 
 
-def test_builder_log_supplement_reads_nix_log_outside_pytest(
+def test_builder_log_supplement_reads_nix_log_only_for_present_derivations(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Hosted validation consults ``nix log``; pytest does not shell out."""
-    drv = "/nix/store/4jjnjbsw4a0ysny10x9p57r057k25nhz-buzz-onnxruntime-1.27.0.drv"
+    """Validation consults ``nix log`` only for a derivation in this store."""
+    drv = f"/nix/store/{'0' * 32}-buzz-onnxruntime-1.27.0.drv"
     result = subprocess.CompletedProcess(
         ["nix", "build", f"{drv}^*"],
         1,
@@ -1169,7 +1206,8 @@ def test_builder_log_supplement_reads_nix_log_outside_pytest(
 
     monkeypatch.setattr(validation.subprocess, "run", ok)
     assert "ranlib eio" in validation._read_nix_builder_log(drv, cwd=tmp_path)
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    assert validation._builder_log_supplement(result, cwd=tmp_path) == ""
+    monkeypatch.setattr(validation.os.path, "exists", lambda path: path == drv)
     fetched: list[str] = []
 
     def fake_log(path: str, *, cwd: Path) -> str:

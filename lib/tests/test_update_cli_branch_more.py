@@ -12,11 +12,9 @@ from lib.update.cli import (
     OutputOptions,
     ResolvedTargets,
     UpdateOptions,
-    UpdateSummary,
     _build_item_meta,
     _build_run_plan,
     _build_update_options,
-    _emit_summary,
     _handle_required_tool_check,
     _is_tty,
 )
@@ -51,6 +49,7 @@ from lib.update.source_runner import (
     run_sources_phase,
     update_source_task,
 )
+from lib.update.summary import UpdateSummary
 from lib.update.ui_state import OperationKind
 from lib.update.updaters import DenoDepsHashUpdater, UpdateContext, VersionInfo
 
@@ -339,23 +338,6 @@ def test_aggregate_source_declarations_require_registered_destinations() -> None
 
     with pytest.raises(RuntimeError, match="not registered: missing"):
         add_aggregate_sources({"consumer"}, {"consumer": _Consumer})
-
-
-def test_emit_summary_dry_run_updates_and_errors(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Print dry-run update list and failed sources in human mode."""
-    summary = UpdateSummary(statuses={"a": "updated", "b": "error"})
-    code = _emit_summary(
-        summary,
-        had_errors=True,
-        out=OutputOptions(json_output=False, quiet=False),
-        dry_run=True,
-    )
-    assert code == 1
-    captured = capsys.readouterr()
-    assert "Available updates" in captured.out
-    assert "Failed: b" in captured.err
 
 
 def test_list_and_validate_non_json_paths(

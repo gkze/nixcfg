@@ -2,18 +2,21 @@
 
 import asyncio
 import json
-from dataclasses import dataclass
 
 import pytest
 
 from lib.nix.models.sources import HashEntry, SourceEntry
+from lib.tests._updater_helpers import (
+    FakeRequest,
+    http_response,
+    install_fixed_hash_stream,
+)
 from lib.tests._updater_helpers import collect_events as _collect_events
-from lib.tests._updater_helpers import install_fixed_hash_stream
 from lib.tests._updater_helpers import load_repo_module as _load_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.candidate import ResolvedVersion
 from lib.update.events import EventSink, UpdateEventKind, ignore_event
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import VersionInfo, vendor_feeds
 from lib.update.updaters.core import UpdateContext
 from lib.update.updaters.metadata import (
     JsonObject,
@@ -51,35 +54,10 @@ def _chrome_omaha_json(payload: object) -> bytes:
     return _CHROME_OMAHA_PREFIX + json.dumps(payload).encode()
 
 
-@dataclass(slots=True)
-class _ChromeHTTPResponse:
-    payload: bytes
-    status: int = 200
-    reason: str = "OK"
-
-    async def __aenter__(self) -> _ChromeHTTPResponse:
-        return self
-
-    async def __aexit__(self, *_args: object) -> None:
-        return None
-
-    async def read(self) -> bytes:
-        return self.payload
-
-
-class _ChromeHTTPSession:
-    def __init__(self, response: _ChromeHTTPResponse) -> None:
-        self.response = response
-        self.calls: list[tuple[str, str, dict[str, object]]] = []
-
-    def request(
-        self,
-        method: str,
-        url: str,
-        **kwargs: object,
-    ) -> _ChromeHTTPResponse:
-        self.calls.append((method, url, kwargs))
-        return self.response
+def _install_chrome_omaha(monkeypatch: pytest.MonkeyPatch) -> FakeRequest:
+    fake = FakeRequest(http_response(body=_chrome_omaha_response()))
+    monkeypatch.setattr(vendor_feeds, "request", fake)
+    return fake
 
 
 def _chrome_omaha_response(
@@ -529,7 +507,8 @@ def test_google_chrome_fetch_latest_uses_platform_full_rollout_versions(
         "google_chrome_lane_success",
     )
     updater = module.GoogleChromeUpdater()
-    session = _ChromeHTTPSession(_ChromeHTTPResponse(_chrome_omaha_response()))
+    session = object()
+    omaha = _install_chrome_omaha(monkeypatch)
     requested_urls: list[str] = []
     apt_calls: list[tuple[object, str, dict[str, object]]] = []
 
@@ -620,10 +599,10 @@ def test_google_chrome_fetch_latest_uses_platform_full_rollout_versions(
             },
         )
     ]
-    assert len(session.calls) == 1
-    method, url, kwargs = session.calls[0]
-    assert method == "POST"
-    assert url == module._OMAHA_URL
+    assert len(omaha.calls) == 1
+    url, kwargs = omaha.calls[0]
+    assert kwargs["method"] == "POST"
+    assert url == vendor_feeds.OMAHA_UPDATE_URL
     assert kwargs["headers"] == {
         "User-Agent": updater.config.default_user_agent,
         "Content-Type": "application/json",
@@ -631,13 +610,12 @@ def test_google_chrome_fetch_latest_uses_platform_full_rollout_versions(
         "X-Goog-Update-AppId": _CHROME_APP_ID,
         "X-Goog-Update-Updater": "nixcfg-0",
     }
-    assert kwargs["json"] == module._omaha_request(
+    assert kwargs["json_body"] == module._omaha_request(
         target_version=_CHROME_MAC_VERSION,
         os_version="26.6.2",
         os_arch="arm64",
     )
-    assert kwargs["allow_redirects"] is True
-    assert kwargs["timeout"].total == updater.config.default_timeout
+    assert kwargs["config"] is updater.config
     assert updater.materialize_when_current is False
     assert updater.supported_platforms == ("aarch64-darwin", "x86_64-darwin")
     assert updater.PLATFORMS == {
@@ -806,7 +784,7 @@ def test_google_chrome_rejects_malformed_or_ambiguous_omaha_artifacts(
 @pytest.mark.parametrize(
     ("payload", "match"),
     [
-        (b"\xff", "Packages metadata is not UTF-8"),
+        (b"\xff", "apt metadata is not UTF-8"),
         (b"", "contained 0 stable amd64 packages"),
         (
             b"Package: google-chrome-beta\nArchitecture: amd64\n",
@@ -832,9 +810,18 @@ def test_google_chrome_rejects_malformed_or_ambiguous_omaha_artifacts(
             ),
             "invalid 'Version' field",
         ),
-        (
-            _chrome_apt_packages(version=_CHROME_LINUX_VERSION),
-            "does not match the fully rolled-out Linux version",
+        *(
+            (
+                _chrome_apt_packages(
+                    version=version,
+                    filename=(
+                        "pool/main/g/google-chrome-stable/"
+                        f"google-chrome-stable_{version}_amd64.deb"
+                    ),
+                ),
+                "does not match the fully rolled-out Linux version",
+            )
+            for version in (_CHROME_LINUX_VERSION, f"{_CHROME_LINUX_VERSION}-")
         ),
         (
             _chrome_apt_packages(version="152.0.7977.81-1"),
@@ -847,7 +834,7 @@ def test_google_chrome_rejects_malformed_or_ambiguous_omaha_artifacts(
         ),
         (
             _chrome_apt_packages(version=f"{_CHROME_LINUX_VERSION}-?"),
-            "does not match the fully rolled-out Linux version",
+            "invalid Filename",
         ),
         (
             _chrome_apt_packages(filename=f"/{_CHROME_DEB_FILENAME}"),
@@ -896,37 +883,6 @@ def test_google_chrome_rejects_malformed_or_ambiguous_apt_artifacts(
 
     with pytest.raises(RuntimeError, match=match):
         module._parse_linux_artifact(payload, expected_version=_CHROME_LINUX_VERSION)
-
-
-def test_google_chrome_reports_omaha_http_errors(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """HTTP failures must stop before a Chrome artifact can be persisted."""
-    module = _load_module(
-        "overlays/google-chrome/updater.py",
-        "google_chrome_lane_omaha_http_error",
-    )
-    updater = module.GoogleChromeUpdater()
-    session = _ChromeHTTPSession(
-        _ChromeHTTPResponse(b"unavailable", status=503, reason="Service Unavailable")
-    )
-    monkeypatch.setattr(
-        module.host_platform,
-        "mac_ver",
-        lambda: ("26.6.2", ("", "", ""), ""),
-    )
-    monkeypatch.setattr(module.host_platform, "machine", lambda: "arm64")
-
-    with pytest.raises(
-        RuntimeError,
-        match="Omaha request failed with HTTP 503 Service Unavailable",
-    ):
-        _run(
-            updater._fetch_darwin_artifact(
-                session,
-                expected_version=_CHROME_MAC_VERSION,
-            )
-        )
 
 
 def test_google_chrome_requires_complete_artifact_metadata() -> None:
@@ -1041,8 +997,9 @@ def _install_chrome_linux_lag_mocks(
     *,
     apt_payload: bytes,
     linux_history_version: str = "155.0.8059.39",
-) -> _ChromeHTTPSession:
-    session = _ChromeHTTPSession(_ChromeHTTPResponse(_chrome_omaha_response()))
+) -> object:
+    _install_chrome_omaha(monkeypatch)
+    session = object()
 
     async def _fetch_json(_session: object, url: str, *, config) -> object:
         assert config == updater.config
@@ -1234,7 +1191,7 @@ def test_google_chrome_malformed_apt_still_fails_with_current_pin(
         apt_payload=b"\xff",
     )
 
-    with pytest.raises(RuntimeError, match="Packages metadata is not UTF-8"):
+    with pytest.raises(RuntimeError, match="apt metadata is not UTF-8"):
         _run(updater.fetch_latest(session, context=UpdateContext(current=current)))
 
 

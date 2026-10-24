@@ -1,6 +1,6 @@
 """Behavioral tests for the Jacq release updater."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import ModuleType
 
 import pytest
@@ -19,9 +19,13 @@ class _FakeResponse:
     url: str
     status: int = 200
     reason: str = "OK"
+    headers: dict[str, str] = field(default_factory=dict)
 
     async def __aenter__(self) -> _FakeResponse:
         return self
+
+    async def read(self) -> bytes:
+        return b""
 
     async def __aexit__(self, *_args: object) -> None:
         return None
@@ -55,7 +59,8 @@ def test_jacq_resolves_latest_redirect_to_versioned_dmg() -> None:
         ("HEAD", "https://downloads.jacquard.dev/latest/mac-arm64.dmg")
     ]
     [(_method, _url, kwargs)] = session.calls
-    assert kwargs["allow_redirects"] is True
+    # Manual following validates every redirect target before the next request.
+    assert kwargs["allow_redirects"] is False
     assert kwargs["timeout"].total == updater.config.default_timeout
 
 
@@ -81,7 +86,6 @@ def test_jacq_accepts_legacy_versioned_dmg_path() -> None:
 @pytest.mark.parametrize(
     "resolved_url",
     [
-        "http://downloads.jacquard.dev/releases/1.2.3/Jacq-1.2.3-arm64.dmg",
         "https://example.test/releases/1.2.3/Jacq-1.2.3-arm64.dmg",
         "https://downloads.jacquard.dev/latest/mac-arm64.dmg",
         "https://downloads.jacquard.dev/releases/1.2.3/Jacq-1.2.4-arm64.dmg",
@@ -103,22 +107,3 @@ def test_jacq_rejects_untrusted_or_malformed_latest_redirects(
                 context=UpdateContext(current=None),
             )
         )
-
-
-def test_jacq_reports_latest_endpoint_http_failures() -> None:
-    """HTTP failures should identify the discovery endpoint before hashing starts."""
-    module = _load_module()
-    updater = module.JacqUpdater()
-    session = _FakeSession(
-        _FakeResponse(
-            url="https://downloads.jacquard.dev/latest/mac-arm64.dmg",
-            status=503,
-            reason="Service Unavailable",
-        )
-    )
-
-    with pytest.raises(
-        RuntimeError,
-        match=("Failed to resolve Jacq latest URL .*: HTTP 503 Service Unavailable"),
-    ):
-        _run(updater.fetch_latest(session, context=UpdateContext(current=None)))

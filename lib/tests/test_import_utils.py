@@ -48,6 +48,32 @@ def test_load_module_from_path_rolls_back_partial_registration(tmp_path: Path) -
     assert module_name not in sys.modules
 
 
+@pytest.mark.parametrize("error_type", [SystemExit, KeyboardInterrupt])
+@pytest.mark.parametrize("with_previous", [False, True])
+def test_load_module_from_path_rolls_back_base_exceptions(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    error_type: type[BaseException],
+    *,
+    with_previous: bool,
+) -> None:
+    """Control-flow exceptions re-raise after restoring registration ownership."""
+    module_name = f"_import_utils_{error_type.__name__}_{with_previous}"
+    module_path = tmp_path / f"{module_name}.py"
+    module_path.write_text(f"raise {error_type.__name__}('boom')\n", encoding="utf-8")
+    previous = ModuleType(module_name)
+    if with_previous:
+        monkeypatch.setitem(sys.modules, module_name, previous)
+
+    with pytest.raises(error_type, match="boom"):
+        load_module_from_path(module_path, module_name)
+
+    if with_previous:
+        assert sys.modules[module_name] is previous
+    else:
+        assert module_name not in sys.modules
+
+
 def test_load_module_from_path_rejects_missing_loader(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -63,15 +89,36 @@ def test_load_module_from_path_rejects_missing_loader(
         load_module_from_path(path, "_import_utils_missing_loader")
 
 
-def test_load_module_from_path_preserves_replacement_module_on_failure(
+def test_load_module_from_path_restores_previous_registration_on_failure(
     monkeypatch,
     tmp_path: Path,
+) -> None:
+    """A failed reload must restore the module that was registered before it."""
+    module_name = "_import_utils_reload"
+    module_path = tmp_path / "reload.py"
+    module_path.write_text("raise RuntimeError('boom')\n", encoding="utf-8")
+    previous = ModuleType(module_name)
+    monkeypatch.setitem(sys.modules, module_name, previous)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        load_module_from_path(module_path, module_name)
+
+    assert sys.modules[module_name] is previous
+
+
+@pytest.mark.parametrize("error_type", [RuntimeError, SystemExit, KeyboardInterrupt])
+def test_load_module_from_path_preserves_replacement_module_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    error_type: type[BaseException],
 ) -> None:
     """Cleanup should not remove a different module inserted during a failed import."""
     module_name = "_import_utils_replaced"
     module_path = tmp_path / "replaced.py"
     module_path.write_text("VALUE = 1\n", encoding="utf-8")
 
+    previous = ModuleType(module_name)
+    monkeypatch.setitem(sys.modules, module_name, previous)
     created_module = ModuleType(module_name)
     replacement = ModuleType(module_name)
 
@@ -79,7 +126,7 @@ def test_load_module_from_path_preserves_replacement_module_on_failure(
         def exec_module(self, module: ModuleType) -> None:
             assert module is created_module
             sys.modules[module_name] = replacement
-            raise RuntimeError("boom")
+            raise error_type("boom")
 
     monkeypatch.setattr(
         lib.import_utils.importlib.util,
@@ -92,7 +139,7 @@ def test_load_module_from_path_preserves_replacement_module_on_failure(
         lambda _spec: created_module,
     )
 
-    with pytest.raises(RuntimeError, match="boom"):
+    with pytest.raises(error_type, match="boom"):
         load_module_from_path(module_path, module_name)
 
     assert sys.modules[module_name] is replacement

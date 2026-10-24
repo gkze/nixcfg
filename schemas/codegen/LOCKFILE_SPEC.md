@@ -137,6 +137,8 @@ Notes:
 
 - symlinks, device files, sockets, and other non-regular files are out of scope
   for v1. They should cause the hash step to fail rather than silently diverge.
+  This includes a symlink used as the source root and symlinked directories
+  encountered during traversal, even when the symlink resolves to a directory.
 - empty materialized file sets hash as the SHA-256 of the empty byte string
 
 ## Directory source matching
@@ -162,8 +164,12 @@ For locked URL sources:
 For locked GitHub raw sources:
 
 - `ref` should be the immutable commit SHA actually fetched
+- `path` must be repository-relative after normalization. Absolute paths,
+  empty paths, and `..` traversal that escapes the repository root are invalid.
 - `uri` should be the canonical raw-content URL derived from `owner`, `repo`,
-  the resolved `ref`, and `path`
+  the resolved `ref`, and `path`. Percent-encode each `path` segment for URL
+  transport so reserved characters such as `?` and `#` remain path data rather
+  than becoming a query or fragment; keep `path` itself unescaped.
 - `tag` may preserve the original human-facing tag name when a tag resolves to
   the stored commit SHA
 - `package` and `package_version` are provenance fields only

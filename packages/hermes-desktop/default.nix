@@ -4,6 +4,7 @@
   inputs,
   lib,
   makeWrapper,
+  mkMacAppPassthru,
   nixcfgElectron,
   python3,
   selfSource,
@@ -82,13 +83,7 @@ hermesNpmLib.buildNpmPackage {
 
   postPatch = ''
     PYTHONPATH=${
-      lib.fileset.toSource {
-        root = ../..;
-        fileset = lib.fileset.unions [
-          ../../lib/__init__.py
-          ../../lib/exact_text_patch.py
-        ];
-      }
+      import ../../lib/codemods-pythonpath.nix { inherit lib; }
     } ${lib.getExe python3} ${./patch_nix_managed.py} "$PWD" ${lib.escapeShellArg hermesExecutable} ${lib.escapeShellArg hermesVersion}
   '';
 
@@ -214,12 +209,14 @@ hermesNpmLib.buildNpmPackage {
 
   passthru = {
     packageJsonPath = "apps/desktop/package.json";
-    macApp = {
-      bundleId = appId;
-      bundleName = appBundleName;
-      bundleRelPath = "Applications/${appBundleName}";
-      installMode = "symlink";
-    };
+    inherit
+      (mkMacAppPassthru {
+        bundleName = appBundleName;
+        macApp.bundleId = appId;
+        macApp.installMode = "symlink";
+      })
+      macApp
+      ;
   };
 
   meta = {

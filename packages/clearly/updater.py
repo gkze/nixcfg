@@ -12,7 +12,6 @@ from lib.update.events import EventSink, ignore_event
 from lib.update.locked_source import is_immutable_commit
 from lib.update.net import fetch_github_api_paginated, fetch_url, github_raw_url
 from lib.update.nix import (
-    _build_fetch_from_github_expr,
     _build_package_path_attr_expr,
 )
 from lib.update.updaters import (
@@ -54,6 +53,8 @@ class ClearlyUpdater(GitHubReleaseUpdater):
         "cmark-gfm",
         "KeyboardShortcuts",
     )
+    # Recompute the source closure before accepting matching metadata.
+    always_rehash = True
 
     @staticmethod
     def _github_repo_from_url(url: str) -> tuple[str, str]:
@@ -200,15 +201,6 @@ class ClearlyUpdater(GitHubReleaseUpdater):
             },
         )
 
-    async def _is_latest(
-        self,
-        context: UpdateContext,
-        info: VersionInfo,
-    ) -> bool:
-        """Recompute the source closure before accepting matching metadata."""
-        _ = (context, info)
-        return False
-
     @classmethod
     def _dependency_urls_from_info(cls, info: VersionInfo) -> dict[str, str]:
         raw_urls = metadata_get(
@@ -228,15 +220,6 @@ class ClearlyUpdater(GitHubReleaseUpdater):
                 raise RuntimeError(msg)
             urls[dependency] = url
         return urls
-
-    @classmethod
-    def _src_expr(cls, commit: str) -> str:
-        return _build_fetch_from_github_expr(
-            cls.GITHUB_OWNER,
-            cls.GITHUB_REPO,
-            rev=commit,
-            fetch_submodules=False,
-        )
 
     def _source_override(
         self,

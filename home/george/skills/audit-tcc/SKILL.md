@@ -202,7 +202,9 @@ the target pane.
 
 ## Dependency notes
 
-`tcctool` is a Python CLI shipped by this repo's `nixcfg` package. It runs with
+`tcctool` is a Python CLI shipped by this repo's `nixcfg` package on Darwin
+(`bin/tcctool` beside `bin/nixcfg`). Inside the repo dev shell,
+`uv run tcctool` runs the same entry point. It runs with
 the same interpreter and pinned dependency set as `nixcfg`, so there is no
 ad-hoc `pip install` and no shell-script layer. Its only native dependency is
 [PyObjC](https://pyobjc.readthedocs.io/) (`pyobjc-core`, `-Cocoa`,

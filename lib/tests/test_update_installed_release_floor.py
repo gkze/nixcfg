@@ -52,7 +52,7 @@ def test_cursor_resolves_newer_of_page_and_current_series(
     async def fetch(_session: object, _url: str, **_kwargs: object) -> bytes:
         return page.encode()
 
-    async def resolve(_session: object, url: str) -> str:
+    async def resolve(_session: object, url: str, **_kwargs: object) -> str:
         requested.append(url)
         platform = url.split("/golden/", 1)[1].split("/", 1)[0]
         file = (
@@ -63,7 +63,7 @@ def test_cursor_resolves_newer_of_page_and_current_series(
         return f"https://downloads.cursor.com/production/{commit}/{platform}/{file}"
 
     monkeypatch.setattr(module, "fetch_url", fetch)
-    monkeypatch.setattr(updater, "_resolve_download_url", resolve)
+    monkeypatch.setattr(module, "fetch_redirect_location", resolve)
     current = SourceEntry.model_validate({"version": current_version, "hashes": {}})
     info = run_async(
         updater.fetch_latest(object(), context=UpdateContext(current=current))
@@ -101,7 +101,7 @@ def _cursor_feed(
             f'"{updater._api_url(p)}"' for p in updater.PLATFORMS.values()
         ).encode()
 
-    async def resolve(_session: object, url: str) -> str:
+    async def resolve(_session: object, url: str, **_kwargs: object) -> str:
         api_platform = url.split("/golden/", 1)[1].split("/", 1)[0]
         platform = next(
             p for p, api in updater.PLATFORMS.items() if api == api_platform
@@ -109,7 +109,7 @@ def _cursor_feed(
         return urls[platform]
 
     monkeypatch.setattr(module, "fetch_url", fetch)
-    monkeypatch.setattr(updater, "_resolve_download_url", resolve)
+    monkeypatch.setattr(module, "fetch_redirect_location", resolve)
     return updater
 
 

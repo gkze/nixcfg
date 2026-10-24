@@ -3,6 +3,7 @@
   curl,
   fetchFromGitHub,
   lib,
+  mkMacAppPassthru,
   outputs,
   python3,
   selfSource,
@@ -241,11 +242,7 @@ stdenvNoCC.mkDerivation {
 
   passthru = {
     inherit swiftDeps;
-    macApp = {
-      bundleName = appBundleName;
-      bundleRelPath = "Applications/${appBundleName}";
-      installMode = "copy";
-    };
+    inherit (mkMacAppPassthru { bundleName = appBundleName; }) macApp;
   };
 
   meta = with lib; {

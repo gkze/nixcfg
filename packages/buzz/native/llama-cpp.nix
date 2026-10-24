@@ -84,6 +84,7 @@ stdenv.mkDerivation {
     runHook postBuild
   '';
 
+  # LLAMA_BUILD_TESTS is off above, so no test targets exist to run.
   doCheck = false;
   dontFixup = true;
 

@@ -15,7 +15,9 @@ let
     else
       throw "compat-overlay.nix: provide `slib` or `outputs.lib` before applying this overlay.";
 
-  resolvedOutputs = if outputs != null then outputs else { lib = resolvedSlib; };
+  resolvedOutputs = (if outputs != null then outputs else { }) // {
+    lib = resolvedSlib;
+  };
 
   overlaySet = import ../overlays/default.nix {
     inherit inputs;

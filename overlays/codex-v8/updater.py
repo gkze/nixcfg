@@ -122,11 +122,11 @@ class CodexV8Updater(GitHubReleaseUpdater):
         }
         return required <= present
 
-    @staticmethod
-    def _src_expr(version: str) -> str:
+    @classmethod
+    def _src_expr(cls, commit: str) -> str:
         return _build_fetchgit_expr(
-            "https://github.com/denoland/rusty_v8.git",
-            version,
+            f"https://github.com/{cls.GITHUB_OWNER}/{cls.GITHUB_REPO}.git",
+            commit,
             fetch_submodules=True,
         )
 

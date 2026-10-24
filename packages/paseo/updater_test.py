@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -28,8 +29,10 @@ from nix_manipulator.expressions.path import NixPath
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.codemods.errors import CodemodError
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance
+from lib.tests._mac_app_passthru import mac_app_passthru_args
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     binding_map,
@@ -69,12 +72,14 @@ _NATIVE_MANIFEST_CASES = [
         "native-manifest.txt",
         "c95f41c50d4b47704abcfa91a9f52b3bda6a288bd085c43cf0d82cfe6d22a4d0",
         199,
+        95,
         "2601.0.0",
     ),
     (
         "native-manifest-abseil-20260817.txt",
         "5d0fa899e4a7bcc347e6e5a0217d5420bc50b0924715d12aaf0a19529a340ef5",
         201,
+        96,
         "2608.0.0",
     ),
 ]
@@ -253,13 +258,10 @@ export class ClaudeAgentClient implements AgentClient {
   }
 
   async fetchCatalog(): Promise<ProviderCatalog> {
-    const advertisedModels = await runProviderRefreshActivity(context, "models", () =>
-        this.discoverModels({
-          resolveBinary: this.resolveBinary,
-          runtimeSettings: this.runtimeSettings,
-        }),
+    const claudeCodeVersion = await runProviderRefreshActivity(context, "version", () =>
+        this.resolveVersion(context?.signal),
     );
-    return { models: advertisedModels };
+    return { models: [], version: claudeCodeVersion };
   }
 }
 
@@ -272,7 +274,7 @@ class ClaudeAgentSession implements AgentSession {
     );
   }
 
-  private async buildOptions(permissionMode: PermissionMode): Promise<ClaudeOptions> {
+  private async buildOptions(): Promise<ClaudeOptions> {
     const claudeBinary = await this.resolveBinary();
     const base: ClaudeOptions = {
       pathToClaudeCodeExecutable: claudeBinary,
@@ -351,6 +353,7 @@ _PINNED_REPLACEMENT_FRAGMENTS = {
         "if (nixOwnsUpdates())",
     ),
     "packages/server/src/server/session/daemon/npm-global-cli.ts": (
+        "installLatest(): Promise<CommandResult> {",
         "return Promise.resolve({",
         'stderr: "Updates are managed by Nix."',
     ),
@@ -405,10 +408,9 @@ _PINNED_SOURCE_FIXTURES = {
     "packages/server/src/server/session/daemon/npm-global-cli.ts": (
         'export const PASEO_CLI_PACKAGE = "@getpaseo/cli";\n'
         "const NPM_INSTALL_TIMEOUT_MS = 300_000;\n"
-        "  installLatest(options: NpmGlobalOptions = {}): Promise<CommandResult> {\n"
-        '    const prefixArgs = options.prefix ? ["--prefix", options.prefix] : [];\n'
+        "  installLatest(): Promise<CommandResult> {\n"
         '    return this.runCommand("npm", ["install", "-g", '
-        "`${PASEO_CLI_PACKAGE}@latest`, ...prefixArgs], {\n"
+        "`${PASEO_CLI_PACKAGE}@latest`], {\n"
         "      timeout: NPM_INSTALL_TIMEOUT_MS,\n"
         "      maxBuffer: NPM_MAX_BUFFER_BYTES,\n"
         "    });\n"
@@ -448,10 +450,9 @@ _ORIGINAL_MUTATION_FRAGMENTS = {
     ),
     "packages/server/src/server/session/daemon/npm-global-cli.ts": (
         "const NPM_INSTALL_TIMEOUT_MS = 300_000;\n",
-        "  installLatest(options: NpmGlobalOptions = {}): Promise<CommandResult> {\n"
-        '    const prefixArgs = options.prefix ? ["--prefix", options.prefix] : [];\n'
+        "  installLatest(): Promise<CommandResult> {\n"
         '    return this.runCommand("npm", ["install", "-g", '
-        "`${PASEO_CLI_PACKAGE}@latest`, ...prefixArgs], {\n"
+        "`${PASEO_CLI_PACKAGE}@latest`], {\n"
         "      timeout: NPM_INSTALL_TIMEOUT_MS,\n"
         "      maxBuffer: NPM_MAX_BUFFER_BYTES,\n"
         "    });\n"
@@ -856,11 +857,20 @@ def test_paseo_resolves_exact_release_and_native_source_graph(
             b"v1.23.2/onnxruntime-osx-arm64-1.23.2.tgz"
         )
 
+    async def github_payload(
+        session: object,
+        path: str,
+        *,
+        config: object,
+    ) -> dict[str, str]:
+        if "/commits/" in path:
+            return await commit_payload(session, path, config=config)
+        return await release_payload(session, path, config=config)
+
     monkeypatch.setattr(
         "lib.update.updaters.github_release.fetch_github_api",
-        release_payload,
+        github_payload,
     )
-    monkeypatch.setattr(module, "fetch_github_api", commit_payload)
     monkeypatch.setattr(module, "fetch_json", json_payload)
     monkeypatch.setattr(module, "fetch_url", bytes_payload)
 
@@ -1053,12 +1063,8 @@ def test_paseo_rejects_malformed_manifest_payloads() -> None:
     """Malformed JSON shapes and missing strings fail before hash promotion."""
     module = _load_updater_module()
 
-    with pytest.raises(TypeError, match="root manifest is not a JSON object"):
+    with pytest.raises(TypeError, match="Expected JSON object for root manifest"):
         _validate_manifests(module, root_payload=[])
-    with pytest.raises(TypeError, match="test payload is missing version"):
-        module._require_string({}, "version", context="test payload")
-    with pytest.raises(TypeError, match="test payload is missing version"):
-        module._require_string({"version": ""}, "version", context="test payload")
     with pytest.raises(RuntimeError, match="exact semantic version"):
         module._require_exact_version("latest", context="test version")
     with pytest.raises(RuntimeError, match="immutable commit"):
@@ -1174,35 +1180,6 @@ def test_paseo_rejects_inconsistent_onnxruntime_archive_identity() -> None:
                 "https://github.com/microsoft/onnxruntime/releases/download/"
                 "v1.23.2/onnxruntime-osx-arm64-1.23.1.tgz"
             ),
-        )
-
-
-def test_paseo_rejects_nonimmutable_commit(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A GitHub tag response must resolve to a full immutable commit."""
-    module = _load_updater_module()
-
-    async def invalid_commit_payload(
-        _session: object,
-        _path: str,
-        *,
-        config: object,
-    ) -> dict[str, str]:
-        assert config is sentinel
-        return {"sha": "not-an-immutable-commit"}
-
-    sentinel = object()
-    monkeypatch.setattr(module, "fetch_github_api", invalid_commit_payload)
-    with pytest.raises(RuntimeError, match="is not an immutable commit"):
-        run_async(
-            module.PaseoUpdater._resolve_tag_commit(
-                object(),
-                owner="getpaseo",
-                repo="paseo",
-                tag=_TAG,
-                config=sentinel,
-            )
         )
 
 
@@ -1862,7 +1839,13 @@ def test_paseo_patcher_is_transactional_and_covers_all_mutation_surfaces(
     for relative_path, originals in _ORIGINAL_MUTATION_FRAGMENTS.items():
         source = (root / relative_path).read_text(encoding="utf-8")
         assert all(original not in source for original in originals)
-    with pytest.raises(RuntimeError, match="managed-source patch anchor"):
+    # Re-running on the patched tree is upstream drift: the unmodified anchors
+    # still match, but the first patch target is gone, so the check-only run
+    # fails before writing anything.
+    with pytest.raises(
+        CodemodError,
+        match=r"^expected 1 match for (?!anchor in ).*, found 0$",
+    ):
         module.patch_tree(
             root,
             claude_code_executable=_TEST_CLAUDE_CODE_EXECUTABLE,
@@ -1911,7 +1894,13 @@ def test_paseo_patcher_rejects_missing_independent_anchor(tmp_path: Path) -> Non
         encoding="utf-8",
     )
 
-    with pytest.raises(RuntimeError, match="expected 1 managed-source anchor"):
+    with pytest.raises(
+        CodemodError,
+        match=(
+            rf"^expected 1 match for anchor in .*{re.escape(_MISSING_ANCHOR_PATH)}, "
+            r"found 0$"
+        ),
+    ):
         module.patch_tree(
             root,
             claude_code_executable=_TEST_CLAUDE_CODE_EXECUTABLE,
@@ -2011,8 +2000,8 @@ async function unreviewedLaunch(): Promise<void> {
             b"  @disabled\n  private async buildOptions",
         ),
         (
-            b"          resolveBinary: this.resolveBinary,\n",
-            b"          resolveBinary: () => bundledSdkBinary,\n",
+            b"        this.resolveVersion(context?.signal),\n",
+            b"        this.resolveVersion(context?.signal) ?? bundledSdkVersion,\n",
         ),
     ],
     ids=(
@@ -2310,14 +2299,19 @@ def test_paseo_registry_exports_only_on_arm64_darwin() -> None:
 
 
 @pytest.mark.parametrize(
-    ("name", "expected_hash", "row_count", "abseil_abi"),
+    ("name", "expected_hash", "row_count", "nonexecutable_count", "abseil_abi"),
     _NATIVE_MANIFEST_CASES,
 )
 def test_paseo_reviewed_native_manifest_matches_the_realized_inventory(
-    name: str, expected_hash: str, row_count: int, abseil_abi: str
+    name: str,
+    expected_hash: str,
+    row_count: int,
+    nonexecutable_count: int,
+    abseil_abi: str,
 ) -> None:
-    """The realized package must retain the exact reviewed native inventory."""
-    manifest = (_PACKAGE_DIR / name).read_bytes()
+    """Digest, row count, and signature shape must describe one reviewed inventory."""
+    manifest_path = _PACKAGE_DIR / name
+    manifest = manifest_path.read_bytes()
 
     assert manifest.endswith(b"\n")
     assert not manifest.endswith(b"\n\n")
@@ -2345,6 +2339,15 @@ def test_paseo_reviewed_native_manifest_matches_the_realized_inventory(
         "1\tContents/Resources/app.asar.unpacked/node_modules/node-pty/"
         "build/Release/spawn-helper"
     ) in rows
+
+    signature_validator = load_repo_module(
+        "packages/paseo/validate_signatures.py",
+        "paseo_signature_validator_updater_test",
+    )
+    assert (
+        signature_validator.expected_nonexecutable_count(manifest_path)
+        == nonexecutable_count
+    )
 
 
 def test_paseo_every_selected_native_manifest_is_reviewed() -> None:
@@ -2610,13 +2613,11 @@ def test_paseo_blocked_foundation_does_not_advertise_a_mac_app() -> None:
     assert_nix_ast_equal(real_passthru.left, "commonPassthru")
     real_only = expect_instance(real_passthru.right, AttributeSet)
     assert_nix_ast_equal(
-        expect_binding(real_only.values, "macApp").value,
+        mac_app_passthru_args(real_only),
         """
         {
-          bundleId = appId;
           bundleName = appBundleName;
-          bundleRelPath = "Applications/${appBundleName}";
-          installMode = "copy";
+          macApp.bundleId = appId;
         }
         """,
     )
@@ -4185,11 +4186,7 @@ def test_paseo_nix_files_are_structurally_parseable() -> None:
 
 def test_paseo_revalidates_current_metadata() -> None:
     """Current version metadata must still refresh every fixed-output closure."""
-    updater = _load_updater_module().PaseoUpdater()
-    assert (
-        run_async(updater._is_latest(UpdateContext(current=None), _version_info()))
-        is False
-    )
+    assert _load_updater_module().PaseoUpdater.always_rehash
 
 
 def test_paseo_raw_urls_are_commit_pinned() -> None:

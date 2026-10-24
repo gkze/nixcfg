@@ -7,7 +7,6 @@ from lib import json_utils
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import EventSink, ignore_event
 from lib.update.net import fetch_json
-from lib.update.nix import _build_fetch_from_github_expr
 from lib.update.updaters import (
     FixedOutputHashStep,
     UpdateContext,
@@ -69,15 +68,6 @@ class MdformatUpdater(GitHubReleaseUpdater):
         return VersionInfo(
             version=version,
             metadata={"commit": commit, "tag": version},
-        )
-
-    @staticmethod
-    def _src_expr(commit: str) -> str:
-        return _build_fetch_from_github_expr(
-            "hukkin",
-            "mdformat",
-            rev=commit,
-            fetch_submodules=False,
         )
 
     async def fetch_hashes(

@@ -10,6 +10,7 @@
   lib,
   makeRustPlatform,
   nodejs_24,
+  outputs,
   pkgs,
   pythonWorkspaceRoot ? ./.,
   runCommand,
@@ -27,9 +28,9 @@ let
   backendVersion = closurePlan.backend.version;
   hashEntryFor =
     hashType: url:
-    lib.findFirst (
-      entry: entry.hashType == hashType && (url == null || (entry.url or null) == url)
-    ) null source.hashes;
+    outputs.lib.selectSourceHashEntry source.hashes hashType (
+      lib.optionalAttrs (url != null) { inherit url; }
+    );
   desktopSourceHash = (hashEntryFor "srcHash" null).hash;
   backendSourceHash = (hashEntryFor "sha256" source.urls.backendSdist).hash;
   hashOrFake = value: if value == null then lib.fakeHash else value;

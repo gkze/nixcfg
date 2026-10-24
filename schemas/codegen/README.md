@@ -24,6 +24,11 @@ flowchart LR
   C --> E["golden fixtures"]
 ```
 
+The Python lockfile command validates the raw YAML/JSON data with the maintained
+`jsonschema` Draft 2020-12 validator and URI format checking before constructing
+the generated Pydantic models. This dependency is installed by the project's
+`codegen` extra and is loaded only when manifest validation runs.
+
 ## Lockfile CLI
 
 - Python reproducible default output:

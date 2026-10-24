@@ -113,7 +113,9 @@ assert
     }
   ];
 assert !(builtins.tryEval (mismatchedInventory.forSystem "aarch64-darwin")).success;
-assert !(builtins.tryEval (mismatchedInventory.forSystem "x86_64-linux")).success;
+# Closure validation is scoped to the roots realized for one system, so a
+# mismatch declared on aarch64-darwin must not fail (or force) other systems.
+assert mismatchedInventory.forSystem "x86_64-linux" == [ ];
 assert
   matchingInventory.manifest.roots == [
     {

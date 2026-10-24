@@ -9,13 +9,14 @@ from datetime import UTC
 from http import HTTPStatus
 from typing import TYPE_CHECKING, ClassVar
 
-import aiohttp
-
 from lib.nix.models.sources import HashCollection
+from lib.update.net import request
 from lib.update.updaters import DownloadHashUpdater, VersionInfo, register_updater
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+    import aiohttp
 
     from lib.nix.models.sources import SourceEntry, SourceHashes
     from lib.update.updaters import UpdateContext
@@ -116,45 +117,31 @@ class CoastLocalUpdater(DownloadHashUpdater):
     name = "coast-local"
     supported_platforms = ("aarch64-darwin",)
     PLATFORMS: ClassVar[dict[str, str]] = {"aarch64-darwin": _DOWNLOAD_URL}
+    # Rehash every time because the public Coast URL is mutable.
+    always_rehash = True
 
     async def fetch_latest(
         self, session: aiohttp.ClientSession, *, context: UpdateContext
     ) -> VersionInfo:
         """Resolve a content identity using only generic public CDN headers."""
         _ = context
-        timeout = aiohttp.ClientTimeout(total=self.config.default_timeout)
-        headers = {
-            "Accept": "application/x-apple-diskimage, application/octet-stream",
-            "Accept-Encoding": "identity",
-            "User-Agent": self.config.default_user_agent,
-        }
-        async with session.request(
-            "HEAD",
+        response = await request(
+            session,
             _DOWNLOAD_URL,
+            method="HEAD",
+            headers={
+                "Accept": "application/x-apple-diskimage, application/octet-stream",
+                "Accept-Encoding": "identity",
+                "User-Agent": self.config.default_user_agent,
+            },
             allow_redirects=False,
-            headers=headers,
-            timeout=timeout,
-        ) as response:
-            if response.status != HTTPStatus.OK:
-                msg = (
-                    f"Coast Local DMG discovery failed with HTTP {response.status} "
-                    f"{response.reason}"
-                )
-                raise RuntimeError(msg)
-            if str(response.url) != _DOWNLOAD_URL:
-                msg = f"Coast Local DMG resolved to an unexpected URL: {response.url}"
-                raise RuntimeError(msg)
-            version = _parse_artifact_identity(response.headers)
+            config=self.config,
+        )
+        if response.status != HTTPStatus.OK:
+            msg = f"Coast Local DMG discovery failed with HTTP {response.status}"
+            raise RuntimeError(msg)
+        version = _parse_artifact_identity(response.headers)
         return VersionInfo(version=version)
-
-    async def _is_latest(
-        self,
-        context: UpdateContext,
-        info: VersionInfo,
-    ) -> bool:
-        """Rehash every time because the public Coast URL is mutable."""
-        _ = (context, info)
-        return False
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist the complete content digest rather than mutable CDN metadata."""

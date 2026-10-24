@@ -11,6 +11,7 @@ let
   managedEntries = attrValues cfg.resolved;
   userEntries = macApps.applicationsForScope "user" cfg.resolved;
   managedBundleNames = map (entry: entry.bundleName) managedEntries;
+  cliShimFiles = macApps.cliShimFiles { entries = managedEntries; };
 in
 {
   options.nixcfg.macApps = {
@@ -28,6 +29,10 @@ in
       copyApps.enable = false;
       linkApps.enable = false;
     };
+
+    # Command-line executables bundled inside managed applications are linked
+    # into ~/.local/bin. The consumer owns putting that directory on PATH.
+    home.file = lib.mkIf (cliShimFiles != { }) cliShimFiles;
 
     assertions = lib.optionals (managedEntries != [ ]) [
       (macApps.uniqueBundleNamesAssertion managedEntries)
@@ -75,11 +80,5 @@ in
 
     # Home Manager owns user-scoped apps in ~/Applications. System-scoped apps are
     # left for nix-darwin system activation so /Applications has one owner.
-
-    # TEMPORARILY DISABLED: mac-app-util fails to build with SBCL 2.6.0
-    # SBCL 2.6.0 broke fare-quasiquote/cl-interpol readtable handling
-    # Tracking issue: https://github.com/hraban/mac-app-util/issues/42
-    # TODO: Re-enable once upstream is fixed (see issue nixcfg-gl7)
-    # imports = [ inputs.mac-app-util.homeManagerModules.default ];
   };
 }

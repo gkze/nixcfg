@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.net import fetch_github_api
-from lib.update.nix import _build_fetch_from_github_expr
 from lib.update.updaters import (
     GitHubReleaseUpdater,
     SourceThenOverlayHashMixin,
@@ -88,9 +87,3 @@ class GhCurrentUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
             msg = "GitHub CLI sourceDateEpoch must be canonical positive seconds"
             raise ValueError(msg)
         return {**(super().source_pins_for(info) or {}), "sourceDateEpoch": epoch}
-
-    @staticmethod
-    def _src_expr(commit: str) -> str:
-        return _build_fetch_from_github_expr(
-            "cli", "cli", rev=commit, fetch_submodules=False
-        )

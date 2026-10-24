@@ -4,6 +4,7 @@
   lib,
   makeDesktopItem,
   makeWrapper,
+  mkMacAppPassthru,
   models-dev,
   nixcfgElectron,
   nodejs,
@@ -147,7 +148,7 @@ let
 
   electronDist = electronBuild.dist;
 
-  node_modules = opencode.node_modules.overrideAttrs (old: {
+  node_modules = opencode.node_modules.overrideAttrs (_old: {
     pname = "${sourceHashPackageName}-node_modules";
     outputHash = slib.sourceHashForPlatform sourceHashPackageName "nodeModulesHash" system;
     buildPhase = ''
@@ -535,11 +536,7 @@ stdenv.mkDerivation {
       opencodeChannel
       ;
 
-    macApp = {
-      bundleName = appBundleName;
-      bundleRelPath = "Applications/${appBundleName}";
-      installMode = "copy";
-    };
+    inherit (mkMacAppPassthru { bundleName = appBundleName; }) macApp;
   };
 
   meta = with lib; {

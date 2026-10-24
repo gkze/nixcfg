@@ -1,10 +1,13 @@
 """Shared helpers for schema code generation."""
 
+import importlib
 from collections.abc import Callable
 from typing import override
 
 import isort
 import libcst as cst
+from libcst.codemod import CodemodContext
+from libcst.codemod.visitors import AddImportsVisitor
 
 type ProgressReporter = Callable[[str], None]
 
@@ -15,8 +18,23 @@ def emit_progress(progress: ProgressReporter | None, message: str) -> None:
         progress(message)
 
 
+def import_optional(module_name: str, *, feature: str) -> object:
+    """Import an optional codegen dependency or raise a helpful runtime error."""
+    try:
+        return importlib.import_module(module_name)
+    except ModuleNotFoundError as exc:
+        msg = (
+            f"{feature} requires optional dependency {module_name!r}. "
+            "Install the `codegen` extra to use this command."
+        )
+        raise RuntimeError(msg) from exc
+
+
 class _ConstrAnnotationTransformer(cst.CSTTransformer):
     """Rewrite Pydantic ``constr(pattern=...)`` calls to ``Annotated``."""
+
+    def __init__(self) -> None:
+        self.rewritten = False
 
     @override
     def leave_Call(
@@ -34,6 +52,7 @@ class _ConstrAnnotationTransformer(cst.CSTTransformer):
         [arg] = updated_node.args
         if arg.keyword is None or arg.keyword.value != "pattern":
             return updated_node
+        self.rewritten = True
         return cst.Subscript(
             value=cst.Name("Annotated"),
             slice=[
@@ -97,8 +116,14 @@ def _import_alias_name(alias: cst.ImportAlias) -> str:
 
 
 def rewrite_constr_type_hints(code: str) -> str:
-    """Rewrite ``constr(pattern=...)`` annotations to ``StringConstraints``."""
-    return cst.parse_module(code).visit(_ConstrAnnotationTransformer()).code
+    """Rewrite ``constr`` annotations and import ``Annotated`` when used."""
+    transformer = _ConstrAnnotationTransformer()
+    rewritten = cst.parse_module(code).visit(transformer)
+    if not transformer.rewritten:
+        return rewritten.code
+    context = CodemodContext()
+    AddImportsVisitor.add_needed_import(context, "typing", "Annotated")
+    return rewritten.visit(AddImportsVisitor(context)).code
 
 
 def normalize_pydantic_imports(code: str) -> str:

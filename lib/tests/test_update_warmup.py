@@ -469,6 +469,7 @@ def test_plan_darwin_warmup_writes_intersection_and_rejects_huge_remainder(
     cached = {"/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-cached"}
     plan = plan_darwin_warmup(
         tmp_path,
+        tree="a" * 40,
         manifest=_manifest(),
         shards=shards,
         run=run,
@@ -506,10 +507,16 @@ def test_plan_darwin_warmup_writes_intersection_and_rejects_huge_remainder(
     assert plan.shards[1].remaining == 0
     path = tmp_path / WARMUP_PLAN_NAME
     write_warmup_plan(path, plan)
-    loaded = load_warmup_plan(path)
+    loaded = load_warmup_plan(path, expected_tree="a" * 40)
     assert loaded.warmup_outputs == plan.warmup_outputs
+    with pytest.raises(WarmupError, match="source tree mismatch"):
+        load_warmup_plan(path, expected_tree="b" * 40)
+    with pytest.raises(WarmupError, match="must not be empty"):
+        load_warmup_plan(path, expected_tree="")
     with pytest.raises(WarmupError, match="invalid warmup plan"):
-        load_warmup_plan(tmp_path / "missing.json")
+        load_warmup_plan(tmp_path / "missing.json", expected_tree="a" * 40)
+    with pytest.raises(WarmupError, match="source tree is required"):
+        plan_darwin_warmup(tmp_path, tree="", manifest=_manifest(), shards=())
     huge_unique = [f"/nix/store/{index:032d}-unique-{index}" for index in range(401)]
     graphs["darwin-argus"] = _graph(
         "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cargo-package-sha2-0.10.9",
@@ -520,6 +527,7 @@ def test_plan_darwin_warmup_writes_intersection_and_rejects_huge_remainder(
     ):
         plan_darwin_warmup(
             tmp_path,
+            tree="a" * 40,
             manifest=_manifest(),
             shards=shards,
             run=run,
@@ -567,6 +575,7 @@ def test_plan_darwin_warmup_peels_shared_non_rust_cascade_from_remaining(
     )
     plan = plan_darwin_warmup(
         tmp_path,
+        tree="a" * 40,
         manifest=_manifest(),
         shards=shards,
         run=run,
@@ -641,6 +650,7 @@ def test_plan_darwin_warmup_peels_two_plus_darwin_only_shared(
     ) == frozenset({all4, rust})
     plan = plan_darwin_warmup(
         tmp_path,
+        tree="a" * 40,
         manifest=_live_manifest(),
         shards=shards,
         run=run,
@@ -670,6 +680,7 @@ def test_plan_darwin_warmup_peels_two_plus_darwin_only_shared(
     with pytest.raises(WarmupError, match="remaining_sample=.*unique-0"):
         plan_darwin_warmup(
             tmp_path,
+            tree="a" * 40,
             manifest=_live_manifest(),
             shards=shards,
             run=run_unique,
@@ -727,6 +738,7 @@ def test_plan_darwin_warmup_peels_gitbutler_family_even_when_cached(
     )
     plan = plan_darwin_warmup(
         tmp_path,
+        tree="a" * 40,
         manifest=_manifest(),
         shards=shards,
         run=run,
@@ -805,6 +817,7 @@ def test_plan_darwin_warmup_evals_package_graphs_when_not_injected(
     )
     plan = plan_darwin_warmup(
         tmp_path,
+        tree="a" * 40,
         manifest=_manifest(),
         shards=shards,
         run=run,
@@ -944,6 +957,7 @@ def test_plan_defaults_to_subprocess_and_cache_helpers(
     )
     plan = plan_darwin_warmup(
         tmp_path,
+        tree="a" * 40,
         manifest=_manifest(),
         shards=shards,
         run=run,
@@ -964,6 +978,7 @@ def test_plan_defaults_to_subprocess_and_cache_helpers(
     })
     empty = plan_darwin_warmup(
         tmp_path,
+        tree="a" * 40,
         manifest=linux_only,
         shards=(),
         run=run,
@@ -1519,6 +1534,7 @@ def test_plan_darwin_warmup_records_rusty_v8_family(tmp_path: Path) -> None:
 
     plan = plan_darwin_warmup(
         tmp_path,
+        tree="a" * 40,
         manifest=_manifest(),
         shards=(),
         run=run,
@@ -1532,7 +1548,9 @@ def test_plan_darwin_warmup_records_rusty_v8_family(tmp_path: Path) -> None:
     assert _GIX not in plan.rusty_v8_family
     path = tmp_path / WARMUP_PLAN_NAME
     write_warmup_plan(path, plan)
-    assert load_warmup_plan(path).rusty_v8_family == plan.rusty_v8_family
+    assert load_warmup_plan(path, expected_tree=plan.tree).rusty_v8_family == (
+        plan.rusty_v8_family
+    )
 
 
 def test_skip_cached_warmup_paths_batches_gkze_path_info() -> None:

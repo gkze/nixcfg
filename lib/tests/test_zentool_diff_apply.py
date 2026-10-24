@@ -248,6 +248,9 @@ def test_asset_diff_lines_reports_create_update_remove_and_user_js_update(
     update_destination = profile_chrome_dir / "nested" / "update.css"
     update_destination.parent.mkdir(parents=True)
     update_destination.symlink_to(wrong_target)
+    unmanaged_source = chrome_source / "plain.css"
+    unmanaged_source.write_text("managed\n", encoding="utf-8")
+    (profile_chrome_dir / "plain.css").write_text("local\n", encoding="utf-8")
 
     manifest_path = profile_dir / zentool.MANAGED_CHROME_MANIFEST
     manifest_path.write_text("nested/update.css\nstale.css\n", encoding="utf-8")
@@ -278,9 +281,15 @@ def test_asset_diff_lines_reports_create_update_remove_and_user_js_update(
     assert zentool._asset_diff_lines(make_args()) == [
         f"create asset chrome/create.css -> {create_source}",
         f"update asset chrome/nested/update.css -> {update_source}",
+        f"replace unmanaged file chrome/plain.css -> {unmanaged_source}",
         "remove asset chrome/stale.css",
         f"update asset user.js -> {user_js_source}",
     ]
+    user_js_destination.unlink()
+    user_js_destination.write_text("local\n", encoding="utf-8")
+    assert zentool._asset_diff_lines(make_args())[-1] == (
+        f"replace unmanaged file user.js -> {user_js_source}"
+    )
 
 
 def test_asset_diff_lines_keeps_symlinked_chrome_sources_stable(
@@ -683,7 +692,7 @@ def test_cmd_apply_applies_state_and_assets_after_showing_both_diffs(
     )
     monkeypatch.setattr(zentool, "DeepDiff", lambda old, new, **_kwargs: diff)
     monkeypatch.setattr(zentool, "_asset_diff_lines", lambda _args: ["asset change"])
-    monkeypatch.setattr(zentool, "backup_session", lambda _path: backup_path)
+    monkeypatch.setattr(zentool, "backup_file", lambda _path, **_kw: backup_path)
     written: list[tuple[Path, object]] = []
     monkeypatch.setattr(
         zentool,
@@ -832,7 +841,7 @@ def test_cmd_apply_accepts_combined_prompt_before_applying_changes(
         zentool, "DeepDiff", lambda *_args, **_kwargs: FakeDiff("state diff")
     )
     monkeypatch.setattr(zentool, "_asset_diff_lines", lambda _args: ["asset change"])
-    monkeypatch.setattr(zentool, "backup_session", lambda _path: backup_path)
+    monkeypatch.setattr(zentool, "backup_file", lambda _path, **_kw: backup_path)
     monkeypatch.setattr(zentool, "write_session", lambda *_args: None)
     monkeypatch.setattr(zentool, "_apply_assets", lambda _args: True)
     monkeypatch.setattr(zentool, "_stdout", lambda message="": stdout.append(message))

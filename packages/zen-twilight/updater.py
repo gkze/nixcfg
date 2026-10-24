@@ -74,6 +74,8 @@ class ZenTwilightUpdater(DownloadHashUpdater):
             mode="build",
         ),
     )
+    # Recompute hashes for the pinned channel artifact before comparing.
+    always_rehash = True
 
     async def fetch_latest(
         self, session: aiohttp.ClientSession, *, context: UpdateContext
@@ -174,12 +176,3 @@ class ZenTwilightUpdater(DownloadHashUpdater):
                 )
                 await asyncio.sleep(max(0.0, self.config.default_retry_backoff))
                 attempt += 1
-
-    async def _is_latest(
-        self,
-        context: UpdateContext,
-        info: VersionInfo,
-    ) -> bool:
-        """Recompute hashes for the pinned channel artifact before comparing."""
-        _ = (context, info)
-        return False

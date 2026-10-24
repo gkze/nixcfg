@@ -1,6 +1,7 @@
 """Tests for extracted crate2nix Tauri helper scripts."""
 
 import json
+import stat
 from pathlib import Path
 from types import ModuleType
 
@@ -56,9 +57,9 @@ def test_env_rewrite_helper_materializes_temp_paths_and_normalizes_exports(
     dir_value = rewritten["TAURI_DIR"].strip('"')
     json_value = rewritten["TAURI_JSON"].strip('"')
     assert Path(dir_value).is_dir()
-    assert Path(dir_value).name == f"tauri_dir-{source_dir.name}"
+    assert Path(dir_value).name == f"env-tauri_dir-{source_dir.name}"
     assert Path(json_value).is_file()
-    assert Path(json_value).name == f"tauri_json-{payload_file.name}"
+    assert Path(json_value).name == f"env-tauri_json-{payload_file.name}"
 
     nested_payload = Path(json_value)
     assert nested_payload.exists()
@@ -68,7 +69,42 @@ def test_env_rewrite_helper_materializes_temp_paths_and_normalizes_exports(
     assert isinstance(rewritten_payload[0], str)
     assert rewritten_payload != original_payload
     assert rewritten_payload[1] == "relative-entry"
-    assert Path(rewritten_payload[0]).parent.name == "tauri_json-files"
+    assert Path(rewritten_payload[0]).parent.name == "env-tauri_json-files"
+
+
+def test_env_rewrite_helper_keeps_same_basename_nested_sources_distinct(
+    tmp_path: Path,
+) -> None:
+    """Indexed destinations preserve each nested file's bytes, mode, and reference."""
+    helper = _load_module(
+        "lib/crate2nix_tauri_env_rewrite.py",
+        "_crate2nix_tauri_env_rewrite_nested_collisions",
+    )
+    helper._TEMP_SOURCE_PREFIXES = (f"{tmp_path}/",)
+    first = tmp_path / "first" / "permissions.json"
+    second = tmp_path / "second" / "permissions.json"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_text('{"first": true}', encoding="utf-8")
+    second.write_text('{"second": true}', encoding="utf-8")
+    first.chmod(0o640)
+    second.chmod(0o755)
+    payload = tmp_path / "permissions.json"
+    payload.write_text(json.dumps([str(first), str(second)]), encoding="utf-8")
+
+    metadata_dir = tmp_path / "metadata"
+    metadata_dir.mkdir()
+    destination = helper._materialize_metadata_path(payload, metadata_dir, "tauri")
+    references = json.loads(destination.read_text(encoding="utf-8"))
+    assert len(references) == 2
+    assert references[0] != references[1]
+    copied = [Path(reference) for reference in references]
+    assert [path.read_text(encoding="utf-8") for path in copied] == [
+        '{"first": true}',
+        '{"second": true}',
+    ]
+    assert [stat.S_IMODE(path.stat().st_mode) for path in copied] == [0o640, 0o755]
+    assert all(path.parent == destination.parent / "tauri-files" for path in copied)
 
 
 def test_env_rewrite_helper_treats_linux_build_dir_as_ephemeral() -> None:
@@ -163,7 +199,7 @@ def test_env_rewrite_helper_supports_file_copy_and_non_temp_inputs(
     assert rewritten["KEEP_ABSOLUTE"] == str(tmp_path / "stable.txt")
     rewritten_file = Path(rewritten["TAURI_FILE"])
     assert rewritten_file.read_text(encoding="utf-8") == "demo"
-    assert rewritten_file.name == "tauri_file-value.txt"
+    assert rewritten_file.name == "env-tauri_file-value.txt"
 
 
 def test_env_rewrite_helper_skips_missing_env_files(tmp_path: Path) -> None:
@@ -254,6 +290,59 @@ def test_env_rewrite_helper_main_reads_environment(monkeypatch, tmp_path: Path) 
     assert metadata_dir.is_dir()
     assert out_file.read_text(encoding="utf-8") == "export KEEP=value\n"
     assert lib_file.read_text(encoding="utf-8") == "export KEEP=other\n"
+
+
+def test_env_rewrite_helper_main_scopes_colliding_exports(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Out and lib exports retain distinct payload and nested-file destinations."""
+    helper = _load_module(
+        "lib/crate2nix_tauri_env_rewrite.py",
+        "_crate2nix_tauri_env_rewrite_main_collisions",
+    )
+    helper._TEMP_SOURCE_PREFIXES = (f"{tmp_path}/",)
+    metadata_dir = tmp_path / "metadata"
+    env_files = {}
+    for source in ("out", "lib"):
+        source_dir = tmp_path / source
+        source_dir.mkdir()
+        nested = source_dir / "nested.json"
+        nested.write_text(f"{source} nested", encoding="utf-8")
+        payload = source_dir / "permissions.json"
+        payload.write_text(json.dumps([str(nested)]), encoding="utf-8")
+        env_file = source_dir / "env"
+        env_file.write_text(f'export TAURI:PERMISSIONS="{payload}"\n', encoding="utf-8")
+        env_files[source] = env_file
+
+    monkeypatch.setenv("TAURI_ENV_METADATA_DIR", str(metadata_dir))
+    monkeypatch.setenv("TAURI_ENV_OUT", str(env_files["out"]))
+    monkeypatch.setenv("TAURI_ENV_LIB", str(env_files["lib"]))
+    assert helper.main() == 0
+
+    def _payload_path(source: str) -> Path:
+        line = env_files[source].read_text(encoding="utf-8").strip()
+        prefix = 'export TAURI_PERMISSIONS="'
+        assert line.startswith(prefix)
+        assert line.endswith('"')
+        return Path(line.removeprefix(prefix).removesuffix('"'))
+
+    out_payload = _payload_path("out")
+    lib_payload = _payload_path("lib")
+    assert out_payload != lib_payload
+    assert out_payload.name == "out-tauri_permissions-permissions.json"
+    assert lib_payload.name == "lib-tauri_permissions-permissions.json"
+
+    out_references = json.loads(out_payload.read_text(encoding="utf-8"))
+    lib_references = json.loads(lib_payload.read_text(encoding="utf-8"))
+    assert out_references != lib_references
+    assert [
+        Path(reference).read_text(encoding="utf-8") for reference in out_references
+    ] == ["out nested"]
+    assert [
+        Path(reference).read_text(encoding="utf-8") for reference in lib_references
+    ] == ["lib nested"]
+    assert Path(out_references[0]).parent.name == "out-tauri_permissions-files"
+    assert Path(lib_references[0]).parent.name == "lib-tauri_permissions-files"
 
 
 def test_env_rewrite_helper_env_path_requires_non_empty_values(monkeypatch) -> None:

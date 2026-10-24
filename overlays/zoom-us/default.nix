@@ -1,4 +1,5 @@
 {
+  final,
   prev,
   selfSource,
   system,
@@ -13,13 +14,7 @@
           url = selfSource.urls.${system};
           hash = selfSource.hashes.${system};
         };
-        passthru = (old.passthru or { }) // {
-          macApp = {
-            bundleName = "zoom.us.app";
-            bundleRelPath = "Applications/zoom.us.app";
-            installMode = "copy";
-          };
-        };
+        passthru = (old.passthru or { }) // final.mkMacAppPassthru { bundleName = "zoom.us.app"; };
       })
     else
       prev.zoom-us;

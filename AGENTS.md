@@ -47,6 +47,7 @@ before you change a subsystem.
 - [Architecture](docs/architecture.md)
 - [Framework](docs/framework.md)
 - [Development](docs/development.md)
+- [Interactive toolchains](docs/interactive-toolchains.md)
 - [Packaging](docs/packaging.md)
 - [Source modifications](docs/source-modifications.md)
 - [Appearance](docs/appearance.md)
@@ -54,6 +55,7 @@ before you change a subsystem.
 - [CI operation](docs/update/ci.md)
 - [Update runtime and durability](docs/update/runtime.md)
 - [Update safety](docs/update/safety.md)
+- [Update free-tier ceiling](docs/update/free-tier-ceiling.md)
 - [Schema codegen](schemas/codegen/README.md)
 - [Codegen lockfile spec](schemas/codegen/LOCKFILE_SPEC.md)
 
@@ -198,7 +200,7 @@ See [Development](docs/development.md).
 ### Zen And Twilight Browser Work
 
 - `modules/home/zen.nix`
-- `home/george/bin/zentool`
+- `modules/home/zen/zentool`
 - `home/george/zen/`
 
 See [Appearance](docs/appearance.md).
@@ -275,7 +277,7 @@ For macOS GUI apps, prefer the shared pattern built around:
 - `overlays/_lib/helpers/darwin-apps.nix`
 - `lib/mac-apps.nix`
 - `passthru.macApp`
-- `nixcfg.macApps.systemApplications`
+- `nixcfg.macApps.applications.<name>` with `scope = "system"`
 
 Do not add bespoke activation hacks for `/Applications` unless the shared
 pattern genuinely cannot express the need.
@@ -483,7 +485,7 @@ back into the exported module set.
 Use the dedicated module and repo-managed Zen tooling:
 
 - `modules/home/zen.nix`
-- `home/george/bin/zentool`
+- `modules/home/zen/zentool`
 - `home/george/zen/folders.yaml`
 
 Remember that Zen folder reconciliation is stateful and interacts with a live

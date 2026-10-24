@@ -67,6 +67,41 @@ let
     ${prev.darwin.xattr}/bin/xattr -cr ${bundlePath}
   '';
 
+  # `bundle` is a shell word the caller has already quoted (same convention as
+  # clearBundleXattrs). Keep strict verification available after postInstall as
+  # well as immediately after signing: either hook may own the final artifact.
+  verifyBundleSignature = bundle: ''
+    /usr/bin/codesign --verify --deep --strict ${bundle}
+  '';
+
+  # Ad-hoc re-sign a bundle after modifying it, then prove the new signature
+  # is valid. `preserveMetadata` keeps vendor signing metadata (identifier,
+  # entitlements, flags, runtime) that an ad-hoc identity can still carry;
+  # `entitlements` replaces the entitlements. `verify = false` is for callers
+  # that verify in installCheckPhase instead.
+  signAndVerifyBundle =
+    {
+      bundle,
+      preserveMetadata ? [ ],
+      entitlements ? null,
+      verify ? true,
+    }:
+    let
+      flags = [
+        "--force"
+        "--deep"
+        "--sign -"
+      ]
+      ++ prev.lib.optional (
+        preserveMetadata != [ ]
+      ) "--preserve-metadata=${prev.lib.concatStringsSep "," preserveMetadata}"
+      ++ prev.lib.optional (entitlements != null) "--entitlements ${entitlements}";
+    in
+    ''
+      /usr/bin/codesign ${prev.lib.concatStringsSep " " flags} ${bundle}
+    ''
+    + prev.lib.optionalString verify (verifyBundleSignature bundle);
+
   # Shared derivation assembly for every mk*App builder below. Each builder is
   # a thin wrapper that resolves its naming defaults and supplies an `unpack`
   # strategy: the unpack tooling, any strategy-specific derivation attributes
@@ -103,6 +138,8 @@ let
     );
 in
 {
+  inherit mkMacAppPassthru signAndVerifyBundle;
+
   mkSimpleDarwinApp =
     {
       builder,
@@ -231,9 +268,10 @@ in
           cp -R . "$out/Applications/${resolvedBundleName}"
           ${clearBundleXattrs ''"$out/Applications/${resolvedBundleName}"''}
           ${postInstallApp}
-          ${prev.lib.optionalString codesignApp ''
-            /usr/bin/codesign --force --deep --sign - "$out/Applications/${resolvedBundleName}"
-          ''}
+          ${prev.lib.optionalString codesignApp (signAndVerifyBundle {
+            bundle = ''"$out/Applications/${resolvedBundleName}"'';
+            verify = true;
+          })}
           ${prev.lib.optionalString makeBinary (guardedBinLink {
             bundleName = resolvedBundleName;
             executableName = resolvedExecutableName;
@@ -241,6 +279,9 @@ in
           })}
 
           runHook postInstall
+          ${prev.lib.optionalString codesignApp (
+            verifyBundleSignature ''"$out/Applications/${resolvedBundleName}"''
+          )}
         '';
       };
     };
@@ -432,9 +473,10 @@ in
             cp -R "$dmg_dir/${resolvedBundleName}" "$out/Applications/${resolvedBundleName}"
             ${clearBundleXattrs ''"$out/Applications/${resolvedBundleName}"''}
             ${postInstallApp}
-            ${prev.lib.optionalString codesignApp ''
-              /usr/bin/codesign --force --deep --sign - "$out/Applications/${resolvedBundleName}"
-            ''}
+            ${prev.lib.optionalString codesignApp (signAndVerifyBundle {
+              bundle = ''"$out/Applications/${resolvedBundleName}"'';
+              verify = true;
+            })}
             ${prev.lib.optionalString makeBinary (guardedBinLink {
               bundleName = resolvedBundleName;
               executableName = resolvedExecutableName;
@@ -442,6 +484,9 @@ in
             })}
 
             runHook postInstall
+            ${prev.lib.optionalString codesignApp (
+              verifyBundleSignature ''"$out/Applications/${resolvedBundleName}"''
+            )}
           '';
         };
       };
@@ -459,6 +504,7 @@ in
       sourceAppPath ? null,
       dontFixup ? true,
       postInstallApp ? "",
+      verifyAppSignature ? false,
       macApp ? { },
       meta ? { },
     }:
@@ -523,6 +569,9 @@ in
           })}
 
           runHook postInstall
+          ${prev.lib.optionalString verifyAppSignature (
+            verifyBundleSignature ''"$out/Applications/${resolvedBundleName}"''
+          )}
         '';
       };
     };

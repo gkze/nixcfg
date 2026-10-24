@@ -11,7 +11,19 @@ def _parse_npm_range(spec: str, *, context: str) -> nodesemver.Range:
         raise RuntimeError(msg) from error
 
 
-def _parse_semantic_version(version: str, *, context: str) -> nodesemver.SemVer:
+def _parse_semantic_version(
+    version: str,
+    *,
+    context: str,
+    release_only: bool = False,
+) -> nodesemver.SemVer:
+    """Parse one exact SemVer 2.0.0 version, build metadata included.
+
+    The round-trip check rejects loose spellings nodesemver normalizes away
+    (``v1.2.3``, surrounding whitespace). ``release_only`` also rejects
+    prerelease and build suffixes.
+    """
+    msg = f"{context} version must be an exact semantic version, got {version!r}"
     try:
         parsed = nodesemver.SemVer(
             version,
@@ -19,10 +31,15 @@ def _parse_semantic_version(version: str, *, context: str) -> nodesemver.SemVer:
             include_prerelease=False,
         )
     except (TypeError, ValueError) as error:
-        msg = f"{context} version must be an exact semantic version, got {version!r}"
         raise RuntimeError(msg) from error
-    if str(parsed) != version:
-        msg = f"{context} version must be an exact semantic version, got {version!r}"
+    build = f"+{'.'.join(parsed.build)}" if parsed.build else ""
+    if f"{parsed}{build}" != version:
+        raise RuntimeError(msg)
+    if release_only and (parsed.prerelease or parsed.build):
+        msg = (
+            f"{context} version must be an exact semantic version without "
+            f"prerelease or build metadata, got {version!r}"
+        )
         raise RuntimeError(msg)
     return parsed
 
@@ -33,10 +50,42 @@ def require_valid_npm_range(spec: str, *, context: str) -> str:
     return spec
 
 
-def require_exact_semantic_version(version: str, *, context: str) -> str:
+def require_exact_semantic_version(
+    version: str,
+    *,
+    context: str,
+    release_only: bool = False,
+) -> str:
     """Return an exact semantic version after standards-based validation."""
-    _parse_semantic_version(version, context=context)
+    _parse_semantic_version(version, context=context, release_only=release_only)
     return version
+
+
+def is_exact_semantic_version(version: str) -> bool:
+    """Return whether ``version`` is one exact SemVer version, not a range or tag."""
+    try:
+        _parse_semantic_version(version, context="npm")
+    except RuntimeError:
+        return False
+    return True
+
+
+def same_semantic_version(left: str, right: str) -> bool:
+    """Return whether two exact versions have equal SemVer precedence."""
+    if not (is_exact_semantic_version(left) and is_exact_semantic_version(right)):
+        return False
+    return (
+        _parse_semantic_version(left, context="npm").compare(
+            _parse_semantic_version(right, context="npm")
+        )
+        == 0
+    )
+
+
+def release_version_triplet(version: str, *, context: str) -> tuple[int, int, int]:
+    """Return ``(major, minor, patch)`` of an exact release version."""
+    parsed = _parse_semantic_version(version, context=context, release_only=True)
+    return parsed.major, parsed.minor, parsed.patch
 
 
 def npm_version_matches_spec(
@@ -65,8 +114,11 @@ def require_npm_version_matches_spec(
 
 
 __all__ = [
+    "is_exact_semantic_version",
     "npm_version_matches_spec",
+    "release_version_triplet",
     "require_exact_semantic_version",
     "require_npm_version_matches_spec",
     "require_valid_npm_range",
+    "same_semantic_version",
 ]

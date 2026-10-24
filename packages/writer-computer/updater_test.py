@@ -12,6 +12,7 @@ from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance
+from lib.tests._mac_app_passthru import mac_app_passthru_args
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
 from lib.tests._source_metadata import (
     assert_immutable_commit,
@@ -225,10 +226,7 @@ def test_writer_requires_commit_when_building_source_result() -> None:
 
 def test_writer_always_recomputes_source_closures_for_current_release() -> None:
     """Matching release metadata must still flow through all source hash probes."""
-    updater = _load_module().WriterComputerUpdater()
-    info = VersionInfo(_VERSION, {"commit": _COMMIT, "tag": f"v{_VERSION}"})
-
-    assert run_async(updater._is_latest(UpdateContext(current=None), info)) is False
+    assert _load_module().WriterComputerUpdater.always_rehash
 
 
 def test_writer_package_is_a_nix_owned_source_built_arm64_app() -> None:
@@ -273,13 +271,10 @@ def test_writer_package_is_a_nix_owned_source_built_arm64_app() -> None:
         AttributeSet,
     )
     expect_instance(expect_binding(passthru.values, "cliPackage").value, FunctionCall)
-    mac_app = expect_instance(
-        expect_binding(passthru.values, "macApp").value,
-        AttributeSet,
-    )
+    mac_app = mac_app_passthru_args(passthru)
     assert_nix_ast_equal(
-        expect_binding(mac_app.values, "bundleRelPath").value,
-        '"Applications/${appBundleName}"',
+        mac_app,
+        "{ bundleName = appBundleName; }",
     )
     assert_nix_ast_equal(
         expect_binding(arguments.values, "postFixup").value,

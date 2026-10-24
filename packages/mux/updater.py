@@ -1,6 +1,5 @@
 """Updater for mux's platform-specific Bun offline cache hashes."""
 
-import re
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, override
 
@@ -26,7 +25,10 @@ from lib.update.events import (
 )
 from lib.update.locked_source import locked_github_source
 from lib.update.net import fetch_json, fetch_url, github_raw_url
-from lib.update.npm_semver import require_npm_version_matches_spec
+from lib.update.npm_semver import (
+    require_exact_semantic_version,
+    require_npm_version_matches_spec,
+)
 from lib.update.updaters import (
     BunNodeModulesHashUpdater,
     UpdateContext,
@@ -40,11 +42,6 @@ if TYPE_CHECKING:
 
     from lib.nix.models.sources import SourceEntry, SourceHashes
 
-_EXACT_VERSION_PATTERN = re.compile(
-    r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
-    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
-    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
-)
 _MANIFEST_PATH = "package.json"
 _LOCK_PATH = "bun.lock"
 _SUPPORTED_SYSTEMS = supported_systems()
@@ -72,10 +69,7 @@ class MuxSourceMetadata(MappingMetadata):
 
 
 def _require_exact_version(value: str, *, context: str) -> str:
-    if _EXACT_VERSION_PATTERN.fullmatch(value) is None:
-        msg = f"Mux {context} must be an exact semantic version, got {value!r}"
-        raise RuntimeError(msg)
-    return value
+    return require_exact_semantic_version(value, context=f"Mux {context}")
 
 
 def _release_version(version: str) -> str:

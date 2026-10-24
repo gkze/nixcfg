@@ -15,6 +15,13 @@ let
       src = fixture;
     };
   nixcfgLib = mkNixcfgLib { };
+  unqualifiedEntry = builtins.elemAt source.hashes 0;
+  platformEntry = builtins.elemAt source.hashes 1;
+  nullPlatformEntry = builtins.elemAt source.hashes 2;
+  duplicateEntries = [
+    unqualifiedEntry
+    (unqualifiedEntry // { hash = "sha256-duplicate"; })
+  ];
   updateLib = mkNixcfgLib {
     fakeHashes = true;
     sourceOverrides.demo = source // {
@@ -30,6 +37,31 @@ let
       throw "${label}: expected ${builtins.toJSON expected}, got ${builtins.toJSON actual}";
 
   checks = [
+    (assertEq "selector chooses among multiple URLs" platformEntry (
+      nixcfgLib.selectSourceHashEntry source.hashes "srcHash" { inherit (platformEntry) url; }
+    ))
+    (assertEq "selector combines URL and platform filters" platformEntry (
+      nixcfgLib.selectSourceHashEntry source.hashes "srcHash" {
+        inherit (platformEntry) url platform;
+      }
+    ))
+    (assertEq "selector matches explicit null platform" nullPlatformEntry (
+      nixcfgLib.selectSourceHashEntry source.hashes "nullPlatform" { platform = null; }
+    ))
+    (assertEq "selector returns null for a missing identity" null (
+      nixcfgLib.selectSourceHashEntry source.hashes "srcHash" {
+        platform = "x86_64-linux";
+        inherit (platformEntry) url;
+      }
+    ))
+    (assertEq "selector rejects duplicate exact identities" false
+      (builtins.tryEval (
+        nixcfgLib.selectSourceHashEntry duplicateEntries "srcHash" { inherit (unqualifiedEntry) url; }
+      )).success
+    )
+    (assertEq "selector rejects an unfiltered ambiguous type" false
+      (builtins.tryEval (nixcfgLib.selectSourceHashEntry source.hashes "srcHash" { })).success
+    )
     (assertEq "unqualified source hash entry" (builtins.elemAt source.hashes 0) (
       nixcfgLib.sourceHashEntry "demo" "srcHash"
     ))

@@ -12,6 +12,7 @@ import importlib
 import os
 import re
 import shlex
+import sys
 from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -260,28 +261,6 @@ def _merge_env(env: Mapping[str, str] | None) -> dict[str, str]:
     return merged
 
 
-def _resolve_timeout_alias(
-    *,
-    command_timeout: float,
-    kwargs: dict[str, object],
-) -> float:
-    timeout_alias = kwargs.pop("timeout", None)
-    if timeout_alias is None:
-        if kwargs:
-            unknown = ", ".join(sorted(kwargs))
-            msg = f"Unexpected keyword argument(s): {unknown}"
-            raise TypeError(msg)
-        return command_timeout
-    if kwargs:
-        unknown = ", ".join(sorted(kwargs))
-        msg = f"Unexpected keyword argument(s): {unknown}"
-        raise TypeError(msg)
-    if not isinstance(timeout_alias, int | float):
-        msg = "timeout must be a number"
-        raise TypeError(msg)
-    return float(timeout_alias)
-
-
 @dataclass(frozen=True)
 class ProcessLine:
     """A single decoded line emitted by a subprocess stream."""
@@ -307,8 +286,39 @@ async def _stop_stream_process(
     """Stop and reap a streamed subprocess and its pipe readers."""
     for task in tasks:
         task.cancel()
-    await _stop_process(proc)
-    await asyncio.gather(*tasks, return_exceptions=True)
+    try:
+        await _stop_process(proc)
+    finally:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def _finish_stream_cleanup(
+    proc: asyncio.subprocess.Process,
+    tasks: list[asyncio.Task[None]],
+    *,
+    primary_error: BaseException | None,
+) -> None:
+    """Finish cleanup before preserving the primary error or deferred cancellation."""
+    cleanup = asyncio.create_task(_stop_stream_process(proc, tasks))
+    completion = asyncio.gather(cleanup, return_exceptions=True)
+    cancelled: asyncio.CancelledError | None = None
+    while not completion.done():
+        try:
+            await asyncio.shield(completion)
+        except asyncio.CancelledError as error:
+            cancelled = error
+    try:
+        cleanup.result()
+    except BaseException as cleanup_error:
+        if cancelled is not None:
+            cancelled.add_note(f"stream cleanup failed: {cleanup_error}")
+            raise cancelled from cleanup_error
+        if primary_error is None or isinstance(primary_error, GeneratorExit):
+            raise
+        primary_error.add_note(f"stream cleanup failed: {cleanup_error}")
+        return
+    if cancelled is not None:
+        raise cancelled
 
 
 async def _stop_process(proc: asyncio.subprocess.Process) -> None:
@@ -372,7 +382,6 @@ async def stream_process(
     command_timeout: float = 2400.0,
     env: Mapping[str, str] | None = None,
     output_limit: int | None = None,
-    **kwargs: object,
 ) -> AsyncGenerator[ProcessEvent]:
     """Stream with backpressure; optionally retain only each stream's tail.
 
@@ -380,10 +389,6 @@ async def stream_process(
     Parser consumers must retain the default complete output or parse line events
     before opting into bounded diagnostic capture.
     """
-    timeout_seconds = _resolve_timeout_alias(
-        command_timeout=command_timeout,
-        kwargs=kwargs,
-    )
     merged_env = _merge_env(env)
     if output_limit is not None and output_limit < 1:
         msg = "output_limit must be positive"
@@ -402,7 +407,7 @@ async def stream_process(
         maxsize=_STREAM_QUEUE_SIZE,
     )
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout_seconds
+    deadline = loop.time() + command_timeout
 
     tasks = [
         asyncio.create_task(
@@ -435,7 +440,11 @@ async def stream_process(
         raise TimeoutError from None
     finally:
         if not process_finished:
-            await _stop_stream_process(proc, tasks)
+            await _finish_stream_cleanup(
+                proc,
+                tasks,
+                primary_error=sys.exc_info()[1],
+            )
 
     result = CommandResult(
         args=args,
@@ -453,7 +462,6 @@ async def run_nix(
     check: bool = True,
     capture: bool = True,
     env: Mapping[str, str] | None = None,
-    **kwargs: object,
 ) -> CommandResult:
     """Run a Nix command and return the collected output.
 
@@ -467,8 +475,6 @@ async def run_nix(
         If ``True`` (default) and the process exits non-zero, raise
         :class:`NixCommandError` (or :class:`HashMismatchError` when
         applicable).
-    **kwargs:
-        Supports legacy ``timeout=...`` alias.
     capture:
         If ``True`` (default), stdout and stderr are captured into the
         returned :class:`CommandResult`.  When ``False`` they are
@@ -477,10 +483,6 @@ async def run_nix(
         Extra environment variables merged on top of :data:`os.environ`.
 
     """
-    timeout_seconds = _resolve_timeout_alias(
-        command_timeout=command_timeout,
-        kwargs=kwargs,
-    )
     merged_env = _merge_env(env)
 
     if capture:
@@ -501,13 +503,13 @@ async def run_nix(
     try:
         stdout_bytes, stderr_bytes = await asyncio.wait_for(
             proc.communicate(),
-            timeout=timeout_seconds,
+            timeout=command_timeout,
         )
         process_finished = True
     except TimeoutError:
         raise NixCommandError(
             CommandResult(args=args, returncode=-1, stdout="", stderr=""),
-            message=f"command timed out after {timeout_seconds}s",
+            message=f"command timed out after {command_timeout}s",
         ) from None
     finally:
         if not process_finished:
@@ -579,16 +581,11 @@ async def _iter_timed_stdout_lines(
         yield line_bytes.decode(errors="replace").rstrip("\n")
 
 
-async def _raise_stream_timeout_error(
+def _raise_stream_timeout_error(
     *,
-    proc: asyncio.subprocess.Process,
-    stderr_task: asyncio.Task[None],
     args: list[str],
     timeout_seconds: float,
 ) -> None:
-    proc.kill()
-    await proc.wait()
-    stderr_task.cancel()
     raise NixCommandError(
         CommandResult(args=args, returncode=-1, stdout="", stderr=""),
         message=f"command timed out after {timeout_seconds}s",
@@ -620,8 +617,7 @@ async def stream_nix(
     *,
     command_timeout: float = 2400.0,
     env: Mapping[str, str] | None = None,
-    **kwargs: object,
-) -> AsyncIterator[str]:
+) -> AsyncGenerator[str]:
     """Yield stdout lines from a Nix command as they arrive.
 
     Stderr is collected internally and included in the
@@ -633,16 +629,10 @@ async def stream_nix(
         Full argument list.
     command_timeout:
         Maximum wall-clock seconds before the process is killed.
-    **kwargs:
-        Supports legacy ``timeout=...`` alias.
     env:
         Extra environment variables merged on top of :data:`os.environ`.
 
     """
-    timeout_seconds = _resolve_timeout_alias(
-        command_timeout=command_timeout,
-        kwargs=kwargs,
-    )
     merged_env = _merge_env(env)
 
     proc, stdout_stream, stderr_stream = await _create_stream_process(
@@ -652,11 +642,12 @@ async def stream_nix(
 
     stderr_chunks: list[bytes] = []
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout_seconds
+    deadline = loop.time() + command_timeout
     stderr_task = asyncio.create_task(
         _drain_stderr_stream(stderr_stream, chunks=stderr_chunks)
     )
     returncode = 0
+    process_finished = False
 
     try:
         async for line in _iter_timed_stdout_lines(
@@ -669,14 +660,17 @@ async def stream_nix(
         # Wait for the process and stderr drain to finish.
         await stderr_task
         returncode = await proc.wait()
+        process_finished = True
 
     except TimeoutError:
-        await _raise_stream_timeout_error(
-            proc=proc,
-            stderr_task=stderr_task,
-            args=args,
-            timeout_seconds=timeout_seconds,
-        )
+        _raise_stream_timeout_error(args=args, timeout_seconds=command_timeout)
+    finally:
+        if not process_finished:
+            await _finish_stream_cleanup(
+                proc,
+                [stderr_task],
+                primary_error=sys.exc_info()[1],
+            )
 
     stderr_text = b"".join(stderr_chunks).decode(errors="replace")
     _raise_stream_command_failure(

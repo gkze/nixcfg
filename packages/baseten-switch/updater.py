@@ -1,10 +1,9 @@
 """Updater for the source-built Baseten Switch macOS app and CLI."""
 
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.net import fetch_github_api_paginated
-from lib.update.nix import _build_fetch_from_github_expr
 from lib.update.updaters import (
     SourceThenOverlayHashMixin,
     VersionInfo,
@@ -26,12 +25,6 @@ class BasetenSwitchUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
     GITHUB_OWNER = "basetenlabs"
     GITHUB_REPO = "baseten-switch"
     dependency_hash_type = "vendorHash"
-    compatibility_pin_rationale = (
-        "0.5.1's testUnsupportedStatusFallsBackWithoutRepeatedProbe SIGTRAPs "
-        "(signal 5) on hosted macos-15 after the rest of the suite passes. "
-        "Skip checkPhase for that version only until a headed Darwin owns it."
-    )
-    compatibility_pins: ClassVar[dict[str, str]] = {"checkSkipVersion": "0.5.1"}
     supported_platforms = ("aarch64-darwin", "x86_64-darwin")
     derivation_validations = (
         DerivationValidation(
@@ -70,12 +63,3 @@ class BasetenSwitchUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
             )
         msg = f"No published releases found for {self.GITHUB_OWNER}/{self.GITHUB_REPO}"
         raise RuntimeError(msg)
-
-    @staticmethod
-    def _src_expr(commit: str) -> str:
-        return _build_fetch_from_github_expr(
-            "basetenlabs",
-            "baseten-switch",
-            rev=commit,
-            fetch_submodules=False,
-        )

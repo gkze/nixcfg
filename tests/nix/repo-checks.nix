@@ -19,23 +19,23 @@ let
     checks
     ;
   fixtureSrc = src + "/tests/nix/fixtures/repo_checks";
-  fixtureChecks =
-    (import (src + "/lib/repo-checks.nix") {
-      src = fixtureSrc;
-      lib = projectionLib // {
-        fileset = projectionLib.fileset // {
-          # Excluded trees must stay lazy, not merely disappear from the result.
-          fileFilter =
-            predicate:
-            lib.fileset.fileFilter (
-              file:
-              assert file.name != "dependency.py";
-              predicate file
-            );
-        };
+  fixtureRepoChecks = import (src + "/lib/repo-checks.nix") {
+    src = fixtureSrc;
+    lib = projectionLib // {
+      fileset = projectionLib.fileset // {
+        # Excluded trees must stay lazy, not merely disappear from the result.
+        fileFilter =
+          predicate:
+          lib.fileset.fileFilter (
+            file:
+            assert file.name != "dependency.py";
+            predicate file
+          );
       };
-      lintFiles.python.pythonScriptPaths = [ ];
-    }).checks;
+    };
+    lintFiles.python.pythonScriptPaths = [ ];
+  };
+  fixtureChecks = fixtureRepoChecks.checks;
   includes = check: path: builtins.elem (src + "/${path}") checks.${check}.source;
   assertEq =
     label: expected: actual:
@@ -52,13 +52,17 @@ let
       && builtins.elem (fixtureSrc + "/node_modules/dependency.py") fixtureChecks.lint-editorconfig.source
     ))
     (assertEq "compile checks extensionless Python" true (
-      includes "lint-python-compile" "home/george/bin/zentool"
+      includes "lint-python-compile" "modules/home/zen/zentool"
     ))
     (assertEq "pyupgrade checks maintained Python" true (
       includes "format-python-pyupgrade" "nixcfg.py"
     ))
+    (assertEq "pytest sees repo files but not local dependency trees" (map (path: fixtureSrc + path) [
+      "/.gitignore"
+      "/__init__.py"
+    ]) (fixtureRepoChecks.mkCheckSource fixtureRepoChecks.pytestFiles))
     (assertEq "pyupgrade preserves compatibility helpers" false (
-      includes "format-python-pyupgrade" "lib/exact_text_patch.py"
+      includes "format-python-pyupgrade" "lib/update/ci/jobs.py"
     ))
     (assertEq "pyupgrade preserves generated Python" false (
       includes "format-python-pyupgrade" "lib/nix/models/_generated.py"

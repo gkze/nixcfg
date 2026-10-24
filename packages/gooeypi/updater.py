@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, ClassVar, cast
 
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
-from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
@@ -13,10 +12,12 @@ from lib.update.events import EventSink, ignore_event
 from lib.update.net import fetch_json, github_raw_url
 from lib.update.nix import (
     _build_fetch_from_github_call,
-    _build_fetch_from_github_expr,
 )
-from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
-from lib.update.npm_semver import require_npm_version_matches_spec
+from lib.update.nix_expr import compact_nix_expr, identifier_attr_path, nix_str
+from lib.update.npm_semver import (
+    release_version_triplet,
+    require_npm_version_matches_spec,
+)
 from lib.update.updaters import (
     FixedOutputHashStep,
     GitHubReleaseUpdater,
@@ -35,9 +36,6 @@ if TYPE_CHECKING:
     import aiohttp
 
 
-_EXACT_VERSION_PATTERN = re.compile(
-    r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
-)
 _ENGINE_MINIMUM_PATTERN = re.compile(
     r"^>=\s*(?P<version>(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
     r"\.(?:0|[1-9][0-9]*))$"
@@ -49,11 +47,7 @@ _NPM_PACKAGE_MANAGER_PATTERN = re.compile(
 
 
 def _version_triplet(version: str, *, context: str) -> tuple[int, int, int]:
-    if _EXACT_VERSION_PATTERN.fullmatch(version) is None:
-        msg = f"GooeyPi {context} must be an exact semantic version, got {version!r}"
-        raise RuntimeError(msg)
-    major, minor, patch = version.split(".")
-    return int(major), int(minor), int(patch)
+    return release_version_triplet(version, context=f"GooeyPi {context}")
 
 
 def _engine_minimum(engine: object, *, context: str) -> tuple[int, int, int]:
@@ -83,6 +77,8 @@ class GooeyPiUpdater(GitHubReleaseUpdater):
     APP_ID: ClassVar[str] = "app.gooeypi.desktop"
     NODEJS_VERSION_PASSTHRU: ClassVar[str] = "nodejsVersion"
     supported_platforms = (DARWIN_PLATFORM,)
+    # Recompute both fixed-output closures even when metadata is unchanged.
+    always_rehash = True
 
     @staticmethod
     def _manifest_version(payload: object, *, label: str) -> str:
@@ -291,24 +287,6 @@ class GooeyPiUpdater(GitHubReleaseUpdater):
             },
         )
 
-    async def _is_latest(
-        self,
-        context: UpdateContext,
-        info: VersionInfo,
-    ) -> bool:
-        """Recompute both fixed-output closures even when metadata is unchanged."""
-        _ = (context, info)
-        return False
-
-    @classmethod
-    def _src_expr(cls, commit: str) -> str:
-        return _build_fetch_from_github_expr(
-            cls.GITHUB_OWNER,
-            cls.GITHUB_REPO,
-            rev=commit,
-            fetch_submodules=False,
-        )
-
     @classmethod
     def _npm_deps_expr(
         cls,
@@ -324,7 +302,7 @@ class GooeyPiUpdater(GitHubReleaseUpdater):
                 values=[
                     Binding(
                         name="name",
-                        value=StringPrimitive(value=f"{cls.name}-{version}-npm-deps"),
+                        value=nix_str(f"{cls.name}-{version}-npm-deps"),
                     ),
                     Binding(
                         name="src",
@@ -357,7 +335,7 @@ class GooeyPiUpdater(GitHubReleaseUpdater):
                 values=[
                     Binding(
                         name="url",
-                        value=StringPrimitive(value=cls._npm_cli_url(npm_version)),
+                        value=nix_str(cls._npm_cli_url(npm_version)),
                     ),
                     Binding(
                         name="hash",

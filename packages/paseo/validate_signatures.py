@@ -18,7 +18,8 @@ EXPECTED_ENTITLEMENTS = {
     "com.apple.security.device.audio-input": True,
 }
 # Only these reviewed whole-bundle inventories may choose the signature shape.
-# Protobuf's dynamic Abseil 20260817 closure adds one non-executable Mach-O.
+# Counts cover regular app files only: archived app.asar entries and native
+# symlink aliases are not separate signature leaves.
 EXPECTED_NONEXECUTABLE_COUNTS = {
     "c95f41c50d4b47704abcfa91a9f52b3bda6a288bd085c43cf0d82cfe6d22a4d0": 95,
     "5d0fa899e4a7bcc347e6e5a0217d5420bc50b0924715d12aaf0a19529a340ef5": 96,

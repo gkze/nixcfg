@@ -1,27 +1,23 @@
 """Tests for canonical codegen manifest lockfile materialization."""
 
+import copy
 import hashlib
 import json
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+
+import pytest
 
 from lib.schema_codegen import lockfile as codegen_lockfile
 from lib.schema_codegen.lockfile import (
     build_codegen_lockfile,
+    load_codegen_manifest,
     render_codegen_lockfile,
     write_codegen_lockfile,
 )
 from lib.schema_codegen.models._generated import CodegenLockfile
 from lib.update.paths import REPO_ROOT
-
-if TYPE_CHECKING:
-    import pytest
-
-
-class _MonkeyPatchLike:
-    def setattr(self, target: str, value: object) -> None: ...
 
 
 def _write_manifest(path: Path, *, source_block: str, entrypoint: str) -> None:
@@ -59,6 +55,289 @@ def _directory_content_sha256(entries: dict[str, bytes]) -> str:
         for path in sorted(entries)
     )
     return hashlib.sha256(records).hexdigest()
+
+
+def _canonical_manifest_payload() -> dict[str, object]:
+    return {
+        "version": 1,
+        "sources": {
+            "source": {"kind": "directory", "path": "schemas", "format": "json"}
+        },
+        "registry_profiles": {
+            "local": {
+                "aliases": ["basename"],
+                "resource": {"mode": "from-contents"},
+            }
+        },
+        "inputs": {
+            "primary": {
+                "kind": "jsonschema",
+                "sources": ["source"],
+                "registry_profile": "local",
+                "entrypoints": ["./root.json"],
+                "prepare": {"schema_transforms": ["drop-description"]},
+            }
+        },
+        "generators": {
+            "python": {"language": "python", "tool": "datamodel-code-generator"}
+        },
+        "products": {
+            "models": {
+                "inputs": ["primary"],
+                "generators": ["python"],
+                "output_template": "generated.py",
+            }
+        },
+    }
+
+
+def test_load_codegen_manifest_accepts_canonical_unique_items(
+    tmp_path: Path,
+) -> None:
+    """The canonical-schema preflight preserves valid manifest behavior."""
+    manifest_path = tmp_path / "codegen.json"
+    manifest_path.write_text(
+        json.dumps(_canonical_manifest_payload()), encoding="utf-8"
+    )
+
+    assert load_codegen_manifest(manifest_path=manifest_path).version == 1
+
+
+def test_manifest_validation_uses_optional_dependency_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Load jsonschema only when manifest validation actually runs."""
+    manifest_path = tmp_path / "codegen.json"
+    manifest_path.write_text(
+        json.dumps(_canonical_manifest_payload()), encoding="utf-8"
+    )
+    import_optional = codegen_lockfile._import_optional
+    calls: list[tuple[str, str]] = []
+
+    def _record_import(module_name: str, *, feature: str) -> object:
+        calls.append((module_name, feature))
+        return import_optional(module_name, feature=feature)
+
+    monkeypatch.setattr(codegen_lockfile, "_import_optional", _record_import)
+    load_codegen_manifest(manifest_path=manifest_path)
+
+    assert calls == [("jsonschema", "codegen manifest validation")]
+
+
+def test_packaged_manifest_schema_is_the_canonical_repository_schema() -> None:
+    """Package data exposes the canonical schema without a second authority."""
+    packaged = codegen_lockfile._CODEGEN_MANIFEST_SCHEMA_PATH
+    canonical = REPO_ROOT / "schemas/codegen/codegen.schema.json"
+
+    assert packaged.is_file()
+    assert packaged.samefile(canonical)
+    assert packaged.read_bytes() == canonical.read_bytes()
+
+
+@pytest.mark.parametrize(
+    ("uri", "source_name"),
+    [
+        ("http://example.com/schema.json", "source"),
+        ("https://example.com/schema.json", "1invalid"),
+    ],
+)
+def test_load_codegen_manifest_enforces_canonical_patterns(
+    tmp_path: Path,
+    uri: str,
+    source_name: str,
+) -> None:
+    """AnyUrl and dictionary projections cannot discard canonical regex constraints."""
+    payload = copy.deepcopy(_canonical_manifest_payload())
+    source = {
+        "kind": "url",
+        "uri": uri,
+        "format": "json",
+    }
+    payload["sources"] = {source_name: source}
+    manifest_path = tmp_path / "codegen.json"
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="does not match"):
+        load_codegen_manifest(manifest_path=manifest_path)
+
+
+@pytest.mark.parametrize(
+    ("path", "duplicates"),
+    [
+        (("registry_profiles", "local", "aliases"), ["basename", "basename"]),
+        (("inputs", "primary", "sources"), ["source", "source"]),
+        (
+            ("inputs", "primary", "prepare", "schema_transforms"),
+            ["drop-description", "drop-description"],
+        ),
+        (("products", "models", "inputs"), ["primary", "primary"]),
+        (("products", "models", "generators"), ["python", "python"]),
+    ],
+)
+def test_load_codegen_manifest_enforces_every_canonical_unique_items_constraint(
+    tmp_path: Path,
+    path: tuple[str, ...],
+    duplicates: list[str],
+) -> None:
+    """Generated-model projections cannot admit duplicates forbidden by the schema."""
+    payload = copy.deepcopy(_canonical_manifest_payload())
+    current: object = payload
+    for key in path[:-1]:
+        assert isinstance(current, dict)
+        current = current[key]
+    assert isinstance(current, dict)
+    current[path[-1]] = duplicates
+    manifest_path = tmp_path / "codegen.json"
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="non-unique elements") as raised:
+        load_codegen_manifest(manifest_path=manifest_path)
+
+    assert f"$.{'.'.join(path)}" in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "expected_path", "expected_message"),
+    [
+        (
+            ("inputs", "primary", "sources"),
+            ["source", 1],
+            "$.inputs.primary.sources[1]",
+            "is not of type 'string'",
+        ),
+        (("sources",), [], "$.sources", "is not of type 'object'"),
+    ],
+)
+def test_load_codegen_manifest_validates_raw_shapes_before_models(
+    tmp_path: Path,
+    path: tuple[str, ...],
+    value: object,
+    expected_path: str,
+    expected_message: str,
+) -> None:
+    """Canonical JSON Schema diagnostics precede generated-model construction."""
+    payload = copy.deepcopy(_canonical_manifest_payload())
+    current: object = payload
+    for key in path[:-1]:
+        assert isinstance(current, dict)
+        current = current[key]
+    assert isinstance(current, dict)
+    current[path[-1]] = value
+    manifest_path = tmp_path / "codegen.json"
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=expected_message) as raised:
+        load_codegen_manifest(manifest_path=manifest_path)
+
+    assert expected_path in str(raised.value)
+    assert "non-unique elements" not in str(raised.value)
+
+
+@pytest.mark.parametrize("composition", ["anyOf", "oneOf"])
+def test_manifest_validation_uses_standard_union_semantics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    composition: str,
+) -> None:
+    """A nonmatching union branch cannot invalidate a matching alternative."""
+    schema_path = tmp_path / "union.schema.json"
+    schema_path.write_text(
+        json.dumps({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            composition: [
+                {
+                    "properties": {
+                        "kind": {"const": "first"},
+                        "value": {"pattern": "^first$"},
+                    },
+                    "required": ["kind", "value"],
+                },
+                {
+                    "properties": {
+                        "kind": {"const": "second"},
+                        "value": {"pattern": "^second$"},
+                    },
+                    "required": ["kind", "value"],
+                },
+            ],
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(codegen_lockfile, "_CODEGEN_MANIFEST_SCHEMA_PATH", schema_path)
+
+    codegen_lockfile._validate_canonical_constraints({
+        "kind": "second",
+        "value": "second",
+    })
+
+
+def test_manifest_validation_enforces_exactly_one_oneof_branch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The maintained validator retains oneOf's exactly-one semantics."""
+    schema_path = tmp_path / "oneof.schema.json"
+    schema_path.write_text(
+        json.dumps({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "oneOf": [{"type": "string"}, {"minLength": 1}],
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(codegen_lockfile, "_CODEGEN_MANIFEST_SCHEMA_PATH", schema_path)
+
+    with pytest.raises(ValueError, match="is valid under each of"):
+        codegen_lockfile._validate_canonical_constraints("value")
+
+
+@pytest.mark.parametrize(
+    ("uri", "expected_message", "expected_path"),
+    [
+        ("https://", "Input should be a valid URL", None),
+        ("https://exa mple.com/schema.json", "is not a 'uri'", "$.sources.source.uri"),
+    ],
+)
+def test_load_codegen_manifest_asserts_uri_and_url_constraints(
+    tmp_path: Path,
+    uri: str,
+    expected_message: str,
+    expected_path: str | None,
+) -> None:
+    """Raw URI format checks and model URL checks preserve the HTTPS contract."""
+    payload = copy.deepcopy(_canonical_manifest_payload())
+    payload["sources"] = {"source": {"kind": "url", "uri": uri, "format": "json"}}
+    manifest_path = tmp_path / "codegen.json"
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=expected_message) as raised:
+        load_codegen_manifest(manifest_path=manifest_path)
+
+    if expected_path is not None:
+        assert expected_path in str(raised.value)
+
+
+def test_load_codegen_manifest_rejects_raw_schema_errors_before_model_construction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Raw canonical validation runs before the generated Pydantic model."""
+    payload = copy.deepcopy(_canonical_manifest_payload())
+    payload["unexpected"] = True
+    manifest_path = tmp_path / "codegen.json"
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def _unexpected_model_construction(_payload: object) -> None:
+        raise AssertionError("generated model must not construct an invalid manifest")
+
+    monkeypatch.setattr(
+        codegen_lockfile.CodegenManifest,
+        "model_validate",
+        _unexpected_model_construction,
+    )
+    with pytest.raises(ValueError, match="Additional properties are not allowed"):
+        load_codegen_manifest(manifest_path=manifest_path)
 
 
 def test_build_http_headers_uses_extended_github_token_resolution(
@@ -147,6 +426,39 @@ def test_write_codegen_lockfile_hashes_directory_sources_deterministically(
         '"version":1'
         "}\n"
     )
+
+
+def test_directory_sources_reject_root_and_nested_directory_symlinks(
+    tmp_path: Path,
+) -> None:
+    """Resolve no directory-source identity until its symlink boundary is checked."""
+    schemas = tmp_path / "schemas"
+    schemas.mkdir()
+    (schemas / "root.json").write_text("{}\n", encoding="utf-8")
+    linked_root = tmp_path / "linked-schemas"
+    linked_root.symlink_to(schemas, target_is_directory=True)
+
+    with pytest.raises(RuntimeError, match="must not be a symlink"):
+        codegen_lockfile._build_locked_directory_source(
+            manifest_dir=tmp_path,
+            source_name="local",
+            source={"path": "linked-schemas"},
+            include_metadata=False,
+        )
+    with pytest.raises(RuntimeError, match="must not be a symlink"):
+        codegen_lockfile._iter_materialized_directory_files(
+            source_root=linked_root,
+            include_patterns=(),
+        )
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (schemas / "linked-directory").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(RuntimeError, match="unsupported symlink"):
+        codegen_lockfile._iter_materialized_directory_files(
+            source_root=schemas,
+            include_patterns=(),
+        )
 
 
 def test_build_codegen_lockfile_omits_url_metadata_by_default(
@@ -288,6 +600,68 @@ def test_build_codegen_lockfile_resolves_github_raw_sources_without_provenance_b
     }
 
 
+def test_github_raw_source_normalizes_and_percent_encodes_repository_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep the logical repository path identical to the fetched raw URL path."""
+    resolved_sha = "a" * 40
+    monkeypatch.setattr(
+        codegen_lockfile,
+        "_resolve_github_commit",
+        lambda *_args: resolved_sha,
+    )
+    fetched: list[str] = []
+    monkeypatch.setattr(
+        codegen_lockfile,
+        "_fetch_https_bytes",
+        lambda url: fetched.append(url) or (b"{}\n", {}),
+    )
+
+    locked = codegen_lockfile._build_locked_github_raw_source(
+        source_name="source",
+        source={
+            "owner": "owner",
+            "repo": "repo",
+            "ref": "main",
+            "path": "./schemas/nested/../workflow final?draft#v1.json",
+        },
+        include_metadata=False,
+    )
+
+    expected_uri = (
+        f"https://raw.githubusercontent.com/owner/repo/{resolved_sha}/"
+        "schemas/workflow%20final%3Fdraft%23v1.json"
+    )
+    assert locked["path"] == "schemas/workflow final?draft#v1.json"
+    assert locked["uri"] == expected_uri
+    assert fetched == [expected_uri]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "../outside.json",
+        "schemas/../../outside.json",
+        "/absolute.json",
+        ".",
+        "schemas/..",
+    ],
+)
+def test_github_raw_source_rejects_non_repository_file_paths(path: str) -> None:
+    """Reject absolute, empty, and root-escaping repository paths before fetching."""
+    with pytest.raises(RuntimeError, match="GitHub raw source path"):
+        codegen_lockfile._build_locked_github_raw_source(
+            source_name="source",
+            source={
+                "owner": "owner",
+                "repo": "repo",
+                "ref": "main",
+                "path": path,
+            },
+            include_metadata=False,
+        )
+
+
 def test_build_codegen_lockfile_can_include_github_raw_provenance_metadata(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -369,6 +743,43 @@ def test_write_codegen_lockfile_normalizes_manifest_path_against_custom_output(
     payload = json.loads(output_path.read_text(encoding="utf-8"))
 
     assert payload["manifest_path"] == "../manifests/codegen.yaml"
+
+
+def test_write_codegen_lockfile_preserves_existing_file_on_replace_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A failed atomic replacement cannot truncate the previous lockfile."""
+    schemas = tmp_path / "schemas"
+    schemas.mkdir()
+    (schemas / "root.json").write_text("{}\n", encoding="utf-8")
+    manifest_path = tmp_path / "codegen.yaml"
+    _write_manifest(
+        manifest_path,
+        source_block="""  source:
+    kind: directory
+    path: schemas
+    format: json
+""",
+        entrypoint="./root.json",
+    )
+    output_path = tmp_path / "codegen.lock.json"
+    output_path.write_text("previous-lockfile\n", encoding="utf-8")
+    replace = Path.replace
+
+    def _fail_replace(path: Path, target: Path) -> Path:
+        if path.parent == output_path.parent and path.name.startswith(
+            ".codegen.lock.json."
+        ):
+            raise OSError("injected replace failure")
+        return replace(path, target)
+
+    monkeypatch.setattr(Path, "replace", _fail_replace)
+    with pytest.raises(OSError, match="injected replace failure"):
+        write_codegen_lockfile(manifest_path=manifest_path)
+
+    assert output_path.read_text(encoding="utf-8") == "previous-lockfile\n"
+    assert list(tmp_path.glob(".codegen.lock.json.*.tmp")) == []
 
 
 def test_write_codegen_lockfile_matches_shared_golden_fixture(tmp_path: Path) -> None:

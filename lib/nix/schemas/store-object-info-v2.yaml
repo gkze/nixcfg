@@ -1,4 +1,3 @@
----
 "$schema": "http://json-schema.org/draft-04/schema"
 "$id": "https://nix.dev/manual/nix/latest/protocols/json/schema/store-object-info-v2.json"
 title: Store Object Info v2
@@ -26,10 +25,14 @@ description: |
   The impure and NAR fields are grouped into separate variants below.
   See their descriptions for additional information.
   The closure fields however as just included as optional fields, to avoid a combinatorial explosion of variants.
+
 oneOf:
   - $ref: "#/$defs/base"
+
   - $ref: "#/$defs/impure"
+
   - $ref: "#/$defs/narInfo"
+
 $defs:
   base:
     title: Store Object Info
@@ -59,6 +62,7 @@ $defs:
           - Version 1: Original JSON format, with ugly `"r:sha256"` inherited from `.narinfo` format.
 
           - Version 2: Use structured JSON type for `ca`
+
       path:
         "$ref": "./store-path-v1.yaml"
         title: Store Path
@@ -66,17 +70,20 @@ $defs:
           [Store path](@docroot@/store/store-path.md) to the given store object.
 
           Note: This field may not be present in all contexts, such as when the path is used as the key and the the store object info the value in map.
+
       narHash:
         "$ref": "./hash-v1.yaml"
         title: NAR Hash
         description: |
           Hash of the [file system object](@docroot@/store/file-system-object.md) part of the store object when serialized as a [Nix Archive](@docroot@/store/file-system-object/content-address.md#serial-nix-archive).
+
       narSize:
         type: integer
         minimum: 0
         title: NAR Size
         description: |
           Size of the [file system object](@docroot@/store/file-system-object.md) part of the store object when serialized as a [Nix Archive](@docroot@/store/file-system-object/content-address.md#serial-nix-archive).
+
       references:
         type: array
         title: References
@@ -84,6 +91,7 @@ $defs:
           An array of [store paths](@docroot@/store/store-path.md), possibly including this one.
         items:
           "$ref": "./store-path-v1.yaml"
+
       ca:
         oneOf:
           - type: "null"
@@ -94,12 +102,14 @@ $defs:
           If the store object is [content-addressed](@docroot@/store/store-object/content-address.md),
           this is the content address of this store object's file system object, used to compute its store path.
           Otherwise (i.e. if it is [input-addressed](@docroot@/glossary.md#gloss-input-addressed-store-object)), this is `null`.
+
       storeDir:
         type: string
         title: Store Directory
         description: |
           The [store directory](@docroot@/store/store-path.md#store-directory) this store object belongs to (e.g. `/nix/store`).
     additionalProperties: false
+
   impure:
     title: Store Object Info with Impure Fields
     description: |
@@ -119,13 +129,13 @@ $defs:
       - ultimate
       - signatures
     properties:
-      version: {$ref: "#/$defs/base/properties/version"}
-      path: {$ref: "#/$defs/base/properties/path"}
-      narHash: {$ref: "#/$defs/base/properties/narHash"}
-      narSize: {$ref: "#/$defs/base/properties/narSize"}
-      references: {$ref: "#/$defs/base/properties/references"}
-      ca: {$ref: "#/$defs/base/properties/ca"}
-      storeDir: {$ref: "#/$defs/base/properties/storeDir"}
+      version: { $ref: "#/$defs/base/properties/version" }
+      path: { $ref: "#/$defs/base/properties/path" }
+      narHash: { $ref: "#/$defs/base/properties/narHash" }
+      narSize: { $ref: "#/$defs/base/properties/narSize" }
+      references: { $ref: "#/$defs/base/properties/references" }
+      ca: { $ref: "#/$defs/base/properties/ca" }
+      storeDir: { $ref: "#/$defs/base/properties/storeDir" }
       deriver:
         oneOf:
           - "$ref": "./store-path-v1.yaml"
@@ -136,6 +146,7 @@ $defs:
           Otherwise `null`.
 
           > This is an "impure" field that may not be included in certain contexts.
+
       registrationTime:
         type: ["integer", "null"]
         title: Registration Time
@@ -144,6 +155,7 @@ $defs:
           Otherwise `null`.
 
           > This is an "impure" field that may not be included in certain contexts.
+
       ultimate:
         type: boolean
         title: Ultimate
@@ -151,6 +163,7 @@ $defs:
           Whether this store object is trusted because we built it ourselves, rather than substituted a build product from elsewhere.
 
           > This is an "impure" field that may not be included in certain contexts.
+
       signatures:
         type: array
         title: Signatures
@@ -162,6 +175,7 @@ $defs:
           > This is an "impure" field that may not be included in certain contexts.
         items:
           type: string
+
       # Computed closure fields
       closureSize:
         type: integer
@@ -172,6 +186,7 @@ $defs:
 
           > This field is not stored at all, but computed by traversing the other fields across all the store objects in a closure.
     additionalProperties: false
+
   narInfo:
     title: Store Object Info with Impure fields and NAR Info
     description: |
@@ -198,18 +213,18 @@ $defs:
       - downloadHash
       - downloadSize
     properties:
-      version: {$ref: "#/$defs/base/properties/version"}
-      path: {$ref: "#/$defs/base/properties/path"}
-      narHash: {$ref: "#/$defs/base/properties/narHash"}
-      narSize: {$ref: "#/$defs/base/properties/narSize"}
-      references: {$ref: "#/$defs/base/properties/references"}
-      ca: {$ref: "#/$defs/base/properties/ca"}
-      storeDir: {$ref: "#/$defs/base/properties/storeDir"}
-      deriver: {$ref: "#/$defs/impure/properties/deriver"}
-      registrationTime: {$ref: "#/$defs/impure/properties/registrationTime"}
-      ultimate: {$ref: "#/$defs/impure/properties/ultimate"}
-      signatures: {$ref: "#/$defs/impure/properties/signatures"}
-      closureSize: {$ref: "#/$defs/impure/properties/closureSize"}
+      version: { $ref: "#/$defs/base/properties/version" }
+      path: { $ref: "#/$defs/base/properties/path" }
+      narHash: { $ref: "#/$defs/base/properties/narHash" }
+      narSize: { $ref: "#/$defs/base/properties/narSize" }
+      references: { $ref: "#/$defs/base/properties/references" }
+      ca: { $ref: "#/$defs/base/properties/ca" }
+      storeDir: { $ref: "#/$defs/base/properties/storeDir" }
+      deriver: { $ref: "#/$defs/impure/properties/deriver" }
+      registrationTime: { $ref: "#/$defs/impure/properties/registrationTime" }
+      ultimate: { $ref: "#/$defs/impure/properties/ultimate" }
+      signatures: { $ref: "#/$defs/impure/properties/signatures" }
+      closureSize: { $ref: "#/$defs/impure/properties/closureSize" }
       url:
         type: string
         title: URL
@@ -217,6 +232,7 @@ $defs:
           Where to download a compressed archive of the file system objects of this store object.
 
           > This is an impure "`.narinfo`" field that may not be included in certain contexts.
+
       compression:
         type: string
         title: Compression
@@ -224,6 +240,7 @@ $defs:
           The compression format that the archive is in.
 
           > This is an impure "`.narinfo`" field that may not be included in certain contexts.
+
       downloadHash:
         "$ref": "./hash-v1.yaml"
         title: Download Hash
@@ -231,6 +248,7 @@ $defs:
           A digest for the compressed archive itself, as opposed to the data contained within.
 
           > This is an impure "`.narinfo`" field that may not be included in certain contexts.
+
       downloadSize:
         type: integer
         minimum: 0
@@ -239,6 +257,7 @@ $defs:
           The size of the compressed archive itself.
 
           > This is an impure "`.narinfo`" field that may not be included in certain contexts.
+
       closureDownloadSize:
         type: integer
         minimum: 0

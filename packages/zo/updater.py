@@ -3,7 +3,7 @@
 import re
 from typing import TYPE_CHECKING, ClassVar
 
-from lib.update.net import fetch_github_api, fetch_url
+from lib.update.net import fetch_github_api
 from lib.update.updaters import (
     GitHubReleaseAssetURLsUpdater,
     UpdateContext,
@@ -11,6 +11,7 @@ from lib.update.updaters import (
     register_updater,
 )
 from lib.update.updaters.metadata import AssetURLsMetadata
+from lib.update.updaters.vendor_feeds import fetch_electron_builder_manifest
 
 if TYPE_CHECKING:
     import aiohttp
@@ -18,8 +19,7 @@ if TYPE_CHECKING:
     from lib.update.net import JSONValue
 
 _MAC_FEED = "latest-mac.yml"
-_FEED_VERSION = re.compile(r"^version: ([0-9]+\.[0-9]+\.[0-9]+)$", re.MULTILINE)
-_FEED_PATH = re.compile(r"^path: (\S+)$", re.MULTILINE)
+_EXACT_VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 
 
 @register_updater
@@ -69,14 +69,14 @@ class ZoUpdater(GitHubReleaseAssetURLsUpdater):
         payload = await self._fetch_latest_release_payload(session)
         tag_name = self._release_tag_from_payload(payload)
         feed_url = self._named_asset_url(payload, _MAC_FEED, tag_name)
-        feed = (await fetch_url(session, feed_url, config=self.config)).decode()
-        version_match = _FEED_VERSION.search(feed)
-        path_match = _FEED_PATH.search(feed)
-        if version_match is None or path_match is None:
-            msg = f"Zo {_MAC_FEED} in tag {tag_name} has no exact version and path"
+        feed = await fetch_electron_builder_manifest(
+            session, feed_url, config=self.config
+        )
+        version = feed.version
+        if _EXACT_VERSION.fullmatch(version) is None:
+            msg = f"Zo {_MAC_FEED} in tag {tag_name} has no exact version"
             raise RuntimeError(msg)
-        version = version_match.group(1)
-        if path_match.group(1) != self._asset_name(version, "universal"):
+        if feed.path != self._asset_name(version, "universal"):
             msg = f"Zo {_MAC_FEED} in tag {tag_name} names an unexpected macOS asset"
             raise RuntimeError(msg)
         mac_tag = f"{self.TAG_PREFIX}{version}"

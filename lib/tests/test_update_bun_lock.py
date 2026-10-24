@@ -181,10 +181,6 @@ def test_helper_error_paths_and_url_fetch(monkeypatch: pytest.MonkeyPatch) -> No
     assert bun_lock._is_source_url("https://example.test/pkg.tgz") is True
     assert bun_lock._is_source_url("github:owner/repo") is True
     assert bun_lock._is_source_url("workspace:*") is False
-    assert bun_lock._is_exact_version_spec("") is False
-    assert bun_lock._is_exact_version_spec("latest") is False
-    assert bun_lock._is_exact_version_spec("^1.0.0") is False
-    assert bun_lock._is_exact_version_spec("1.2.3-superset.1") is True
     assert bun_lock._package_json_member_name(["package/package.json"]) == (
         "package/package.json"
     )
@@ -515,6 +511,61 @@ def test_validate_source_package_exact_versions_skips_irrelevant_shapes(
     # Only the one real override is resolved: the malformed package entries must
     # neither abort validation nor add fetches for their own tarballs.
     assert fetched == ["https://example.test/dep.tgz"]
+
+
+def _write_single_dependency_lock(tmp_path: Path, spec: str) -> Path:
+    lock_file = tmp_path / "bun.lock"
+    lock_file.write_text(
+        json.dumps({
+            "overrides": {"dep": "https://example.test/dep.tgz"},
+            "packages": {
+                "dep": ["dep@https://example.test/dep.tgz", {}, "sha512-a"],
+                "parent": [
+                    "parent@https://example.test/parent.tgz",
+                    {"dependencies": {"dep": spec}},
+                    "sha512-b",
+                ],
+            },
+        }),
+        encoding="utf-8",
+    )
+    return lock_file
+
+
+@pytest.mark.parametrize(
+    "spec",
+    ["1.x", "1", "x", "next", "canary", "v1.2.3", "1.0.0-01", "2.0.0+build.1"],
+)
+def test_validate_source_package_exact_versions_compares_only_exact_semver(
+    tmp_path: Path,
+    spec: str,
+) -> None:
+    """Ranges, tags, and loose spellings are not exact pins, so never mismatch.
+
+    ``2.0.0+build.1`` is exact but differs only from ``2.0.0`` in build
+    metadata, which SemVer excludes from precedence.
+    """
+    version = "2.0.0" if spec.startswith("2.") else "1.2.3"
+    bun_lock.validate_source_package_exact_versions(
+        _write_single_dependency_lock(tmp_path, spec),
+        fetch_bytes=lambda _url: _tarball_bytes({"name": "dep", "version": version}),
+    )
+
+
+@pytest.mark.parametrize("version", ["1.2.4", "not-semver"])
+def test_validate_source_package_exact_versions_rejects_unequal_parsed_version(
+    tmp_path: Path,
+    version: str,
+) -> None:
+    """An exact pin mismatches any tarball version of different precedence."""
+    with pytest.raises(RuntimeError, match="exact-version mismatch"):
+        bun_lock.validate_source_package_exact_versions(
+            _write_single_dependency_lock(tmp_path, "1.2.3"),
+            fetch_bytes=lambda _url: _tarball_bytes({
+                "name": "dep",
+                "version": version,
+            }),
+        )
 
 
 def test_read_source_package_manifest_rejects_invalid_archive() -> None:

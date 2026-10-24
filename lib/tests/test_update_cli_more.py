@@ -33,28 +33,19 @@ from lib.update.cli import (
     OutputOptions,
     ResolvedTargets,
     UpdateOptions,
-    UpdateSummary,
-    _argv_runs_top_level_update,
     _build_item_meta,
     _build_run_plan,
     _build_update_options,
-    _emit_summary,
     _get_updaters,
     _handle_preflight_requests,
     _handle_schema_request,
     _is_tty,
     _load_sources_for_run,
-    _maybe_reexec_checkout_update,
     _requires_root_closure_validation,
     _resolve_full_output,
     _resolve_runtime_config,
     _resolve_tty_settings,
-    _revalidate_runtime_source_snapshot,
-    _runtime_source_policy,
-    _runtime_source_relpaths,
-    _same_source_path,
     _split_trailing_target_options,
-    _update_library_matches_checkout,
     check_required_tools,
     cli,
     run_update_command,
@@ -98,6 +89,7 @@ from lib.update.persistence import (
 from lib.update.planner import companion_source_name, source_backing_input_name
 from lib.update.refs import FlakeInputRef
 from lib.update.source_runner import UpdatePhaseResult
+from lib.update.summary import UpdateSummary
 from lib.update.ui_state import OperationKind
 from lib.update.updaters import (
     ChecksumProvidedUpdater,
@@ -117,434 +109,6 @@ def _run_async[T](awaitable: object) -> T:
     return asyncio.run(awaitable)  # type: ignore[arg-type]
 
 
-_RUNTIME_SOURCE_POLICY = """[tool.nixcfg.runtimeSource]
-schemaVersion = 1
-rootPaths = ["nixcfg.py", "pyproject.toml", "uv.lock"]
-libraryExtensions = ["json", "py", "pyi", "yaml"]
-libraryNames = ["py.typed"]
-excludedLibraryPaths = ["tests"]
-dynamicRoots = ["packages", "overlays"]
-dynamicExtensions = ["py", "pyi"]
-dynamicExcludedFileSuffixes = ["_test.py"]
-"""
-
-
-def _write_update_file(root: Path, relative_path: str, content: str) -> None:
-    path = root / "lib" / "update" / relative_path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-    policy_path = root / "pyproject.toml"
-    if not policy_path.exists():
-        policy_path.write_text(_RUNTIME_SOURCE_POLICY, encoding="utf-8")
-    for root_file in (root / "nixcfg.py", root / "uv.lock"):
-        if not root_file.exists():
-            root_file.write_text("fixture runtime root\n", encoding="utf-8")
-    for dynamic_root in (root / "packages", root / "overlays"):
-        dynamic_root.mkdir(exist_ok=True)
-
-
-def test_update_library_matches_checkout_same_and_equal_trees(tmp_path: Path) -> None:
-    """Treat the current update tree and byte-identical copies as compatible."""
-    repo_root = tmp_path / "repo"
-    _write_update_file(repo_root, "cli.py", "VALUE = 1\n")
-
-    assert _update_library_matches_checkout(
-        repo_root,
-        runtime_source_root=repo_root,
-    )
-
-    _write_update_file(tmp_path / "runtime-root", "cli.py", "VALUE = 1\n")
-    runtime_root = tmp_path / "runtime-root"
-
-    assert _update_library_matches_checkout(
-        repo_root,
-        runtime_source_root=runtime_root,
-    )
-
-
-def test_update_library_detects_missing_or_changed_checkout(tmp_path: Path) -> None:
-    """Reject missing, differently shaped, or content-skewed update libraries."""
-    repo_root = tmp_path / "repo"
-    runtime_source_root = tmp_path / "runtime-root"
-    runtime_root = runtime_source_root
-
-    assert not _update_library_matches_checkout(
-        repo_root,
-        runtime_source_root=runtime_root,
-    )
-
-    _write_update_file(repo_root, "cli.py", "VALUE = 1\n")
-    _write_update_file(runtime_source_root, "other.py", "VALUE = 1\n")
-    assert not _update_library_matches_checkout(
-        repo_root, runtime_source_root=runtime_root
-    )
-
-    (runtime_root / "lib" / "update" / "other.py").unlink()
-    _write_update_file(runtime_source_root, "cli.py", "VALUE = 2\n")
-    assert not _update_library_matches_checkout(
-        repo_root, runtime_source_root=runtime_root
-    )
-
-
-@pytest.mark.parametrize("runtime_path", ["nixcfg.py", "pyproject.toml", "uv.lock"])
-def test_update_library_detects_runtime_root_input_changes(
-    runtime_path: str,
-    tmp_path: Path,
-) -> None:
-    """Entrypoint, project metadata, and lock changes must all force a handoff."""
-    repo_root = tmp_path / "repo"
-    runtime_source_root = tmp_path / "runtime-root"
-    _write_update_file(repo_root, "cli.py", "VALUE = 1\n")
-    _write_update_file(runtime_source_root, "cli.py", "VALUE = 1\n")
-    for root in (repo_root, runtime_source_root):
-        (root / "nixcfg.py").write_text("VALUE = 1\n", encoding="utf-8")
-        (root / "uv.lock").write_text("version = 1\n", encoding="utf-8")
-
-    changed_path = repo_root / runtime_path
-    changed_path.write_text(
-        changed_path.read_text(encoding="utf-8") + "# changed\n",
-        encoding="utf-8",
-    )
-
-    assert not _update_library_matches_checkout(
-        repo_root,
-        runtime_source_root=runtime_source_root,
-    )
-
-
-def test_update_library_detects_packaged_policy_data_changes(tmp_path: Path) -> None:
-    """Policy-only edits must trigger the checkout-matching runtime handoff."""
-    repo_root = tmp_path / "repo"
-    runtime_source_root = tmp_path / "runtime-root"
-    _write_update_file(repo_root, "cli.py", "VALUE = 1\n")
-    _write_update_file(runtime_source_root, "cli.py", "VALUE = 1\n")
-    repo_policy = repo_root / "lib" / "system-policy.json"
-    runtime_policy = runtime_source_root / "lib" / "system-policy.json"
-    repo_policy.write_text('{"schemaVersion": 1}\n', encoding="utf-8")
-    runtime_policy.write_text('{"schemaVersion": 2}\n', encoding="utf-8")
-
-    assert not _update_library_matches_checkout(
-        repo_root,
-        runtime_source_root=runtime_source_root,
-    )
-
-    runtime_policy.write_bytes(repo_policy.read_bytes())
-    assert _update_library_matches_checkout(
-        repo_root,
-        runtime_source_root=runtime_source_root,
-    )
-
-
-def test_update_library_detects_dynamic_updater_changes(tmp_path: Path) -> None:
-    """Live updater code must never run against a silently stale installed core."""
-    repo_root = tmp_path / "repo"
-    runtime_source_root = tmp_path / "runtime-root"
-    for root in (repo_root, runtime_source_root):
-        _write_update_file(root, "cli.py", "VALUE = 1\n")
-        updater = root / "packages" / "demo" / "updater.py"
-        updater.parent.mkdir(parents=True)
-        updater.write_text("VALUE = 1\n", encoding="utf-8")
-        (updater.parent / "updater_test.py").write_text(
-            "TEST_VALUE = 1\n",
-            encoding="utf-8",
-        )
-
-    assert _update_library_matches_checkout(
-        repo_root,
-        runtime_source_root=runtime_source_root,
-    )
-
-    (repo_root / "packages" / "demo" / "updater.py").write_text(
-        "VALUE = 2\n",
-        encoding="utf-8",
-    )
-    assert not _update_library_matches_checkout(
-        repo_root,
-        runtime_source_root=runtime_source_root,
-    )
-
-    (repo_root / "packages" / "demo" / "updater.py").write_text(
-        "VALUE = 1\n",
-        encoding="utf-8",
-    )
-    (repo_root / "packages" / "demo" / "updater_test.py").write_text(
-        "TEST_VALUE = 2\n",
-        encoding="utf-8",
-    )
-    assert _update_library_matches_checkout(
-        repo_root,
-        runtime_source_root=runtime_source_root,
-    )
-
-
-def test_runtime_source_relpaths_excludes_non_runtime_files(tmp_path: Path) -> None:
-    """Apply every policy filter before comparing packaged runtime sources."""
-    _write_update_file(tmp_path, "cli.py", "VALUE = 1\n")
-    excluded_library_file = tmp_path / "lib" / "tests" / "helper.py"
-    excluded_library_file.parent.mkdir(parents=True)
-    excluded_library_file.write_text("VALUE = 1\n", encoding="utf-8")
-    (tmp_path / "lib" / "update" / "notes.txt").write_text(
-        "not runtime source\n",
-        encoding="utf-8",
-    )
-    package_dir = tmp_path / "packages" / "demo"
-    package_dir.mkdir(parents=True)
-    (package_dir / "updater.py").write_text("VALUE = 1\n", encoding="utf-8")
-    (package_dir / "updater_test.py").write_text(
-        "TEST_VALUE = 1\n",
-        encoding="utf-8",
-    )
-    (package_dir / "README.md").write_text("ignored\n", encoding="utf-8")
-
-    assert _runtime_source_relpaths(
-        tmp_path,
-        _runtime_source_policy(tmp_path),
-    ) == {
-        Path("nixcfg.py"),
-        Path("pyproject.toml"),
-        Path("uv.lock"),
-        Path("lib/update/cli.py"),
-        Path("packages/demo/updater.py"),
-    }
-
-
-def test_update_library_compares_declared_runtime_directories(
-    tmp_path: Path,
-) -> None:
-    """Directory root paths must match the recursive fileset packaged by Nix."""
-    repo_root = tmp_path / "repo"
-    runtime_source_root = tmp_path / "runtime-root"
-    policy = _RUNTIME_SOURCE_POLICY.replace(
-        'rootPaths = ["nixcfg.py", "pyproject.toml", "uv.lock"]',
-        'rootPaths = ["nixcfg.py", "pyproject.toml", "uv.lock", "runtime-data"]',
-    )
-    for root in (repo_root, runtime_source_root):
-        _write_update_file(root, "cli.py", "VALUE = 1\n")
-        (root / "pyproject.toml").write_text(policy, encoding="utf-8")
-        runtime_file = root / "runtime-data" / "behavior.py"
-        runtime_file.parent.mkdir()
-        runtime_file.write_text("VALUE = 1\n", encoding="utf-8")
-
-    assert _update_library_matches_checkout(
-        repo_root,
-        runtime_source_root=runtime_source_root,
-    )
-
-    (repo_root / "runtime-data" / "behavior.py").write_text(
-        "VALUE = 2\n",
-        encoding="utf-8",
-    )
-    assert not _update_library_matches_checkout(
-        repo_root,
-        runtime_source_root=runtime_source_root,
-    )
-
-    (repo_root / "runtime-data" / "behavior.py").unlink()
-    assert not _update_library_matches_checkout(
-        repo_root,
-        runtime_source_root=runtime_source_root,
-    )
-
-
-def test_update_library_compares_file_valued_dynamic_roots(tmp_path: Path) -> None:
-    """A dynamic file root must match the fileFilter semantics used by Nix."""
-    repo_root = tmp_path / "repo"
-    runtime_source_root = tmp_path / "runtime-root"
-    policy = _RUNTIME_SOURCE_POLICY.replace(
-        'dynamicRoots = ["packages", "overlays"]',
-        'dynamicRoots = ["dynamic.py"]',
-    )
-    for root in (repo_root, runtime_source_root):
-        _write_update_file(root, "cli.py", "VALUE = 1\n")
-        (root / "pyproject.toml").write_text(policy, encoding="utf-8")
-        (root / "dynamic.py").write_text("VALUE = 1\n", encoding="utf-8")
-
-    assert _update_library_matches_checkout(
-        repo_root,
-        runtime_source_root=runtime_source_root,
-    )
-
-    (repo_root / "dynamic.py").write_text("VALUE = 2\n", encoding="utf-8")
-    assert not _update_library_matches_checkout(
-        repo_root,
-        runtime_source_root=runtime_source_root,
-    )
-
-    (repo_root / "dynamic.py").unlink()
-    assert not _update_library_matches_checkout(
-        repo_root,
-        runtime_source_root=runtime_source_root,
-    )
-
-
-@pytest.mark.parametrize("root_path", ["missing.py", "../outside", "/outside"])
-def test_update_library_rejects_invalid_declared_runtime_roots(
-    root_path: str,
-    tmp_path: Path,
-) -> None:
-    """Missing or checkout-escaping source roots must force a safe re-exec."""
-    repo_root = tmp_path / "repo"
-    runtime_source_root = tmp_path / "runtime-root"
-    policy = _RUNTIME_SOURCE_POLICY.replace(
-        'rootPaths = ["nixcfg.py", "pyproject.toml", "uv.lock"]',
-        f'rootPaths = ["{root_path}"]',
-    )
-    for root in (repo_root, runtime_source_root):
-        _write_update_file(root, "cli.py", "VALUE = 1\n")
-        (root / "pyproject.toml").write_text(policy, encoding="utf-8")
-
-    assert not _update_library_matches_checkout(
-        repo_root,
-        runtime_source_root=runtime_source_root,
-    )
-
-
-def test_update_library_rejects_invalid_or_different_runtime_policy(
-    tmp_path: Path,
-) -> None:
-    """Fail closed when either packaged policy cannot define the same boundary."""
-    repo_root = tmp_path / "repo"
-    runtime_source_root = tmp_path / "runtime-root"
-    for root in (repo_root, runtime_source_root):
-        _write_update_file(root, "cli.py", "VALUE = 1\n")
-
-    runtime_policy = runtime_source_root / "pyproject.toml"
-    runtime_policy.write_text("[", encoding="utf-8")
-    assert not _update_library_matches_checkout(
-        repo_root,
-        runtime_source_root=runtime_source_root,
-    )
-
-    runtime_policy.write_text(
-        _RUNTIME_SOURCE_POLICY.replace(
-            'libraryNames = ["py.typed"]',
-            'libraryNames = ["py.typed", "runtime.marker"]',
-        ),
-        encoding="utf-8",
-    )
-    assert not _update_library_matches_checkout(
-        repo_root,
-        runtime_source_root=runtime_source_root,
-    )
-
-
-def test_update_library_uses_packaged_runtime_source_environment(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """The installed wrapper's source boundary must drive the skew comparison."""
-    repo_root = tmp_path / "repo"
-    runtime_source_root = tmp_path / "runtime-root"
-    for root in (repo_root, runtime_source_root):
-        _write_update_file(root, "cli.py", "VALUE = 1\n")
-        (root / "uv.lock").write_text("version = 1\n", encoding="utf-8")
-    monkeypatch.setenv("NIXCFG_UPDATE_EXECUTION_SOURCE", str(runtime_source_root))
-
-    assert _update_library_matches_checkout(repo_root)
-
-    (repo_root / "uv.lock").write_text("version = 2\n", encoding="utf-8")
-    assert not _update_library_matches_checkout(repo_root)
-
-
-@pytest.mark.parametrize(
-    ("policy", "error_type", "message"),
-    [
-        (
-            _RUNTIME_SOURCE_POLICY.replace("schemaVersion = 1", "schemaVersion = 2"),
-            RuntimeError,
-            "schema",
-        ),
-        (
-            _RUNTIME_SOURCE_POLICY.replace("schemaVersion = 1", "schemaVersion = true"),
-            RuntimeError,
-            "schema",
-        ),
-        (
-            _RUNTIME_SOURCE_POLICY.replace(
-                'rootPaths = ["nixcfg.py", "pyproject.toml", "uv.lock"]',
-                'rootPaths = "nixcfg.py"',
-            ),
-            TypeError,
-            "rootPaths",
-        ),
-        (
-            '[tool.nixcfg]\nruntimeSource = "invalid"\n',
-            TypeError,
-            "policy table",
-        ),
-        (
-            _RUNTIME_SOURCE_POLICY.replace(
-                'dynamicRoots = ["packages", "overlays"]',
-                'dynamicRoots = ["../outside"]',
-            ),
-            TypeError,
-            "dynamicRoots",
-        ),
-        (
-            _RUNTIME_SOURCE_POLICY.replace(
-                'excludedLibraryPaths = ["tests"]',
-                'excludedLibraryPaths = ["/outside"]',
-            ),
-            TypeError,
-            "excludedLibraryPaths",
-        ),
-    ],
-)
-def test_runtime_source_policy_rejects_invalid_metadata(
-    policy: str,
-    error_type: type[Exception],
-    message: str,
-    tmp_path: Path,
-) -> None:
-    """Malformed source policy must fail closed before a skew comparison."""
-    (tmp_path / "pyproject.toml").write_text(policy, encoding="utf-8")
-
-    with pytest.raises(error_type, match=message):
-        _runtime_source_policy(tmp_path)
-
-
-def test_runtime_source_comparison_preserves_symlink_identity(tmp_path: Path) -> None:
-    """Equal file bytes must not conceal a changed packaged symlink contract."""
-    target = tmp_path / "target"
-    target.write_text("content\n", encoding="utf-8")
-    same_target = tmp_path / "same-target"
-    same_target.write_text("content\n", encoding="utf-8")
-    left = tmp_path / "left"
-    right = tmp_path / "right"
-    left.symlink_to(target.name)
-    right.symlink_to(target.name)
-    assert _same_source_path(left, right)
-
-    right.unlink()
-    right.symlink_to(same_target.name)
-    assert not _same_source_path(left, right)
-
-    right.unlink()
-    right.write_text("content\n", encoding="utf-8")
-    assert not _same_source_path(left, right)
-
-
-def test_update_library_comparison_fails_closed_on_path_race(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """A file disappearing during the final byte comparison is source skew."""
-    repo_root = tmp_path / "repo"
-    runtime_source_root = tmp_path / "runtime-root"
-    for root in (repo_root, runtime_source_root):
-        _write_update_file(root, "cli.py", "VALUE = 1\n")
-
-    def _raise_oserror(_left: Path, _right: Path) -> bool:
-        raise OSError("source changed")
-
-    monkeypatch.setattr("lib.update.cli._same_source_path", _raise_oserror)
-
-    assert not _update_library_matches_checkout(
-        repo_root,
-        runtime_source_root=runtime_source_root,
-    )
-
-
 def test_run_updates_revalidates_snapshot_before_updater_discovery(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -557,10 +121,10 @@ def test_run_updates_revalidates_snapshot_before_updater_discovery(
     def _unexpected_plan(_opts: UpdateOptions) -> None:
         raise AssertionError("updater planning ran after the source race")
 
-    monkeypatch.setattr("lib.update.cli.sys.argv", ["nixcfg", "update"])
+    monkeypatch.setattr("lib.update.runtime_source.sys.argv", ["nixcfg", "update"])
     monkeypatch.setattr("lib.update.cli.get_repo_root", lambda: live)
     monkeypatch.setattr(
-        "lib.update.cli._update_library_matches_checkout",
+        "lib.update.runtime_source.update_library_matches_checkout",
         lambda _root: False,
     )
     monkeypatch.setattr("lib.update.cli._build_run_plan", _unexpected_plan)
@@ -571,29 +135,6 @@ def test_run_updates_revalidates_snapshot_before_updater_discovery(
         captured.err
     )
     assert "retry `nixcfg update`" in captured.err
-
-
-def test_runtime_source_revalidation_accepts_matching_snapshot(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """Continue when the captured workspace still matches the selected runtime."""
-    observed: list[Path] = []
-    monkeypatch.setattr("lib.update.cli.sys.argv", ["nixcfg"])
-    monkeypatch.setenv("NIXCFG_UPDATE_EXECUTION_SOURCE", "/nix/store/runtime-source")
-
-    def _matches(root: Path) -> bool:
-        observed.append(root)
-        return True
-
-    monkeypatch.setattr(
-        "lib.update.cli._update_library_matches_checkout",
-        _matches,
-    )
-
-    _revalidate_runtime_source_snapshot(tmp_path)
-
-    assert observed == [tmp_path]
 
 
 def test_run_update_command_discovers_updaters_only_after_snapshot_revalidation(
@@ -627,14 +168,16 @@ def test_run_update_command_discovers_updaters_only_after_snapshot_revalidation(
         return await run_updates(opts, check_tools=True)
 
     monkeypatch.setattr("lib.update.durable.execute", execute)
-    monkeypatch.setattr("lib.update.cli.sys.argv", ["nixcfg"])
+    monkeypatch.setattr("lib.update.runtime_source.sys.argv", ["nixcfg"])
     monkeypatch.setenv("NIXCFG_UPDATE_EXECUTION_SOURCE", "/nix/store/runtime-source")
     monkeypatch.setattr("lib.update.cli.get_repo_root", lambda: tmp_path)
     monkeypatch.setattr(
         "lib.update.persistence.IsolatedUpdateWorkspace",
         _ObservedWorkspace,
     )
-    monkeypatch.setattr("lib.update.cli._update_library_matches_checkout", _matches)
+    monkeypatch.setattr(
+        "lib.update.runtime_source.update_library_matches_checkout", _matches
+    )
     monkeypatch.setattr("lib.update.cli._get_updaters", _discover)
     monkeypatch.setattr(
         "lib.update.cli.shutil.which",
@@ -651,107 +194,6 @@ def test_run_update_command_discovers_updaters_only_after_snapshot_revalidation(
         "Error: Required tools not found: uv\n"
         "Please install them and ensure they are in your PATH.\n"
     )
-
-
-def test_maybe_reexec_checkout_update_skips_non_update_or_matching(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """Only top-level update commands with mismatched code trigger re-exec."""
-    monkeypatch.setattr("lib.update.cli.sys.argv", ["nixcfg", "tree"])
-    assert _maybe_reexec_checkout_update() is None
-
-    monkeypatch.setattr("lib.update.cli.sys.argv", ["nixcfg", "update"])
-    monkeypatch.setattr("lib.update.cli.get_repo_root", lambda: tmp_path)
-    monkeypatch.setattr(
-        "lib.update.cli._update_library_matches_checkout", lambda _: True
-    )
-    assert _maybe_reexec_checkout_update() is None
-
-
-def test_maybe_reexec_checkout_update_reports_blockers(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    tmp_path: Path,
-) -> None:
-    """Recursion and missing nix produce actionable errors instead of skewed imports."""
-    monkeypatch.setattr("lib.update.cli.sys.argv", ["nixcfg", "update"])
-    monkeypatch.setattr("lib.update.cli.get_repo_root", lambda: tmp_path)
-    monkeypatch.setattr(
-        "lib.update.cli._update_library_matches_checkout", lambda _: False
-    )
-    monkeypatch.setenv("NIXCFG_UPDATE_REEXECED_FROM_CHECKOUT", "1")
-
-    assert _maybe_reexec_checkout_update() == 1
-    assert "still differs" in capsys.readouterr().err
-
-    monkeypatch.delenv("NIXCFG_UPDATE_REEXECED_FROM_CHECKOUT")
-    monkeypatch.setattr("lib.update.cli.shutil.which", lambda _tool: None)
-
-    assert _maybe_reexec_checkout_update() == 1
-    assert "nix` was not found" in capsys.readouterr().err
-
-
-def test_maybe_reexec_checkout_update_execs_checkout_flake(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """Handoff uses a complete visible snapshot and preserves update argv."""
-    calls: dict[str, object] = {}
-
-    def _run(
-        args: list[str],
-        *,
-        cwd: Path,
-        env: dict[str, str],
-        check: bool,
-    ) -> SimpleNamespace:
-        calls["args"] = args
-        calls["cwd"] = cwd
-        calls["env"] = env
-        calls["check"] = check
-        return SimpleNamespace(returncode=23)
-
-    monkeypatch.setattr(
-        "lib.update.cli.sys.argv",
-        ["nixcfg", "update", "--check", "t3code"],
-    )
-    monkeypatch.setattr("lib.update.cli.get_repo_root", lambda: tmp_path)
-    monkeypatch.setattr(
-        "lib.update.cli._update_library_matches_checkout", lambda _: False
-    )
-    monkeypatch.setattr("lib.update.cli.shutil.which", lambda _tool: "/bin/nix")
-    monkeypatch.setattr(
-        "lib.update.cli.update_persistence.visible_source_snapshot",
-        lambda root: nullcontext(tmp_path / "snapshot"),
-    )
-    monkeypatch.setattr("lib.update.cli.subprocess.run", _run)
-
-    assert _maybe_reexec_checkout_update() == 23
-
-    assert calls["cwd"] == tmp_path
-    assert calls["args"] == [
-        "/bin/nix",
-        "run",
-        f"path:{tmp_path / 'snapshot'}#nixcfg",
-        "--",
-        "update",
-        "--check",
-        "t3code",
-    ]
-    assert calls["check"] is False
-    assert (
-        cast("dict[str, str]", calls["env"])["NIXCFG_UPDATE_REEXECED_FROM_CHECKOUT"]
-        == "1"
-    )
-    assert cast("dict[str, str]", calls["env"])["REPO_ROOT"] == str(tmp_path)
-
-
-def test_argv_runs_top_level_update() -> None:
-    """Recognize only top-level nixcfg update invocations."""
-    assert _argv_runs_top_level_update(["nixcfg", "update"])
-    assert not _argv_runs_top_level_update(["nixcfg"])
-    assert not _argv_runs_top_level_update(["nixcfg", "ci", "update"])
 
 
 def test_build_update_options_and_required_tools(
@@ -869,33 +311,6 @@ def test_tty_resolution_and_output_options(
     hidden = capsys.readouterr()
     assert hidden.out == ""
     assert hidden.err == ""
-
-
-def test_update_summary_and_emit_summary(capsys: pytest.CaptureFixture[str]) -> None:
-    """Accumulate status priorities and print human/json summaries."""
-    summary = UpdateSummary()
-    summary.accumulate({"a": "no_change", "b": "updated"})
-    summary.accumulate({"a": "error"})
-    assert summary.updated == ["b"]
-    assert summary.errors == ["a"]
-    assert summary.to_dict()["success"] is False
-
-    code = _emit_summary(
-        summary, had_errors=True, out=OutputOptions(json_output=True), dry_run=False
-    )
-    assert code == 1
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["errors"] == ["a"]
-
-    summary_no_updates = UpdateSummary(statuses={})
-    code_no_updates = _emit_summary(
-        summary_no_updates,
-        had_errors=False,
-        out=OutputOptions(json_output=False, quiet=False),
-        dry_run=True,
-    )
-    assert code_no_updates == 0
-    assert "No updates available" in capsys.readouterr().out
 
 
 def test_resolved_targets_and_item_meta(monkeypatch: pytest.MonkeyPatch) -> None:

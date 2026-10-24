@@ -1,4 +1,3 @@
----
 "$schema": "http://json-schema.org/draft-04/schema"
 "$id": "https://nix.dev/manual/nix/latest/protocols/json/schema/content-address-v1.json"
 title: Content Address
@@ -23,6 +22,7 @@ description: |
   > This data type is thus safely used in both of these contexts.
 
   -->
+
 type: object
 properties:
   method:
@@ -36,15 +36,15 @@ properties:
       In particular, the references of the store object are *not* taken into account with this hash (and currently-supported methods).
     "$ref": "./hash-v1.yaml"
 required:
-  - method
-  - hash
+- method
+- hash
 additionalProperties: false
 "$defs":
   method:
     type: string
     enum: [flat, nar, text, git]
     title: Content-Addressing Method
-    description: |-
+    description: |
       A string representing the [method](@docroot@/store/store-object/content-address.md) of content addressing that is chosen.
 
       Valid method strings are:

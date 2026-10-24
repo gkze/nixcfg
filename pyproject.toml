@@ -53,7 +53,11 @@ tcctool = "lib.macos.tcc_audit.cli:main"
 
 [project.optional-dependencies]
 # Install these only for schema/code-generation workflows.
-codegen = ["datamodel-code-generator[http]>=0.54.0", "referencing>=0.37.0"]
+codegen = [
+  "datamodel-code-generator[http]>=0.54.0",
+  "jsonschema[format-nongpl]>=4.25.1",
+  "referencing>=0.37.0",
+]
 
 [tool.ruff]
 # Turn on Ruff preview behavior to adopt newer checks earlier.
@@ -69,11 +73,7 @@ extend-exclude = [
 # Treat these directories as namespace package roots during resolution.
 namespace-packages = ["overlays", "packages"]
 # Explicitly include all extensionless Python entrypoints in Ruff discovery.
-extend-include = [
-  "home/george/bin/git-ignore",
-  "home/george/bin/zentool",
-  "home/george/bin/tcctool",
-]
+extend-include = ["home/george/bin/git-ignore", "modules/home/zen/zentool"]
 
 [tool.ruff.per-file-target-version]
 # Actions invokes this bootstrap before Nix supplies the Python 3.14 runtime.
@@ -86,7 +86,7 @@ extend-include = [
 # formatter bug is fixed.
 exclude = [
   "home/george/bin/git-ignore",
-  "home/george/bin/zentool",
+  "modules/home/zen/zentool",
   "lib/crate2nix_tauri_env_rewrite.py",
   "lib/nix/schemas/_fetch.py",
   "lib/update/persistence.py",
@@ -196,11 +196,19 @@ exclude = ["lib.tests*"]
 # Ship the type marker and schemas owned by the Nix model/codegen package.
 "lib.nix" = ["py.typed"]
 "lib.nix.schemas" = ["*.yaml", "_version.json"]
+# Ship the canonical manifest schema used by the packaged lockfile CLI. The
+# package-local path is a symlink to the single repository-owned schema file.
+"lib.schema_codegen" = ["codegen.schema.json"]
 
 [tool.nixcfg.runtimeSource]
 # Keep the updater re-exec boundary aligned with the uv2nix workspace source.
 schemaVersion = 1
-rootPaths = ["nixcfg.py", "pyproject.toml", "uv.lock"]
+rootPaths = [
+  "nixcfg.py",
+  "pyproject.toml",
+  "uv.lock",
+  "schemas/codegen/codegen.schema.json",
+]
 libraryExtensions = ["json", "py", "pyi", "yaml"]
 libraryNames = ["py.typed"]
 excludedLibraryPaths = ["tests"]
@@ -225,8 +233,7 @@ include = [
   "modules/**/*.py",
   "modules/**/*.pyi",
   "home/george/bin/git-ignore",
-  "home/george/bin/zentool",
-  "home/george/bin/tcctool",
+  "modules/home/zen/zentool",
 ]
 
 [tool.ty.rules]
@@ -275,6 +282,7 @@ respect-type-ignore-comments = false
 addopts = ["--strict-config", "--strict-markers", "--import-mode=importlib"]
 # Discover shared tests plus package- and overlay-owned sibling updater tests.
 testpaths = ["lib", "packages", "overlays"]
+pythonpath = ["."]
 # Preserve pytest's conventional prefix while supporting colocated sibling names.
 python_files = ["test_*.py", "*_test.py"]
 # Fail when xfail-marked tests unexpectedly pass.
@@ -322,6 +330,7 @@ dev = [
   "cosmic-ray>=8.3.18",
   "coverage>=7.13.4",
   "datamodel-code-generator[http]>=0.54.0",
+  "jsonschema[format-nongpl]>=4.25.1",
   "pytest>=9.0.2",
   "pytest-xdist>=3.8.0",
   "tree-sitter>=0.25.2,<0.26",

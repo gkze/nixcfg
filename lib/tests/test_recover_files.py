@@ -90,6 +90,81 @@ def test_plan_file_recovery_sync_marks_selected_local_only_files(
     assert plan.remove_paths == ("docs/extra.md",)
 
 
+def test_sync_restores_dangling_and_directory_snapshot_symlinks(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Snapshot symlinks are restored, not mistaken for local-only regular files."""
+    repo_root = tmp_path / "repo"
+    (repo_root / "docs").mkdir(parents=True)
+    (repo_root / "explicit-link").write_text("stale explicit\n", encoding="utf-8")
+    (repo_root / "docs/glob-link").write_text("stale glob\n", encoding="utf-8")
+
+    snapshot = tmp_path / "snapshot"
+    (snapshot / "docs/directory-target").mkdir(parents=True)
+    (snapshot / "explicit-link").symlink_to("missing-target")
+    (snapshot / "docs/glob-link").symlink_to("directory-target")
+
+    async def _plan_snapshot(_generation: str) -> SnapshotPlan:
+        return SnapshotPlan(
+            generation="/run/current-system",
+            resolved_target="/nix/store/current-system",
+            deriver="/nix/store/demo.drv",
+            snapshot=str(snapshot),
+        )
+
+    monkeypatch.setattr(rf, "plan_snapshot_recovery", _plan_snapshot)
+    plan = asyncio.run(
+        rf.plan_file_recovery(
+            paths=("explicit-link",),
+            globs=("docs/*",),
+            repo_root=repo_root,
+            sync=True,
+        )
+    )
+
+    assert plan.write_paths == ("docs/glob-link", "explicit-link")
+    assert plan.remove_paths == ()
+    assert rf.apply_file_recovery(plan) == plan.write_paths
+    assert (repo_root / "explicit-link").is_symlink()
+    assert not (repo_root / "explicit-link").exists()
+    assert (repo_root / "explicit-link").readlink() == Path("missing-target")
+    assert (repo_root / "docs/glob-link").readlink() == Path("directory-target")
+
+
+def test_sync_removes_a_selected_dangling_symlink(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A dangling local-only symlink is selected, unlinked, and reported changed."""
+    repo_root = tmp_path / "repo"
+    (repo_root / "docs").mkdir(parents=True)
+    (repo_root / "docs/stale-link").symlink_to("missing-target")
+    snapshot = tmp_path / "snapshot"
+    (snapshot / "docs").mkdir(parents=True)
+
+    async def _plan_snapshot(_generation: str) -> SnapshotPlan:
+        return SnapshotPlan(
+            generation="/run/current-system",
+            resolved_target="/nix/store/current-system",
+            deriver="/nix/store/demo.drv",
+            snapshot=str(snapshot),
+        )
+
+    monkeypatch.setattr(rf, "plan_snapshot_recovery", _plan_snapshot)
+    plan = asyncio.run(
+        rf.plan_file_recovery(
+            globs=("docs/*",),
+            repo_root=repo_root,
+            sync=True,
+        )
+    )
+
+    assert plan.remove_paths == ("docs/stale-link",)
+    assert rf.apply_file_recovery(plan) == ("docs/stale-link",)
+    assert not (repo_root / "docs/stale-link").is_symlink()
+
+
 def test_plan_file_recovery_rejects_missing_or_invalid_selectors(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

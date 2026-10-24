@@ -16,14 +16,12 @@ let
     name: version:
     let
       url = "https://files.pythonhosted.org/packages/source/${builtins.substring 0 1 name}/${name}/${name}-${version}.tar.gz";
-      entries = builtins.filter (
-        entry: entry.hashType == "sha256" && (entry.url or null) == url
-      ) selfSource.hashes;
+      entry = outputs.lib.selectSourceHashEntry selfSource.hashes "sha256" { inherit url; };
     in
-    assert builtins.length entries == 1;
+    assert entry != null;
     fetchurl {
       inherit url;
-      inherit ((builtins.head entries)) hash;
+      inherit (entry) hash;
     };
   localstub = python3.pkgs.buildPythonPackage {
     pname = "localstub";

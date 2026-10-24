@@ -369,7 +369,13 @@ def test_fetch_write_and_parse_version_manifest(
         {"name": "b.yaml", "download_url": "https://example.com/b"},
         {"name": "missing.yaml", "download_url": "https://example.com/m"},
     ]
-    object.__getattribute__(fetch, "_write_version")("deadbeef", "main", files)
+    object.__getattribute__(fetch, "_write_version")(
+        "deadbeef",
+        "main",
+        files,
+        schemas_dir=schemas_dir,
+        version_file=schemas_dir / "_version.json",
+    )
 
     manifest = object.__getattribute__(fetch, "_parse_version")()
     assert manifest is not None
@@ -418,21 +424,18 @@ def test_fetch_downloads_files_and_writes_manifest(
     ]
     monkeypatch.setattr(fetch, "_list_schema_files", lambda _sha: files)
     monkeypatch.setattr(fetch, "_download_schema", lambda url: url.encode())
+    (schemas_dir / "stale.yaml").write_bytes(b"deleted upstream")
 
-    writes: list[tuple[str, str, list[dict[str, str]]]] = []
-
-    def _write_version(
-        commit: str, branch: str, version_files: list[dict[str, str]]
-    ) -> None:
-        writes.append((commit, branch, version_files))
-
-    monkeypatch.setattr(fetch, "_write_version", _write_version)
     progress: list[str] = []
     fetch.fetch(progress=progress.append)
 
     assert (schemas_dir / "a.yaml").read_bytes() == b"https://example.com/a"
     assert (schemas_dir / "b.yaml").read_bytes() == b"https://example.com/b"
-    assert writes == [("abc", "main", files)]
+    assert not (schemas_dir / "stale.yaml").exists()
+    manifest = fetch._parse_version()
+    assert manifest is not None
+    assert manifest.commit == "abc"
+    assert set(manifest.checksums) == {"a.yaml", "b.yaml"}
     assert progress == [
         f"Resolving default branch head for {fetch.REPO}.",
         "Listing schema files for main@abc.",
@@ -444,58 +447,347 @@ def test_fetch_downloads_files_and_writes_manifest(
     ]
 
 
-def test_fetch_check_happy_path_and_failure_modes(
+def _schema_artifacts(schemas_dir: Path) -> dict[str, bytes]:
+    return {
+        path.name: path.read_bytes() for path in schemas_dir.iterdir() if path.is_file()
+    }
+
+
+def test_fetch_mid_download_failure_leaves_live_snapshot_untouched(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Run this test case."""
+    """A failed download cannot partially replace the committed schema set."""
+    schemas_dir = tmp_path / "schemas"
+    schemas_dir.mkdir()
+    (schemas_dir / "a.yaml").write_bytes(b"old-a")
+    (schemas_dir / "stale.yaml").write_bytes(b"old-stale")
+    (schemas_dir / "_version.json").write_bytes(b"old-manifest")
+    before = _schema_artifacts(schemas_dir)
+    monkeypatch.setattr(fetch, "SCHEMAS_DIR", schemas_dir)
+    monkeypatch.setattr(fetch, "VERSION_FILE", schemas_dir / "_version.json")
+    monkeypatch.setattr(fetch, "_get_default_branch_head", lambda: ("abc", "main"))
+    monkeypatch.setattr(
+        fetch,
+        "_list_schema_files",
+        lambda _sha: [
+            {"name": "a.yaml", "download_url": "https://example.com/a"},
+            {"name": "b.yaml", "download_url": "https://example.com/b"},
+        ],
+    )
+
+    def _download(url: str) -> bytes:
+        if url.endswith("/b"):
+            raise RuntimeError("mid-fetch failure")
+        return b"new-a"
+
+    monkeypatch.setattr(fetch, "_download_schema", _download)
+    with pytest.raises(RuntimeError, match="mid-fetch failure"):
+        fetch.fetch()
+
+    assert _schema_artifacts(schemas_dir) == before
+    assert list(schemas_dir.glob(".schema-fetch-*")) == []
+
+
+def test_fetch_manifest_write_failure_restores_files_and_deletions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A manifest commit failure rolls back every previously applied file change."""
+    schemas_dir = tmp_path / "schemas"
+    schemas_dir.mkdir()
+    (schemas_dir / "a.yaml").write_bytes(b"old-a")
+    (schemas_dir / "stale.yaml").write_bytes(b"old-stale")
+    (schemas_dir / "_version.json").write_bytes(b"old-manifest")
+    before = _schema_artifacts(schemas_dir)
+    monkeypatch.setattr(fetch, "SCHEMAS_DIR", schemas_dir)
+    monkeypatch.setattr(fetch, "VERSION_FILE", schemas_dir / "_version.json")
+    monkeypatch.setattr(fetch, "_get_default_branch_head", lambda: ("abc", "main"))
+    monkeypatch.setattr(
+        fetch,
+        "_list_schema_files",
+        lambda _sha: [
+            {"name": "a.yaml", "download_url": "https://example.com/a"},
+            {"name": "b.yaml", "download_url": "https://example.com/b"},
+        ],
+    )
+    monkeypatch.setattr(
+        fetch,
+        "_download_schema",
+        lambda url: f"new-{url.rsplit('/', 1)[-1]}".encode(),
+    )
+    atomic_write_bytes = fetch.update_io.atomic_write_bytes
+    failed = False
+
+    def _fail_manifest_once(path: Path, content: bytes, **kwargs: object) -> None:
+        nonlocal failed
+        if path == fetch.VERSION_FILE and not failed:
+            failed = True
+            raise OSError("manifest write failed")
+        atomic_write_bytes(path, content, **kwargs)
+
+    monkeypatch.setattr(fetch.update_io, "atomic_write_bytes", _fail_manifest_once)
+    with pytest.raises(OSError, match="manifest write failed"):
+        fetch.fetch()
+
+    assert failed
+    assert _schema_artifacts(schemas_dir) == before
+    assert list(schemas_dir.glob(".schema-fetch-*")) == []
+
+
+def test_fetch_rollback_failure_retains_recovery_backup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unsuccessful rollback preserves the prior snapshot for manual recovery."""
+    schemas_dir = tmp_path / "schemas"
+    schemas_dir.mkdir()
+    (schemas_dir / "a.yaml").write_bytes(b"old-a")
+    (schemas_dir / "_version.json").write_bytes(b"old-manifest")
+    before = _schema_artifacts(schemas_dir)
+    monkeypatch.setattr(fetch, "SCHEMAS_DIR", schemas_dir)
+    monkeypatch.setattr(fetch, "VERSION_FILE", schemas_dir / "_version.json")
+    monkeypatch.setattr(fetch, "_get_default_branch_head", lambda: ("abc", "main"))
+    monkeypatch.setattr(
+        fetch,
+        "_list_schema_files",
+        lambda _sha: [{"name": "a.yaml", "download_url": "https://example.com/a"}],
+    )
+    monkeypatch.setattr(fetch, "_download_schema", lambda _url: b"new-a")
+
+    atomic_write_bytes = fetch.update_io.atomic_write_bytes
+
+    def _fail_manifest(path: Path, content: bytes, **kwargs: object) -> None:
+        if path == fetch.VERSION_FILE:
+            raise OSError("persistent manifest failure")
+        atomic_write_bytes(path, content, **kwargs)
+
+    monkeypatch.setattr(fetch.update_io, "atomic_write_bytes", _fail_manifest)
+    with pytest.raises(fetch._SnapshotRollbackError) as raised:
+        fetch.fetch()
+
+    message = str(raised.value)
+    assert "Schema snapshot publication failed" in message
+    assert "rollback also failed" in message
+    assert "recovery backup retained" in message
+    workspaces = list(schemas_dir.glob(".schema-fetch-*"))
+    assert len(workspaces) == 1
+    backup = workspaces[0] / "backup"
+    assert (backup / "a.yaml").read_bytes() == before["a.yaml"]
+    assert (backup / "_version.json").read_bytes() == before["_version.json"]
+
+
+@pytest.mark.parametrize("interruption_type", [KeyboardInterrupt, SystemExit])
+def test_fetch_publication_interruption_restores_live_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    interruption_type: type[BaseException],
+) -> None:
+    """Interrupts still run rollback, then propagate without deleting staging data early."""
+    schemas_dir = tmp_path / "schemas"
+    schemas_dir.mkdir()
+    (schemas_dir / "a.yaml").write_bytes(b"old-a")
+    (schemas_dir / "stale.yaml").write_bytes(b"old-stale")
+    (schemas_dir / "_version.json").write_bytes(b"old-manifest")
+    before = _schema_artifacts(schemas_dir)
+    monkeypatch.setattr(fetch, "SCHEMAS_DIR", schemas_dir)
+    monkeypatch.setattr(fetch, "VERSION_FILE", schemas_dir / "_version.json")
+    monkeypatch.setattr(fetch, "_get_default_branch_head", lambda: ("abc", "main"))
+    monkeypatch.setattr(
+        fetch,
+        "_list_schema_files",
+        lambda _sha: [
+            {"name": "a.yaml", "download_url": "https://example.com/a"},
+            {"name": "b.yaml", "download_url": "https://example.com/b"},
+        ],
+    )
+    monkeypatch.setattr(
+        fetch,
+        "_download_schema",
+        lambda url: f"new-{url.rsplit('/', 1)[-1]}".encode(),
+    )
+    interruption = interruption_type("publication interrupted")
+    atomic_write_bytes = fetch.update_io.atomic_write_bytes
+    interrupted = False
+
+    def _interrupt_manifest_once(path: Path, content: bytes, **kwargs: object) -> None:
+        nonlocal interrupted
+        if path == fetch.VERSION_FILE and not interrupted:
+            interrupted = True
+            raise interruption
+        atomic_write_bytes(path, content, **kwargs)
+
+    monkeypatch.setattr(fetch.update_io, "atomic_write_bytes", _interrupt_manifest_once)
+    with pytest.raises(interruption_type) as raised:
+        fetch.fetch()
+
+    assert raised.value is interruption
+    assert interrupted
+    assert _schema_artifacts(schemas_dir) == before
+    assert list(schemas_dir.glob(".schema-fetch-*")) == []
+
+
+@pytest.mark.parametrize("interruption_type", [KeyboardInterrupt, SystemExit])
+def test_fetch_publication_interruption_survives_rollback_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    interruption_type: type[BaseException],
+) -> None:
+    """A rollback error cannot replace the original interrupt or delete its backup."""
+    schemas_dir = tmp_path / "schemas"
+    schemas_dir.mkdir()
+    (schemas_dir / "a.yaml").write_bytes(b"old-a")
+    (schemas_dir / "_version.json").write_bytes(b"old-manifest")
+    before = _schema_artifacts(schemas_dir)
+    monkeypatch.setattr(fetch, "SCHEMAS_DIR", schemas_dir)
+    monkeypatch.setattr(fetch, "VERSION_FILE", schemas_dir / "_version.json")
+    monkeypatch.setattr(fetch, "_get_default_branch_head", lambda: ("abc", "main"))
+    monkeypatch.setattr(
+        fetch,
+        "_list_schema_files",
+        lambda _sha: [{"name": "a.yaml", "download_url": "https://example.com/a"}],
+    )
+    monkeypatch.setattr(fetch, "_download_schema", lambda _url: b"new-a")
+    interruption = interruption_type("publication interrupted")
+    atomic_write_bytes = fetch.update_io.atomic_write_bytes
+    manifest_writes = 0
+
+    def _interrupt_then_fail_rollback(
+        path: Path, content: bytes, **kwargs: object
+    ) -> None:
+        nonlocal manifest_writes
+        if path == fetch.VERSION_FILE:
+            manifest_writes += 1
+            if manifest_writes == 1:
+                raise interruption
+            raise OSError("rollback interrupted by secondary failure")
+        atomic_write_bytes(path, content, **kwargs)
+
+    monkeypatch.setattr(
+        fetch.update_io, "atomic_write_bytes", _interrupt_then_fail_rollback
+    )
+    with pytest.raises(interruption_type) as raised:
+        fetch.fetch()
+
+    assert raised.value is interruption
+    assert manifest_writes == 2
+    assert _schema_artifacts(schemas_dir) == before
+    workspaces = list(schemas_dir.glob(".schema-fetch-*"))
+    assert len(workspaces) == 1
+    assert _schema_artifacts(workspaces[0] / "backup") == before
+
+
+@pytest.mark.parametrize("interruption_type", [KeyboardInterrupt, SystemExit])
+def test_fetch_rollback_interruption_retains_backup_and_original_interrupt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    interruption_type: type[BaseException],
+) -> None:
+    """An interrupted rollback keeps both its partial live state and recovery evidence."""
+    schemas_dir = tmp_path / "schemas"
+    schemas_dir.mkdir()
+    (schemas_dir / "a.yaml").write_bytes(b"old-a")
+    (schemas_dir / "stale.yaml").write_bytes(b"old-stale")
+    (schemas_dir / "_version.json").write_bytes(b"old-manifest")
+    before = _schema_artifacts(schemas_dir)
+    monkeypatch.setattr(fetch, "SCHEMAS_DIR", schemas_dir)
+    monkeypatch.setattr(fetch, "VERSION_FILE", schemas_dir / "_version.json")
+    monkeypatch.setattr(fetch, "_get_default_branch_head", lambda: ("abc", "main"))
+    monkeypatch.setattr(
+        fetch,
+        "_list_schema_files",
+        lambda _sha: [
+            {"name": "a.yaml", "download_url": "https://example.com/a"},
+            {"name": "b.yaml", "download_url": "https://example.com/b"},
+        ],
+    )
+    monkeypatch.setattr(
+        fetch,
+        "_download_schema",
+        lambda url: f"new-{url.rsplit('/', 1)[-1]}".encode(),
+    )
+    interruption = interruption_type("rollback interrupted")
+    atomic_write_bytes = fetch.update_io.atomic_write_bytes
+    manifest_writes = 0
+    a_writes = 0
+
+    def _interrupt_rollback(path: Path, content: bytes, **kwargs: object) -> None:
+        nonlocal a_writes, manifest_writes
+        if path == fetch.VERSION_FILE:
+            manifest_writes += 1
+            if manifest_writes == 1:
+                raise OSError("publication failed")
+        if path == schemas_dir / "a.yaml":
+            a_writes += 1
+            if a_writes == 2:
+                raise interruption
+        atomic_write_bytes(path, content, **kwargs)
+
+    monkeypatch.setattr(fetch.update_io, "atomic_write_bytes", _interrupt_rollback)
+    with pytest.raises(interruption_type) as raised:
+        fetch.fetch()
+
+    assert raised.value is interruption
+    assert manifest_writes == 1
+    assert (schemas_dir / "a.yaml").read_bytes() == b"new-a"
+    assert not (schemas_dir / "b.yaml").exists()
+    assert not (schemas_dir / "stale.yaml").exists()
+    assert (schemas_dir / "_version.json").read_bytes() == b"old-manifest"
+    workspaces = list(schemas_dir.glob(".schema-fetch-*"))
+    assert len(workspaces) == 1
+    assert _schema_artifacts(workspaces[0] / "backup") == before
+
+
+def test_fetch_check_verifies_recorded_checksums_offline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Check compares local bytes to manifest checksums and names each drift."""
     schemas_dir = tmp_path / "schemas"
     schemas_dir.mkdir()
     monkeypatch.setattr(fetch, "SCHEMAS_DIR", schemas_dir)
-
+    (schemas_dir / "a.yaml").write_bytes(b"a")
+    (schemas_dir / "b.yaml").write_bytes(b"b")
     manifest = fetch.SchemaVersionManifest(
         commit="abc",
         branch="main",
         fetched=fetch.datetime.now(UTC),
         repo=fetch.REPO,
         path=fetch.SCHEMA_PATH,
-        checksums={},
+        checksums={
+            "a.yaml": fetch.hashlib.sha256(b"a").hexdigest(),
+            "b.yaml": fetch.hashlib.sha256(b"b").hexdigest(),
+        },
     )
     monkeypatch.setattr(fetch, "_parse_version", lambda: manifest)
 
-    files = [
-        {"name": "a.yaml", "download_url": "https://example.com/a"},
-        {"name": "b.yaml", "download_url": "https://example.com/b"},
-    ]
-    monkeypatch.setattr(fetch, "_list_schema_files", lambda _sha: files)
+    def _no_network(*_args: object, **_kwargs: object) -> bytes:
+        raise AssertionError
 
-    (schemas_dir / "a.yaml").write_bytes(b"a")
-    (schemas_dir / "b.yaml").write_bytes(b"b")
-
-    monkeypatch.setattr(
-        fetch, "_download_schema", lambda url: b"a" if url.endswith("/a") else b"b"
-    )
+    monkeypatch.setattr(fetch, "_https_get", _no_network)
     assert fetch.check()
+    assert capsys.readouterr().err == ""
 
-    # Missing local file.
+    (schemas_dir / "a.yaml").write_bytes(b"reformatted")
     (schemas_dir / "b.yaml").unlink()
-    assert not fetch.check()
-    (schemas_dir / "b.yaml").write_bytes(b"b")
-
-    # Mismatched contents.
-    monkeypatch.setattr(fetch, "_download_schema", lambda _url: b"different")
-    assert not fetch.check()
-
-    # Stale local file.
-    monkeypatch.setattr(
-        fetch, "_download_schema", lambda url: b"a" if url.endswith("/a") else b"b"
-    )
     (schemas_dir / "stale.yaml").write_bytes(b"x")
     assert not fetch.check()
+    assert capsys.readouterr().err.splitlines() == [
+        "Vendored schema drift: a.yaml: checksum differs from _version.json",
+        "Vendored schema drift: b.yaml: missing",
+        "Vendored schema drift: stale.yaml: not recorded in _version.json",
+    ]
 
-    # No version manifest.
-    monkeypatch.setattr(fetch, "_parse_version", lambda: None)
-    assert not fetch.check()
+    for broken in (None, manifest.model_copy(update={"checksums": {}})):
+        monkeypatch.setattr(fetch, "_parse_version", lambda broken=broken: broken)
+        assert not fetch.check()
+        assert "missing, invalid, or empty" in capsys.readouterr().err
+
+
+def test_vendored_schemas_match_recorded_checksums() -> None:
+    """The checked-in schemas are the exact upstream bytes the manifest records."""
+    assert fetch.check()
 
 
 def test_fetch_main_check_and_fetch_paths(monkeypatch: pytest.MonkeyPatch) -> None:

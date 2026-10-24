@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, ClassVar, override
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.identifier import Identifier
-from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
@@ -20,7 +19,7 @@ from lib.update.events import (
     UpdateEvent,
     ignore_event,
 )
-from lib.update.nix_expr import compact_nix_expr, select_attrs
+from lib.update.nix_expr import compact_nix_expr, nix_str, select_attrs
 from lib.update.paths import updater_dir_for
 from lib.update.planner import aggregate_source_members
 from lib.update.updaters import (
@@ -219,11 +218,11 @@ class ElectronRuntimesUpdater(Updater):
                 values=[
                     Binding(
                         name="name",
-                        value=StringPrimitive(value=f"electron-{version}-headers"),
+                        value=nix_str(f"electron-{version}-headers"),
                     ),
                     Binding(
                         name="url",
-                        value=StringPrimitive(value=url),
+                        value=nix_str(url),
                     ),
                     Binding(
                         name="hash",

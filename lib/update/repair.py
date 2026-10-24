@@ -1,13 +1,30 @@
 """Bounded agent repair proposals, isolated from updater validation authority."""
 
+import ast
 import asyncio
 import json
+import subprocess
 import sys
-from dataclasses import asdict, replace
+from collections import Counter
+from dataclasses import asdict, fields, is_dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
+from nix_manipulator.expressions.binary import BinaryExpression
+from nix_manipulator.expressions.binding import Binding
+from nix_manipulator.expressions.comment import Comment
+from nix_manipulator.expressions.function.call import FunctionCall
+from nix_manipulator.expressions.identifier import Identifier
+from nix_manipulator.expressions.if_expression import IfExpression
+from nix_manipulator.expressions.list import NixList
+from nix_manipulator.expressions.parenthesis import Parenthesis
+from nix_manipulator.expressions.primitive import BooleanPrimitive, StringPrimitive
+from nix_manipulator.expressions.select import Select
+from nix_manipulator.expressions.unary import UnaryExpression
+
+from lib.codemods.packaging_source_policy import parse_nix_expr_for_policy
+from lib.update.candidate import git
 from lib.update.cli_options import RepairAgent
 from lib.update.events import UpdateEventKind
 from lib.update.persistence import IsolatedUpdateWorkspace
@@ -15,6 +32,10 @@ from lib.update.process import RunCommandOptions, run_command
 from lib.update.run_monitor import default_run_log_root
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+
+    from nix_manipulator.expressions.expression import NixExpression
+
     from lib.update.cli_options import UpdateOptions
     from lib.update.events import UpdateEvent
 
@@ -48,6 +69,265 @@ def repair_paths(paths: tuple[Path, ...]) -> tuple[Path, ...]:
     return paths
 
 
+# Each check-switching binding and the literal value that keeps checks on.
+_CHECK_SWITCHES = {"doCheck": True, "dontCheck": False}
+
+
+def _is_check_skip(node: Binding) -> bool:
+    """Return whether a binding disables checks or skips named tests."""
+    if node.name == "checkFlags":
+        return "--skip" in node.rebuild()
+    return node.name in _CHECK_SWITCHES and not (
+        isinstance(node.value, BooleanPrimitive)
+        and node.value.value is _CHECK_SWITCHES[node.name]
+    )
+
+
+def _walk(
+    value: object,
+    owner_path: tuple[str, ...] = (),
+    seen: set[int] | None = None,
+) -> Iterator[tuple[tuple[str, ...], object]]:
+    """Yield each AST node once with its enclosing binding attribute path."""
+    seen = set() if seen is None else seen
+    if id(value) in seen:
+        return
+    seen.add(id(value))
+    if isinstance(value, Binding):
+        owner_path = (*owner_path, value.name)
+    yield owner_path, value
+    if is_dataclass(value):
+        value = [getattr(value, field.name) for field in fields(value)]
+    if isinstance(value, list | tuple):
+        for child in value:
+            yield from _walk(child, owner_path, seen)
+
+
+def _added_check_skips(
+    path: Path, new: bytes | None, old: bytes | None
+) -> list[Binding]:
+    """Return check-skip occurrences that the repair added or relocated."""
+
+    def skips(content: bytes | None) -> list[tuple[tuple[str, ...], str, Binding]]:
+        if content is None:
+            return []
+        tree = parse_nix_expr_for_policy(content.decode(), context=str(path))
+        return [
+            (attribute_path, node.rebuild(), node)
+            for attribute_path, node in _walk(tree)
+            if isinstance(node, Binding) and _is_check_skip(node)
+        ]
+
+    baseline = Counter(
+        (attribute_path, rendered) for attribute_path, rendered, _node in skips(old)
+    )
+    added: list[Binding] = []
+    for attribute_path, rendered, node in skips(new):
+        key = (attribute_path, rendered)
+        if baseline[key]:
+            baseline[key] -= 1
+        else:
+            added.append(node)
+    return added
+
+
+def _without_parentheses(node: object) -> object:
+    while isinstance(node, Parenthesis):
+        node = node.value
+    return node
+
+
+def _is_version_reference(node: object) -> bool:
+    """Accept only the package's own version, not unrelated version attributes."""
+    node = _without_parentheses(node)
+    if isinstance(node, Identifier):
+        return node.name == "version"
+    return (
+        isinstance(node, Select)
+        and node.attribute == "version"
+        and node.default is None
+        and isinstance(node.expression, Identifier)
+        and node.expression.name in {"final", "finalAttrs"}
+    )
+
+
+def _version_condition_polarity(node: object) -> bool | None:
+    """Return whether an expression is true (or false) only at one literal version."""
+    node = _without_parentheses(node)
+    if isinstance(node, UnaryExpression) and node.operator == "!":
+        polarity = _version_condition_polarity(node.expression)
+        return None if polarity is None else not polarity
+    if not isinstance(node, BinaryExpression) or node.operator.name not in {"==", "!="}:
+        return None
+    left, right = node.left, node.right
+    literal_on_right = _is_version_reference(left) and isinstance(
+        _without_parentheses(right), StringPrimitive
+    )
+    literal_on_left = _is_version_reference(right) and isinstance(
+        _without_parentheses(left), StringPrimitive
+    )
+    if literal_on_right == literal_on_left:
+        return None
+    literal = _without_parentheses(right if literal_on_right else left)
+    if (
+        not isinstance(literal, StringPrimitive)
+        or not literal.value
+        or "${" in literal.value
+    ):
+        return None
+    return node.operator.name == "=="
+
+
+def _is_lib_optionals(node: object) -> bool:
+    """Recognize ``lib.optionals`` and the equivalent package-set ``*.lib`` path."""
+    node = _without_parentheses(node)
+    if not (isinstance(node, Select) and node.default is None):
+        return False
+    if node.attribute == "lib.optionals":
+        return isinstance(node.expression, Identifier) and node.expression.name in {
+            "final",
+            "nixpkgs",
+            "pkgs",
+            "prev",
+        }
+    if node.attribute != "optionals":
+        return False
+    owner = _without_parentheses(node.expression)
+    if isinstance(owner, Identifier):
+        return owner.name == "lib"
+    return (
+        isinstance(owner, Select)
+        and owner.attribute == "lib"
+        and owner.default is None
+        and isinstance(owner.expression, Identifier)
+        and owner.expression.name in {"final", "nixpkgs", "pkgs", "prev"}
+    )
+
+
+def _pinned_if_flags(node: IfExpression, *, version_gated: bool) -> bool:
+    polarity = _version_condition_polarity(node.condition)
+    if polarity is None:
+        return _pinned_check_flags(
+            node.consequence, version_gated=version_gated
+        ) and _pinned_check_flags(node.alternative, version_gated=version_gated)
+    return _pinned_check_flags(
+        node.consequence, version_gated=version_gated or polarity
+    ) and _pinned_check_flags(
+        node.alternative, version_gated=version_gated or not polarity
+    )
+
+
+def _pinned_flag_call(node: FunctionCall, *, version_gated: bool) -> bool:
+    if isinstance(node.name, FunctionCall) and _is_lib_optionals(node.name.name):
+        # The parser constructs every call with an argument.
+        condition = cast("NixExpression", node.name.argument)
+        flags = cast("NixExpression", node.argument)
+        polarity = _version_condition_polarity(condition)
+        return polarity is True and _pinned_check_flags(flags, version_gated=True)
+    argument = cast("NixExpression", node.argument)
+    return _pinned_check_flags(
+        node.name, version_gated=version_gated
+    ) and _pinned_check_flags(argument, version_gated=version_gated)
+
+
+def _pinned_check_flags(node: object, *, version_gated: bool = False) -> bool:
+    """Prove every skip flag occurs only beneath one exact failing-version gate."""
+    node = _without_parentheses(node)
+    if isinstance(node, StringPrimitive):
+        return version_gated or "--skip" not in node.value
+    if isinstance(node, NixList):
+        return all(
+            _pinned_check_flags(item, version_gated=version_gated)
+            for item in node.value
+        )
+    if isinstance(node, IfExpression):
+        return _pinned_if_flags(node, version_gated=version_gated)
+    if isinstance(node, FunctionCall):
+        return _pinned_flag_call(node, version_gated=version_gated)
+    if isinstance(node, BinaryExpression):
+        return _pinned_check_flags(
+            node.left, version_gated=version_gated
+        ) and _pinned_check_flags(node.right, version_gated=version_gated)
+    expression = cast("NixExpression", node)
+    return version_gated or "--skip" not in expression.rebuild()
+
+
+def _pinned_and_explained(binding: Binding) -> bool:
+    """Require binding-specific failing-version polarity and an adjacent comment."""
+    if binding.name == "checkFlags":
+        pinned = _pinned_check_flags(binding.value)
+    else:
+        # doCheck must be false only at the failure; dontCheck must be true there.
+        pinned = _version_condition_polarity(binding.value) is (
+            not _CHECK_SWITCHES[binding.name]
+        )
+    comment = any(
+        isinstance(trivia, Comment) for trivia in (*binding.before, *binding.after)
+    )
+    return pinned and comment
+
+
+def _added_holds(new: bytes | None, old: bytes | None) -> set[str]:
+    """Return ``bulk_update_hold`` declarations that the repair added."""
+
+    def holds(content: bytes | None) -> set[str]:
+        return {
+            ast.dump(node.value)
+            for node in ast.walk(ast.parse(content or b""))
+            if isinstance(node, ast.Assign | ast.AnnAssign)
+            and node.value is not None
+            and not (isinstance(node.value, ast.Constant) and node.value.value is None)
+            and any(
+                isinstance(target, ast.Name) and target.id == "bulk_update_hold"
+                for target in (
+                    node.targets if isinstance(node, ast.Assign) else [node.target]
+                )
+            )
+        }
+
+    return holds(new) - holds(old)
+
+
+def reject_unsafe_skips(
+    root: Path,
+    baseline_content: Callable[[Path], bytes | None],
+    paths: tuple[Path, ...],
+) -> None:
+    """Enforce the AGENTS.md checkPhase-skip rules and the no-holds rule on a diff."""
+    rejected: list[str] = []
+    for path in paths:
+        target = root / path
+        new = target.read_bytes() if target.is_file() else None
+        old = baseline_content(path)
+        if path.suffix == ".py" and _added_holds(new, old):
+            rejected.append(f"{path}: adds a bulk_update_hold")
+        if path.suffix != ".nix":
+            continue
+        rejected.extend(
+            f"{path}: {binding.name} skip is not pinned to a version "
+            "with an adjacent comment"
+            for binding in _added_check_skips(path, new, old)
+            if not _pinned_and_explained(binding)
+        )
+    if rejected:
+        msg = "Repair violates the checkPhase-skip policy: " + "; ".join(rejected)
+        raise ValueError(msg)
+
+
+def check_applied_repair(root: Path) -> None:
+    """Re-check a repair patch staged in *root* against ``HEAD`` before commit."""
+    names = git(root, "diff", "--cached", "--name-only", "-z").decode().split("\0")
+    paths = repair_paths(tuple(Path(name) for name in names if name))
+
+    def baseline(path: Path) -> bytes | None:
+        try:
+            return git(root, "show", f"HEAD:{path}")
+        except subprocess.CalledProcessError:
+            return None
+
+    reject_unsafe_skips(root, baseline, paths)
+
+
 def repair_agent_prompt(evidence: Path) -> str:
     """Return the one-shot prompt the bounded repair agent must follow."""
     return (
@@ -58,22 +338,21 @@ def repair_agent_prompt(evidence: Path) -> str:
         "lib/update/planner.py (and lib/tests/test_update_planner.py). Preserve "
         "platform support, discovery, validation declarations, upstream pin "
         "intent, and generated-file ownership. "
-        "Upstream checkPhase skip is allowed only when ALL of: "
-        "(1) the failure is an upstream package's own tests "
-        "(checkPhase / XCTest / pytest / similar), not compile or link; "
-        "(2) the derivation build itself succeeded before checks; "
-        "(3) the failure is not in George's overlay, app, or home-manager "
-        "module code (wrapping an upstream project in packages/ is OK); "
-        "(4) prefer doCheck = false (or equivalent) pinned to the failing "
-        "version, with a short comment citing the failing test and signal "
-        "(missing checkPhase-only PATH tools such as python3/pgrep on Darwin "
-        "counts as the package's own tests); "
-        "(5) document the skip so it is visible in the change. "
-        "HARD FAIL — do not skip or waive: SIGBUS; hosted runner lost "
-        "communication; store ValidationIncomplete (infra — retry, never "
-        "waive Darwin); compile/link failures; failures in George's own "
-        "overlay/app/home-manager module code; waiving Darwin validation "
-        "entirely. Do not add holds, suppress errors, change CI, acceptance "
+        "You may disable checkPhase only when all of the following are true: "
+        "(1) the failure is an upstream package's own tests (not compile/link); "
+        "(2) the derivation built before checks; "
+        "(3) the failure is not in George's overlay/app/home-manager module code; "
+        "(4) the skip is `doCheck = false` (or equivalent) pinned to the failing "
+        "version with a comment that cites the test and signal; "
+        "(5) the skip is documented in the change. "
+        "Never skip SIGBUS, runner-lost-communication, store "
+        "`ValidationIncomplete`, compile/link failures, George's own "
+        "overlay/app/module code, or Darwin validation itself. "
+        "The caller rejects a doCheck, dontCheck, or checkFlags --skip whose "
+        "whole binding does not disable checks solely at one package-owned "
+        "literal failing version with binding-specific polarity, or which "
+        "lacks an adjacent comment, and any new bulk_update_hold. "
+        "Do not add holds, suppress errors, change CI, acceptance "
         "gates, persistence, or other updater-framework files, commit, push, "
         "or contact anyone. Regenerate outputs through their generators. Add "
         "a focused package or planner regression test when behavior changes. "
@@ -136,6 +415,7 @@ async def repair_in_workspace(
             msg = f"Repair agent failed with exit code {result.returncode}; see {evidence}"
             raise RuntimeError(msg)
     paths = repair_paths(workspace.changed_paths())
+    reject_unsafe_skips(workspace.root, workspace.baseline_content, paths)
     workspace.validate_changes(paths)
     return paths
 

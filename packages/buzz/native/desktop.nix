@@ -283,6 +283,8 @@ desktopRustPlatform.buildRustPackage {
     "--no-sign"
     "--verbose"
   ];
+  # Upstream's Rust tests are not run; why is unrecorded (56e23658).
+  # desktop-candidate.nix's installCheckPhase gates this unsigned bundle.
   doCheck = false;
 
   # cargo-tauri.hook propagates the Cargo used to build its CLI. Keep Buzz's

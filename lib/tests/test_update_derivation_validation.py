@@ -441,6 +441,9 @@ def test_validate_root_closures_builds_flake_owned_aggregate(
                 "eval",
                 "--no-update-lock-file",
                 "--json",
+                "--option",
+                "allow-import-from-derivation",
+                "false",
                 f"path:{snapshot_root}#lib.rootClosureManifest",
             ],
             expected_kwargs,
@@ -981,6 +984,9 @@ def test_validate_root_closures_rejects_an_empty_candidate_manifest(
             "eval",
             "--no-update-lock-file",
             "--json",
+            "--option",
+            "allow-import-from-derivation",
+            "false",
             f"path:{tmp_path}#lib.rootClosureManifest",
         ]
     ]

@@ -120,6 +120,10 @@ def test_runtime_identity_covers_source_platform_and_dependencies(
 
     root = get_repo_root()
     (tmp_path / "pyproject.toml").write_bytes((root / "pyproject.toml").read_bytes())
+    (tmp_path / "schemas/codegen").mkdir(parents=True)
+    (tmp_path / "schemas/codegen/codegen.schema.json").write_bytes(
+        (root / "schemas/codegen/codegen.schema.json").read_bytes()
+    )
     (tmp_path / "lib").mkdir()
     (tmp_path / "packages").mkdir()
     (tmp_path / "overlays").mkdir()

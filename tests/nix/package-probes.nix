@@ -71,6 +71,54 @@ let
   };
   dependencyProbe = emdashFunction dependencyArguments;
   dependencyContext = builtins.getContext dependencyProbe.pnpmDeps.drvPath;
+
+  # Exercise the real Home package module with the same absent attribute that
+  # the registry produces on aarch64-linux. Other package values stay real.
+  aarch64LinuxPkgs = (removeAttrs pkgs [ "red-reddit-cli" ]) // {
+    stdenv = pkgs.stdenv // {
+      hostPlatform = pkgs.stdenv.hostPlatform // {
+        system = "aarch64-linux";
+        isDarwin = false;
+        isLinux = true;
+      };
+    };
+  };
+  homePackagesWithoutRed =
+    (lib.evalModules {
+      specialArgs.pkgs = aarch64LinuxPkgs;
+      modules = [
+        (src + "/modules/home/packages.nix")
+        {
+          options = {
+            home.packages = lib.mkOption { type = lib.types.listOf lib.types.package; };
+            fonts.monospace.package = lib.mkOption { type = lib.types.package; };
+          };
+          config = {
+            fonts.monospace.package = aarch64LinuxPkgs.hello;
+            nixcfg.packageSets =
+              lib.genAttrs
+                [
+                  "core"
+                  "nixTooling"
+                  "gitExtensions"
+                  "dataProcessing"
+                  "security"
+                  "monitoring"
+                  "cliTools"
+                  "guiApps"
+                  "cloud"
+                  "heavyOptional"
+                ]
+                (name: {
+                  enable = name == "guiApps";
+                });
+          };
+        }
+      ];
+    }).config.home.packages;
+  homePackageNamesWithoutRed = map (
+    package: package.pname or package.name or ""
+  ) homePackagesWithoutRed;
 in
 assert injectedApp.version == "9.9.9-test";
 assert overriddenApp.version == "explicit-override";
@@ -78,4 +126,6 @@ assert dependencyProbe.pnpmDeps.outputHash == lib.fakeHash;
 # Forcing this path instantiates the real fetchPnpmDeps derivation. Any Electron
 # reference in its dependency closure forces one of the exceptions above.
 assert builtins.attrNames dependencyContext == [ dependencyProbe.pnpmDeps.drvPath ];
+assert homePackageNamesWithoutRed != [ ];
+assert !(builtins.elem "red-reddit-cli" homePackageNamesWithoutRed);
 true

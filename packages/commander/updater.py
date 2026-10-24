@@ -1,11 +1,8 @@
 """Updater for Commander's signed Sparkle release channel."""
 
-from typing import TYPE_CHECKING, ClassVar
+from typing import ClassVar
 
-from lib.update.updaters import SparkleAppcastUrlUpdater, VersionInfo, register_updater
-
-if TYPE_CHECKING:
-    from lib.update.updaters import UpdateContext
+from lib.update.updaters import SparkleAppcastUrlUpdater, register_updater
 
 
 @register_updater
@@ -21,12 +18,5 @@ class CommanderUpdater(SparkleAppcastUrlUpdater):
         "aarch64-darwin": "darwin",
         "x86_64-darwin": "darwin",
     }
-
-    async def _is_latest(
-        self,
-        context: UpdateContext,
-        info: VersionInfo,
-    ) -> bool:
-        """Recompute hashes because release artifacts may change in place."""
-        _ = (context, info)
-        return False
+    # Recompute hashes because release artifacts may change in place.
+    always_rehash = True

@@ -36,6 +36,7 @@ from lib.update.events import (
     expect_command_result,
     raise_failed_command,
 )
+from lib.update.summary import UpdateSummary
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -287,7 +288,7 @@ def test_cli_json_and_human_errors_are_redacted(
     """Final errors remain valid JSON and safe text even with quoted URLs."""
     message = f'failed "{_URL}"'
     outcome = cli._RunOutcome(
-        summary=cli.UpdateSummary(statuses={_URL: "error"}),
+        summary=UpdateSummary(statuses={_URL: "error"}),
         had_errors=True,
         workspace_error=message,
         plan_error=cli._RunPlanError(message, (_URL,), ("demo",)),

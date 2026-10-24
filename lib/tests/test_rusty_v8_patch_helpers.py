@@ -479,3 +479,100 @@ def test_patch_whole_archive_main_guard_runs(
     with pytest.raises(SystemExit) as exc:
         runpy.run_path(str(script_path), run_name="__main__")
     assert exc.value.code == 0
+
+
+@pytest.mark.parametrize(
+    ("script_name", "file_name", "needles", "message"),
+    [
+        ("patch_allocator_build.py", "BUILD.gn", ("_NEEDLE",), "exactly once"),
+        (
+            "patch_apple_toolchain_host_build_tools.py",
+            "toolchain.gni",
+            ("_NEEDLE",),
+            "exactly once",
+        ),
+        ("patch_whole_archive.py", "whole_archive.py", ("_NEEDLE",), "exactly once"),
+        ("patch_build_rs_prebuilt.py", "build.rs", ("_ENV_NEEDLE",), "exactly once"),
+        (
+            "patch_build_rs_prebuilt.py",
+            "build.rs",
+            ("_ENV_NEEDLE", "_PREBUILT_NEEDLE", "_PREBUILT_NEEDLE"),
+            "prebuilt V8 branch not found exactly once",
+        ),
+        (
+            "patch_stdlib_adler.py",
+            "BUILD.gn",
+            ("_LEGACY_BLOCK",),
+            "rust stdlib adler selection",
+        ),
+    ],
+)
+def test_patchers_reject_duplicated_anchors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    script_name: str,
+    file_name: str,
+    needles: tuple[str, ...],
+    message: str,
+) -> None:
+    """A duplicated anchor is ambiguous upstream drift, not a first-match patch."""
+    namespace = _load_script(script_name)
+    target = tmp_path / file_name
+    body = "".join(str(namespace[name]) for name in needles)
+    if len(needles) == 1:
+        body *= 2
+    target.write_text(body, encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", [script_name, str(target)])
+    with pytest.raises(SystemExit, match=message):
+        _main(namespace)()
+    assert target.read_text(encoding="utf-8") == body
+
+
+def test_patch_compiler_gni_rejects_duplicate_use_lld_assignments(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A second use_lld assignment would otherwise stay unpatched."""
+    namespace = _load_script("patch_compiler_gni.py")
+    target = tmp_path / "compiler.gni"
+    target.write_text("  use_lld = true\n  use_lld = is_clang\n", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", ["patch_compiler_gni.py", str(target)])
+    with pytest.raises(SystemExit, match="use_lld anchor not found exactly once"):
+        _main(namespace)()
+
+
+@pytest.mark.parametrize(
+    ("script_name", "file_name", "residue", "message"),
+    [
+        (
+            "patch_allocator_build.py",
+            "BUILD.gn",
+            '  rustflags += [ "--cfg=rust_allocator_no_nightly_capability" ]\n',
+            "legacy shim flag survived",
+        ),
+        (
+            "patch_apple_toolchain_host_build_tools.py",
+            "toolchain.gni",
+            "      inputs = rustc_wrapper_inputs\n",
+            "rustc_wrapper_inputs survived",
+        ),
+    ],
+)
+def test_patchers_reject_reformatted_removal_targets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    script_name: str,
+    file_name: str,
+    residue: str,
+    message: str,
+) -> None:
+    """Optional removals fail closed when upstream reformats the removed construct."""
+    namespace = _load_script(script_name)
+    target = tmp_path / file_name
+    target.write_text(f"{namespace['_NEEDLE']}{residue}", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", [script_name, str(target)])
+    with pytest.raises(SystemExit, match=message):
+        _main(namespace)()

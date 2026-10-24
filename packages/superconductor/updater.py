@@ -5,9 +5,7 @@ import urllib.parse
 from email.utils import parsedate_to_datetime
 from typing import TYPE_CHECKING, ClassVar
 
-import aiohttp
-
-from lib.http_utils import HTTP_BAD_REQUEST
+from lib.update.net import request
 from lib.update.updaters import (
     AssetURLsMetadataUpdater,
     VersionInfo,
@@ -18,6 +16,8 @@ from lib.update.updaters.metadata import AssetURLsMetadata
 from lib.update.updaters.strategies import ResolvedArtifact, url_without_query
 
 if TYPE_CHECKING:
+    import aiohttp
+
     from lib.update.updaters import UpdateContext
 
 
@@ -30,6 +30,8 @@ class SuperconductorUpdater(AssetURLsMetadataUpdater):
     PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "arm64",
     }
+    # Recompute hashes because the nightly discovery endpoint is mutable.
+    always_rehash = True
 
     @staticmethod
     def _version_from_url(url: str, last_modified: str | None) -> str:
@@ -53,26 +55,17 @@ class SuperconductorUpdater(AssetURLsMetadataUpdater):
         platform: str,
     ) -> ResolvedArtifact:
         query = urllib.parse.urlencode({"arch": self.PLATFORMS[platform]})
-        timeout = aiohttp.ClientTimeout(total=self.config.default_timeout)
-        async with session.head(
+        response = await request(
+            session,
             f"{self.DISCOVERY_URL}?{query}",
-            allow_redirects=True,
-            timeout=timeout,
-        ) as response:
-            if response.status >= HTTP_BAD_REQUEST:
-                msg = (
-                    f"Superconductor metadata request for {platform} failed with "
-                    f"HTTP {response.status}"
-                )
-                raise RuntimeError(msg)
-            url = url_without_query(str(response.url))
-            return ResolvedArtifact(
-                version=self._version_from_url(
-                    url,
-                    response.headers.get("Last-Modified"),
-                ),
-                url=url,
-            )
+            method="HEAD",
+            config=self.config,
+        )
+        url = url_without_query(response.url)
+        return ResolvedArtifact(
+            version=self._version_from_url(url, response.headers.get("Last-Modified")),
+            url=url,
+        )
 
     async def fetch_latest(
         self, session: aiohttp.ClientSession, *, context: UpdateContext
@@ -96,12 +89,3 @@ class SuperconductorUpdater(AssetURLsMetadataUpdater):
                 platform: artifact.url for platform, artifact in artifacts.items()
             }),
         )
-
-    async def _is_latest(
-        self,
-        context: UpdateContext,
-        info: VersionInfo,
-    ) -> bool:
-        """Recompute hashes because the nightly discovery endpoint is mutable."""
-        _ = (context, info)
-        return False

@@ -328,6 +328,7 @@ def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
         f"""
         (import {REPO_ROOT}/overlays/goose-cli/default.nix {{
           inputs = rootFlake.inputs;
+          final = pkgs;
           prev = pkgs;
           slib = flake.lib;
           sources = flake.lib.sources;
@@ -400,6 +401,9 @@ class _FakeHeadResponse:
     async def __aenter__(self) -> _FakeHeadResponse:
         return self
 
+    async def read(self) -> bytes:
+        return b""
+
     async def __aexit__(self, *_exc: object) -> None:
         return None
 
@@ -409,18 +413,8 @@ class _FakeHeadSession:
         self.responses = responses
         self.calls: list[dict[str, object]] = []
 
-    def head(
-        self,
-        url: str,
-        *,
-        allow_redirects: bool,
-        timeout: object,
-    ) -> _FakeHeadResponse:
-        self.calls.append({
-            "url": url,
-            "allow_redirects": allow_redirects,
-            "timeout": timeout,
-        })
+    def request(self, method: str, url: str, **kwargs: object) -> _FakeHeadResponse:
+        self.calls.append({"method": method, "url": url, **kwargs})
         return self.responses.pop(0)
 
 
@@ -447,8 +441,10 @@ def test_superconductor_updater_resolves_nightly_redirect(
     assert latest.version == "2026-06-12-9bd387bf"
     assert latest.metadata["asset_urls"] == {"aarch64-darwin": resolved_url}
     assert updater.get_download_url("aarch64-darwin", latest) == resolved_url
+    assert session.calls[0]["method"] == "HEAD"
     assert session.calls[0]["url"] == f"{updater.DISCOVERY_URL}?arch=arm64"
-    assert session.calls[0]["allow_redirects"] is True
+    # Manual following validates every redirect target before the next request.
+    assert session.calls[0]["allow_redirects"] is False
 
     renamed_url = (
         "https://releases.superconductor.so/nightly/"
@@ -479,15 +475,6 @@ def test_superconductor_updater_rejects_bad_metadata(
             "https://example.com/Superconductor-nightly-9bd387bf-arm64.dmg",
             None,
         )
-
-    failing_session = _FakeHeadSession([
-        _FakeHeadResponse(
-            status=500,
-            url="https://example.com/failure.dmg",
-        )
-    ])
-    with pytest.raises(RuntimeError, match="failed with HTTP 500"):
-        _run(updater._fetch_resolved_artifact(failing_session, "aarch64-darwin"))
 
     monkeypatch.setattr(
         superconductor_module.SuperconductorUpdater,
@@ -594,12 +581,16 @@ def test_code_cursor_fetch_latest_from_download_page(
         assert url == updater.DOWNLOAD_PAGE
         return page.encode()
 
-    async def _resolve_download_url(_session: object, api_url: str) -> str:
+    async def _resolve_download_url(
+        _session: object, api_url: str, **_kwargs: object
+    ) -> str:
         api_platform = api_url.rsplit("/cursor/", maxsplit=1)[0].rsplit("/", 1)[1]
         return resolved_urls[api_platform]
 
     monkeypatch.setattr(code_cursor_module, "fetch_url", _fetch_url)
-    monkeypatch.setattr(updater, "_resolve_download_url", _resolve_download_url)
+    monkeypatch.setattr(
+        code_cursor_module, "fetch_redirect_location", _resolve_download_url
+    )
 
     latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
@@ -665,12 +656,16 @@ def test_code_cursor_keeps_pin_when_platforms_stage_different_commits(
         assert url == updater.DOWNLOAD_PAGE
         return _cursor_download_page(updater).encode()
 
-    async def _resolve_download_url(_session: object, api_url: str) -> str:
+    async def _resolve_download_url(
+        _session: object, api_url: str, **_kwargs: object
+    ) -> str:
         api_platform = api_url.rsplit("/cursor/", maxsplit=1)[0].rsplit("/", 1)[1]
         return resolved_urls[api_platform]
 
     monkeypatch.setattr(code_cursor_module, "fetch_url", _fetch_url)
-    monkeypatch.setattr(updater, "_resolve_download_url", _resolve_download_url)
+    monkeypatch.setattr(
+        code_cursor_module, "fetch_redirect_location", _resolve_download_url
+    )
 
     current = SourceEntry.model_validate({
         "version": "3.22.12",
@@ -703,59 +698,6 @@ def test_code_cursor_keeps_pin_when_platforms_stage_different_commits(
                 context=UpdateContext(current=incomplete),
             )
         )
-
-
-def test_code_cursor_retries_head_timeouts(
-    code_cursor_module: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """37415714902: unretried HEAD TimeoutError aborted prepare."""
-    updater = code_cursor_module.CodeCursorUpdater()
-    api_url = updater._api_url("darwin-arm64")
-    attempts = {"n": 0}
-
-    class _HeadResponse:
-        def __init__(self, status: int, headers: dict[str, str]) -> None:
-            self.status = status
-            self.headers = headers
-
-        async def __aenter__(self) -> _HeadResponse:
-            return self
-
-        async def __aexit__(self, *_args: object) -> bool:
-            return False
-
-    class _Session:
-        def head(self, url: str, **_kwargs: object) -> _HeadResponse:
-            assert url == api_url
-            attempts["n"] += 1
-            if attempts["n"] < 3:
-                raise TimeoutError
-            return _HeadResponse(
-                302, {"Location": "/production/abc/darwin/arm64/C.dmg"}
-            )
-
-    async def _no_sleep(_delay: float) -> None:
-        return None
-
-    monkeypatch.setattr(code_cursor_module.asyncio, "sleep", _no_sleep)
-    resolved = _run(updater._resolve_download_url(_Session(), api_url))
-    assert resolved == "https://api2.cursor.sh/production/abc/darwin/arm64/C.dmg"
-    assert attempts["n"] == 3
-
-    class _TimeoutSession:
-        def head(self, _url: str, **_kwargs: object) -> _HeadResponse:
-            raise TimeoutError
-
-    with pytest.raises(RuntimeError, match="failed after"):
-        _run(updater._resolve_download_url(_TimeoutSession(), api_url))
-
-    class _ClientErrorSession:
-        def head(self, _url: str, **_kwargs: object) -> _HeadResponse:
-            raise code_cursor_module.aiohttp.ClientError
-
-    with pytest.raises(RuntimeError, match="failed after"):
-        _run(updater._resolve_download_url(_ClientErrorSession(), api_url))
 
 
 def test_goose_v8_updater_skips_unchanged_pinned_revision(
@@ -917,21 +859,23 @@ def test_conductor_updater_paths(
         async def __aexit__(self, *_exc: object) -> None:
             return None
 
+        async def read(self) -> bytes:
+            return b""
+
     class _HeadSession:
         def __init__(self, *, status: int, header: str, url: str) -> None:
             self.status = status
             self.header = header
             self.url = url
-            self.calls: list[tuple[str, bool, object]] = []
+            self.calls: list[tuple[str, str, object, object]] = []
 
-        def head(
-            self,
-            url: str,
-            *,
-            allow_redirects: bool,
-            timeout: object,
-        ) -> _HeadResponse:
-            self.calls.append((url, allow_redirects, timeout))
+        def request(self, method: str, url: str, **kwargs: object) -> _HeadResponse:
+            self.calls.append((
+                method,
+                url,
+                kwargs["allow_redirects"],
+                kwargs["timeout"],
+            ))
             return _HeadResponse(
                 status=self.status,
                 header=self.header,
@@ -948,21 +892,15 @@ def test_conductor_updater_paths(
         "1.2.3",
         "https://cdn.crabnebula.app/asset/conductor-arm64.dmg",
     )
-    [(discovery_url, allow_redirects, timeout)] = head_session.calls
+    [(method, discovery_url, allow_redirects, timeout)] = head_session.calls
+    assert method == "HEAD"
     assert discovery_url == (
         "https://cdn.crabnebula.app/download/melty/conductor/latest/platform/"
         "dmg-aarch64"
     )
-    assert allow_redirects is True
+    # Manual following validates every redirect target before the next request.
+    assert allow_redirects is False
     assert timeout.total == updater.config.default_timeout
-
-    failed_head_session = _HeadSession(
-        status=500,
-        header='attachment; filename="Conductor_1.2.3_x64.dmg"',
-        url="https://cdn.crabnebula.app/asset/conductor-x64.dmg",
-    )
-    with pytest.raises(RuntimeError, match="x86_64-darwin failed with HTTP 500"):
-        _run(updater._fetch_resolved_artifact(failed_head_session, "x86_64-darwin"))
 
     async def _artifact(_session: object, platform: str) -> object:
         return conductor_module.ResolvedArtifact(
@@ -1208,43 +1146,6 @@ def test_code_cursor_download_page_requires_all_platform_links(
     ))
     with pytest.raises(RuntimeError, match="missing platform links"):
         updater._extract_download_api_urls(partial_page)
-
-
-def test_code_cursor_resolve_download_url_follows_redirects(
-    code_cursor_module: ModuleType,
-) -> None:
-    """Resolve API URLs via redirect Location and reject non-redirect answers."""
-    updater = code_cursor_module.CodeCursorUpdater()
-    api_url = updater._api_url("darwin-arm64")
-
-    class _HeadResponse:
-        def __init__(self, status: int, headers: dict[str, str]) -> None:
-            self.status = status
-            self.headers = headers
-
-        async def __aenter__(self) -> _HeadResponse:
-            return self
-
-        async def __aexit__(self, *_args: object) -> bool:
-            return False
-
-    class _Session:
-        def __init__(self, response: _HeadResponse) -> None:
-            self._response = response
-
-        def head(self, url: str, **_kwargs: object) -> _HeadResponse:
-            assert url == api_url
-            return self._response
-
-    redirect = _HeadResponse(302, {"Location": "/production/abc/darwin/arm64/C.dmg"})
-    resolved = _run(updater._resolve_download_url(_Session(redirect), api_url))
-    assert resolved == "https://api2.cursor.sh/production/abc/darwin/arm64/C.dmg"
-
-    with pytest.raises(RuntimeError, match="Expected Cursor download redirect"):
-        _run(updater._resolve_download_url(_Session(_HeadResponse(200, {})), api_url))
-
-    with pytest.raises(RuntimeError, match="did not include Location"):
-        _run(updater._resolve_download_url(_Session(_HeadResponse(302, {})), api_url))
 
 
 def test_code_cursor_require_uniform_regex_value_rejects_mixed_urls(

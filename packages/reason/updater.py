@@ -2,30 +2,18 @@
 
 from typing import TYPE_CHECKING, ClassVar
 
-import aiohttp
-
 from lib import json_utils
-from lib.http_utils import HTTP_BAD_REQUEST
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import EventSink, ignore_event
-from lib.update.net import fetch_json
+from lib.update.net import fetch_json, fetch_redirect_location
 from lib.update.process import compute_sri_hash
 from lib.update.updaters import DownloadHashUpdater, VersionInfo, register_updater
 
 if TYPE_CHECKING:
+    import aiohttp
+
     from lib.nix.models.sources import SourceHashes
     from lib.update.updaters import UpdateContext
-
-
-def _header(headers: dict[str, str], name: str) -> str:
-    return next(
-        (
-            value.strip()
-            for key, value in headers.items()
-            if key.lower() == name and value.strip()
-        ),
-        "",
-    )
 
 
 def _versioned_object_version(location: str, prefix: str) -> str:
@@ -86,27 +74,13 @@ class ReasonUpdater(DownloadHashUpdater):
         # Location authorizes GET only, so a following HEAD returns HTTP 403
         # (Update 37067759340).
         download_url = self.PLATFORMS["aarch64-darwin"]
-        async with session.head(
-            download_url,
-            allow_redirects=False,
-            timeout=aiohttp.ClientTimeout(total=self.config.default_timeout),
-        ) as response:
-            if response.status >= HTTP_BAD_REQUEST:
-                msg = (
-                    f"Reason download discovery failed with HTTP {response.status} "
-                    f"{response.reason}"
-                )
-                raise RuntimeError(msg)
-            location = _header(dict(response.headers), "location")
-            pin_version = _versioned_object_version(
-                location, self.VERSIONED_OBJECT_PREFIX
-            )
-            if not pin_version:
-                msg = (
-                    "Reason download Location is not a versioned object: "
-                    f"{location or '<missing>'}"
-                )
-                raise RuntimeError(msg)
+        location = await fetch_redirect_location(
+            session, download_url, config=self.config
+        )
+        pin_version = _versioned_object_version(location, self.VERSIONED_OBJECT_PREFIX)
+        if not pin_version:
+            msg = f"Reason download Location is not a versioned object: {location}"
+            raise RuntimeError(msg)
         return VersionInfo(version=pin_version)
 
     def fod_name(self, version: str) -> str:

@@ -1,14 +1,16 @@
 """Shared helpers for recovery subcommands."""
 
 import asyncio
+import os
 import shutil
+import stat
 import subprocess
+import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lib.recover._cli import emit_error, emit_success, require_apply_for_stage
-from lib.update import io as update_io
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -39,11 +41,52 @@ class RecoveryPlan:
         return ()
 
 
+_NEW_FILE_MODE = 0o644
+
+
+def is_git_executable(path: Path) -> bool:
+    """Return whether Git would record *path* with executable mode."""
+    return bool(path.stat().st_mode & stat.S_IXUSR)
+
+
+def _tracked_state(path: Path) -> tuple[str, str] | tuple[str, bytes, bool] | None:
+    """Return what Git tracks for *path*: symlink target, or bytes and exec bit."""
+    if path.is_symlink():
+        return ("symlink", path.readlink().as_posix())
+    if not path.is_file():
+        return None
+    return ("file", path.read_bytes(), is_git_executable(path))
+
+
 def files_equal(left: Path, right: Path) -> bool:
-    """Return whether two files exist and have identical contents."""
-    if not left.exists() or not right.exists():
-        return False
-    return left.read_bytes() == right.read_bytes()
+    """Return whether both paths exist with the same type, target, bytes and exec bit."""
+    state = _tracked_state(left)
+    return state is not None and state == _tracked_state(right)
+
+
+def _restore_path(source: Path, target: Path) -> None:
+    """Restore *target* atomically, keeping symlinks and the exec bit."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        dir=target.parent, prefix=f".{target.name}.recover.", suffix=".tmp"
+    ) as temp_dir:
+        staged = Path(temp_dir) / "entry"
+        if source.is_symlink():
+            staged.symlink_to(source.readlink())
+        else:
+            mode = (
+                target.stat().st_mode & 0o777
+                if target.is_file() and not target.is_symlink()
+                else _NEW_FILE_MODE
+            )
+            exec_bits = (mode & 0o444) >> 2 if is_git_executable(source) else 0
+            with staged.open("wb") as temp_file:
+                temp_file.write(source.read_bytes())
+                temp_file.flush()
+                os.fsync(temp_file.fileno())
+            # A mode failure must leave the live target untouched.
+            staged.chmod((mode & ~0o111) | exec_bits)
+        staged.replace(target)
 
 
 def stage_paths(repo_root: Path, paths: tuple[str, ...]) -> None:
@@ -89,28 +132,94 @@ def compute_recovery_paths(
     return write_paths, remove_paths
 
 
+class RecoveryApplyError(RuntimeError):
+    """A recovery failure with its completed filesystem and staging state."""
+
+    def __init__(
+        self,
+        cause: BaseException,
+        *,
+        completed_write_paths: tuple[str, ...],
+        completed_remove_paths: tuple[str, ...],
+        in_flight_paths: tuple[str, ...],
+        planned_count: int,
+        stage_requested: bool,
+        stage_attempted: bool,
+    ) -> None:
+        self.cause = cause
+        self.completed_write_paths = completed_write_paths
+        self.completed_remove_paths = completed_remove_paths
+        self.completed_paths = (*completed_write_paths, *completed_remove_paths)
+        self.in_flight_paths = in_flight_paths
+        self.planned_count = planned_count
+        self.stage_requested = stage_requested
+        self.stage_attempted = stage_attempted
+        self.stage_state = (
+            "failed"
+            if stage_attempted
+            else "pending"
+            if stage_requested
+            else "not_requested"
+        )
+        in_flight = (
+            f"; in flight: {', '.join(in_flight_paths)}" if in_flight_paths else ""
+        )
+        super().__init__(
+            f"{cause} (applied {len(self.completed_paths)} of {planned_count} "
+            f"planned changes before failing{in_flight}; "
+            f"stage state: {self.stage_state})"
+        )
+
+    def failure_details(self) -> dict[str, object]:
+        """Return JSON-serialisable partial-completion details."""
+        return {
+            "completed_paths": list(self.completed_paths),
+            "completed_write_paths": list(self.completed_write_paths),
+            "completed_remove_paths": list(self.completed_remove_paths),
+            "in_flight_paths": list(self.in_flight_paths),
+            "stage_state": self.stage_state,
+        }
+
+
 def apply_recovery(plan: RecoveryPlan, *, stage: bool = False) -> tuple[str, ...]:
-    """Restore and remove a recovery plan's paths, optionally staging them."""
+    """Apply a plan in order, reporting partial completion on failure."""
     repo_root = Path(plan.repo_root)
     snapshot_root = Path(plan.snapshot)
-    changed_paths: list[str] = []
+    completed_writes: list[str] = []
+    completed_removals: list[str] = []
+    in_flight: str | None = None
+    stage_attempted = False
 
-    for relative_path in plan.write_paths:
-        source_path = snapshot_root / relative_path
-        target_path = repo_root / relative_path
-        update_io.atomic_write_bytes(target_path, source_path.read_bytes(), mkdir=True)
-        changed_paths.append(relative_path)
+    try:
+        for relative_path in plan.write_paths:
+            in_flight = relative_path
+            _restore_path(snapshot_root / relative_path, repo_root / relative_path)
+            completed_writes.append(relative_path)
+            in_flight = None
 
-    for relative_path in plan.remove_paths:
-        target_path = repo_root / relative_path
-        if target_path.exists():
-            target_path.unlink()
-            changed_paths.append(relative_path)
+        for relative_path in plan.remove_paths:
+            in_flight = relative_path
+            target_path = repo_root / relative_path
+            if target_path.exists() or target_path.is_symlink():
+                target_path.unlink()
+                completed_removals.append(relative_path)
+            in_flight = None
 
-    changed_tuple = tuple(changed_paths)
-    if stage:
-        stage_paths(repo_root, changed_tuple)
-    return changed_tuple
+        changed_paths = (*completed_writes, *completed_removals)
+        if stage:
+            stage_attempted = True
+            stage_paths(repo_root, changed_paths)
+    except BaseException as exc:
+        raise RecoveryApplyError(
+            exc,
+            completed_write_paths=tuple(completed_writes),
+            completed_remove_paths=tuple(completed_removals),
+            in_flight_paths=() if in_flight is None else (in_flight,),
+            planned_count=len(plan.write_paths) + len(plan.remove_paths),
+            stage_requested=stage,
+            stage_attempted=stage_attempted,
+        ) from exc
+    return changed_paths
 
 
 def render_plan(
@@ -200,5 +309,14 @@ def run_recovery(
                 changed_paths=changed_paths,
             ),
         )
+    except RecoveryApplyError as exc:
+        status = emit_error(
+            json_output=json_output,
+            message=str(exc),
+            details=exc.failure_details(),
+        )
+        if not isinstance(exc.cause, Exception):
+            raise exc.cause from None
+        return status
     except Exception as exc:  # noqa: BLE001
         return emit_error(json_output=json_output, message=str(exc))

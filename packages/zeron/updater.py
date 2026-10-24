@@ -7,7 +7,6 @@ from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import EventSink, ignore_event
 from lib.update.net import fetch_url, github_raw_url
 from lib.update.nix import (
-    _build_fetch_from_github_expr,
     _build_package_path_attr_expr,
 )
 from lib.update.updaters import (
@@ -68,15 +67,6 @@ class ZeronUpdater(GitHubReleaseUpdater):
             msg = f"Zeron {info.version} updater seam drifted from the Nix ownership patch"
             raise RuntimeError(msg) from exc
         return info
-
-    @classmethod
-    def _src_expr(cls, commit: str) -> str:
-        return _build_fetch_from_github_expr(
-            cls.GITHUB_OWNER,
-            cls.GITHUB_REPO,
-            rev=commit,
-            fetch_submodules=False,
-        )
 
     def _source_override(self, info: VersionInfo, *, src_hash: str) -> SourceEntry:
         return SourceEntry(

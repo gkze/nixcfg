@@ -97,13 +97,7 @@ in
         };
         cursor = {
           name = "${theme.slug}-${theme.accentColor}-cursors";
-          package =
-            catppuccin-cursors."${theme.variant}${
-              let
-                c = theme.accentColor;
-              in
-              (lib.toUpper (builtins.substring 0 1 c)) + (builtins.substring 1 (builtins.stringLength c - 1) c)
-            }";
+          package = catppuccin-cursors."${theme.variant}${theme.capitalize theme.accentColor}";
           inherit (fonts.monospace) size;
         };
         fonts =

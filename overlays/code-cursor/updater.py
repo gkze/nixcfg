@@ -3,21 +3,18 @@
 import asyncio
 import re
 from typing import TYPE_CHECKING, ClassVar
-from urllib.parse import urljoin
 
-import aiohttp
 from packaging.version import Version
 
-from lib.http_utils import HTTP_BAD_REQUEST
-from lib.update.net import fetch_url
+from lib.update.net import fetch_redirect_location, fetch_url
 from lib.update.updaters import VersionInfo, register_updater
 from lib.update.updaters.metadata import PlatformAPIMetadata
 from lib.update.updaters.platform_api import DownloadingPlatformAPIUpdater
 
 if TYPE_CHECKING:
-    from lib.update.updaters.core import UpdateContext
+    import aiohttp
 
-HTTP_REDIRECT_MIN = 300
+    from lib.update.updaters.core import UpdateContext
 
 _CURSOR_API_URL_RE = re.compile(
     r"https://api2\.cursor\.sh/updates/download/golden/"
@@ -61,46 +58,6 @@ class CodeCursorUpdater(DownloadingPlatformAPIUpdater):
             msg = f"Cursor download page missing platform links: {sorted(missing)}"
             raise RuntimeError(msg)
         return urls
-
-    async def _resolve_download_url(
-        self,
-        session: aiohttp.ClientSession,
-        api_url: str,
-    ) -> str:
-        attempts = max(1, self.config.default_retries)
-        last_error: BaseException | None = None
-        for attempt in range(attempts):
-            try:
-                timeout = aiohttp.ClientTimeout(total=self.config.default_timeout)
-                async with session.head(
-                    api_url,
-                    allow_redirects=False,
-                    timeout=timeout,
-                ) as response:
-                    if not HTTP_REDIRECT_MIN <= response.status < HTTP_BAD_REQUEST:
-                        msg = (
-                            f"Expected Cursor download redirect from {api_url}, "
-                            f"got HTTP {response.status}"
-                        )
-                        raise RuntimeError(msg)
-                    location = response.headers.get("Location")
-                    if not location:
-                        msg = (
-                            f"Cursor download redirect from {api_url} "
-                            "did not include Location"
-                        )
-                        raise RuntimeError(msg)
-                    return urljoin(api_url, location)
-            except (TimeoutError, aiohttp.ClientError) as exc:
-                last_error = exc
-                if attempt + 1 < attempts:
-                    await asyncio.sleep(
-                        self.config.default_retry_backoff * (attempt + 1)
-                    )
-        msg = (
-            f"Cursor download redirect from {api_url} failed after {attempts} attempts"
-        )
-        raise RuntimeError(msg) from last_error
 
     @staticmethod
     def _uniform_regex_value(
@@ -199,7 +156,7 @@ class CodeCursorUpdater(DownloadingPlatformAPIUpdater):
                 api_urls,
                 await asyncio.gather(
                     *(
-                        self._resolve_download_url(session, url)
+                        fetch_redirect_location(session, url, config=self.config)
                         for url in api_urls.values()
                     )
                 ),

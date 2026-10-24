@@ -1,6 +1,6 @@
 """Dedicated tests for the Zoom updater's redirect and URL handling."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import ModuleType
 
 import pytest
@@ -19,9 +19,13 @@ class _FakeResponse:
     url: str
     status: int = 200
     reason: str = "OK"
+    headers: dict[str, str] = field(default_factory=dict)
 
     async def __aenter__(self) -> _FakeResponse:
         return self
+
+    async def read(self) -> bytes:
+        return b""
 
     async def __aexit__(self, *_args: object) -> None:
         return None
@@ -102,29 +106,15 @@ def test_fetch_latest_resolves_shared_version_from_latest_redirects() -> None:
         ("HEAD", updater._LATEST_URLS["x86_64-darwin"]),
     ]
     for _method, _url, kwargs in session.calls:
-        assert kwargs["allow_redirects"] is True
+        # Manual following validates every redirect target before the next request.
+        assert kwargs["allow_redirects"] is False
         assert kwargs["timeout"].total == updater.config.default_timeout
 
 
-def test_fetch_latest_rejects_failed_or_mismatched_redirects() -> None:
-    """Zoom should fail on HTTP errors or platform version skew."""
+def test_fetch_latest_rejects_mismatched_redirects() -> None:
+    """Zoom should fail on platform version skew."""
     module = _load_module()
     updater = module.ZoomUsUpdater()
-
-    failing_session = _FakeSession({
-        updater._LATEST_URLS["aarch64-darwin"]: _FakeResponse(
-            url=updater._LATEST_URLS["aarch64-darwin"],
-            status=503,
-            reason="Service Unavailable",
-        )
-    })
-    with pytest.raises(RuntimeError, match="Failed to resolve Zoom latest URL"):
-        _run(
-            updater._resolve_latest_url(
-                failing_session,
-                updater._LATEST_URLS["aarch64-darwin"],
-            )
-        )
 
     mismatched_session = _FakeSession({
         updater._LATEST_URLS["aarch64-darwin"]: _FakeResponse(

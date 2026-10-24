@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, ClassVar
 from lib.nix.models.sources import SourceEntry, SourceHashes
 from lib.update.locked_source import is_immutable_commit
 from lib.update.net import JSONValue, fetch_github_api
+from lib.update.nix import _build_fetch_from_github_expr
 from lib.update.updaters.core import DownloadHashUpdater, UpdateContext, Updater
 from lib.update.updaters.metadata import (
     AssetURLsMetadata,
@@ -16,6 +17,41 @@ from lib.update.updaters.metadata import (
 
 if TYPE_CHECKING:
     import aiohttp
+
+    from lib.update.config import UpdateConfig
+
+
+def require_immutable_commit(value: str, *, context: str) -> str:
+    """Return ``value`` when it is a full immutable commit SHA."""
+    if not is_immutable_commit(value):
+        msg = f"{context} must be an immutable commit, got {value!r}"
+        raise RuntimeError(msg)
+    return value
+
+
+async def resolve_tag_commit(
+    session: aiohttp.ClientSession,
+    *,
+    owner: str,
+    repo: str,
+    tag: str,
+    config: UpdateConfig,
+    context: str,
+) -> str:
+    """Resolve one GitHub tag to its immutable commit SHA."""
+    tag_path = urllib.parse.quote(tag, safe="")
+    payload = await fetch_github_api(
+        session,
+        f"repos/{owner}/{repo}/commits/{tag_path}",
+        config=config,
+    )
+    message = f"{context} {owner}/{repo} tag {tag} has no immutable source commit"
+    if not isinstance(payload, dict):
+        raise TypeError(message)
+    commit = payload.get("sha")
+    if not isinstance(commit, str) or not is_immutable_commit(commit):
+        raise RuntimeError(message)
+    return commit
 
 
 class GitHubReleaseUpdater(Updater):
@@ -30,6 +66,16 @@ class GitHubReleaseUpdater(Updater):
     @property
     def _release_display_name(self) -> str:
         return self.RELEASE_DISPLAY_NAME or self.name
+
+    @classmethod
+    def _src_expr(cls, commit: str) -> str:
+        """Return the fixed-output source expression for one release commit."""
+        return _build_fetch_from_github_expr(
+            cls.GITHUB_OWNER,
+            cls.GITHUB_REPO,
+            rev=commit,
+            fetch_submodules=False,
+        )
 
     def _require_commit(self, info: VersionInfo) -> str:
         """Return validated immutable release metadata for source consumers."""
@@ -78,22 +124,14 @@ class GitHubReleaseUpdater(Updater):
         session: aiohttp.ClientSession,
         tag_name: str,
     ) -> str:
-        tag_path = urllib.parse.quote(tag_name, safe="")
-        payload = await fetch_github_api(
+        return await resolve_tag_commit(
             session,
-            f"repos/{self.GITHUB_OWNER}/{self.GITHUB_REPO}/commits/{tag_path}",
+            owner=self.GITHUB_OWNER,
+            repo=self.GITHUB_REPO,
+            tag=tag_name,
             config=self.config,
+            context=self._release_display_name,
         )
-        message = (
-            f"{self._release_display_name} release {tag_name} has no immutable "
-            "source commit"
-        )
-        if not isinstance(payload, dict):
-            raise TypeError(message)
-        commit = payload.get("sha")
-        if not isinstance(commit, str) or not is_immutable_commit(commit):
-            raise RuntimeError(message)
-        return commit
 
     async def _fetch_release_version_tag_commit(
         self,
@@ -232,4 +270,9 @@ class GitHubReleaseAssetURLsUpdater(GitHubReleaseUpdater, DownloadHashUpdater):
         return self._fallback_url(info.version, platform_value)
 
 
-__all__ = ["GitHubReleaseAssetURLsUpdater", "GitHubReleaseUpdater"]
+__all__ = [
+    "GitHubReleaseAssetURLsUpdater",
+    "GitHubReleaseUpdater",
+    "require_immutable_commit",
+    "resolve_tag_commit",
+]

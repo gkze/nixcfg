@@ -20,6 +20,47 @@ let
   registry = import (src + "/packages/registry.nix") {
     inherit src;
   };
+  # Exercise the real compatibility overlay while replacing only its downstream
+  # overlay set. The stub returns the exact resolved outputs handed across that
+  # consumer boundary, so resolution stays testable without a production seam.
+  resolveCompatOutputs =
+    args:
+    let
+      compatOverlay = builtins.scopedImport {
+        import = _path: overlayArgs: {
+          default = _final: _prev: overlayArgs.outputs;
+        };
+      } (src + "/lib/compat-overlay.nix");
+    in
+    compatOverlay args { } { };
+  explicitCompatSlib = {
+    origin = "explicit-slib";
+  };
+  compatOutputsNull = resolveCompatOutputs {
+    outputs = null;
+    slib = explicitCompatSlib;
+  };
+  compatOutputsNullLib = resolveCompatOutputs {
+    outputs = {
+      lib = null;
+      retained = "null-lib";
+    };
+    slib = explicitCompatSlib;
+  };
+  compatOutputsConflict = resolveCompatOutputs {
+    outputs = {
+      lib.origin = "outputs-lib";
+      retained = "conflict";
+    };
+    slib = explicitCompatSlib;
+  };
+  compatOutputsFallback = resolveCompatOutputs {
+    outputs = {
+      lib.origin = "outputs-lib";
+      retained = "fallback";
+    };
+  };
+  compatOutputsMissing = builtins.tryEval (resolveCompatOutputs { }).lib;
 
   # Keep the minimal stub needed for shared selfSource injection semantics. The
   # contracts below exercise package wrapping, not nixpkgs startup cost.
@@ -168,6 +209,23 @@ let
 
   checks = [
     (import ./constructors.nix { inherit src; })
+    (assertEq "compat outputs null preserves explicit slib" {
+      lib = explicitCompatSlib;
+    } compatOutputsNull)
+    (assertEq "compat outputs null lib preserves explicit slib and other attrs" {
+      lib = explicitCompatSlib;
+      retained = "null-lib";
+    } compatOutputsNullLib)
+    (assertEq "compat conflicting libs preserve explicit slib and other attrs" {
+      lib = explicitCompatSlib;
+      retained = "conflict";
+    } compatOutputsConflict)
+    (assertEq "compat outputs lib remains the fallback" {
+      lib.origin = "outputs-lib";
+      retained = "fallback";
+    } compatOutputsFallback)
+    (assertEq "compat outputs require some lib" false compatOutputsMissing.success)
+    (assertEq "compat outputs missing lib throws" false compatOutputsMissing.value)
     (assertEq "public API version" 2 exports.api.version)
     (assertEq "public module sets exclude site profiles" false (
       builtins.any (moduleSet: moduleSet ? nixcfgProfiles) (builtins.attrValues exports.moduleSets)
