@@ -19,10 +19,14 @@ let
       true
     else
       throw ''
-        ${packageName}: persisted Bun version does not match the locked package manifest.
+        ${packageName}: packageManager does not match the Bun that installs its lockfile.
         Expected packageManager ${expectedPackageManager}, got ${builtins.toJSON packageManager}.
+        nixcfg's Bun is ${bun.version}. Another Bun release can reject --frozen-lockfile.
         Refresh it with: nixcfg update ${packageName}
       '';
+  # pkgs.bun is the tracked upstream release. Use it when packageManager names
+  # that same release. A different release still needs its own binary.
+  useSharedBun = version == bun.version;
   systemPolicy = builtins.fromJSON (builtins.readFile ./system-policy.json);
   releaseAssets =
     assert systemPolicy.schemaVersion == 1;
@@ -50,23 +54,26 @@ let
     url = sourceUrl;
     inherit (sourceEntry) hash;
   };
+  exactBun =
+    assert sourceUrlCheck;
+    bun.overrideAttrs (previousAttrs: {
+      inherit version;
+      src = bunSource;
+
+      doInstallCheck = true;
+      postInstallCheck = (previousAttrs.postInstallCheck or "") + ''
+        test "$("$out/bin/bun" --version)" = ${lib.escapeShellArg version}
+      '';
+
+      passthru = (previousAttrs.passthru or { }) // {
+        exactVersion = version;
+        source = bunSource;
+        sources = {
+          "${system}" = bunSource;
+        };
+      };
+    });
+  selectedBun = if useSharedBun then bun else exactBun;
 in
 assert packageManagerCheck;
-assert sourceUrlCheck;
-bun.overrideAttrs (previousAttrs: {
-  inherit version;
-  src = bunSource;
-
-  doInstallCheck = true;
-  postInstallCheck = (previousAttrs.postInstallCheck or "") + ''
-    test "$("$out/bin/bun" --version)" = ${lib.escapeShellArg version}
-  '';
-
-  passthru = (previousAttrs.passthru or { }) // {
-    exactVersion = version;
-    source = bunSource;
-    sources = {
-      "${system}" = bunSource;
-    };
-  };
-})
+selectedBun

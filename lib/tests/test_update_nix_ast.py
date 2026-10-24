@@ -763,6 +763,14 @@ def test_exact_bun_requires_an_exact_manifest_package_manager() -> None:
     assert expect_instance(package_manager_check.consequence, Primitive).value is True
     failure = expect_instance(package_manager_check.alternative, FunctionCall)
     assert expect_instance(failure.name, Identifier).name == "throw"
+    assert_nix_ast_equal(
+        nix_file_binding_expr("lib/exact-bun.nix", "useSharedBun"),
+        "version == bun.version",
+    )
+    assert_nix_ast_equal(
+        nix_file_binding_expr("lib/exact-bun.nix", "selectedBun"),
+        "if useSharedBun then bun else exactBun",
+    )
 
 
 def test_gitbutler_exports_its_package_owned_pnpm_dependency_derivation() -> None:
