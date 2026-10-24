@@ -4,6 +4,7 @@
   lib,
   makeDesktopItem,
   makeWrapper,
+  mkMacAppPassthru,
   models-dev,
   nixcfgElectron,
   nodejs,
@@ -531,11 +532,7 @@ stdenv.mkDerivation {
       opencodeChannel
       ;
 
-    macApp = {
-      bundleName = appBundleName;
-      bundleRelPath = "Applications/${appBundleName}";
-      installMode = "copy";
-    };
+    inherit (mkMacAppPassthru { bundleName = appBundleName; }) macApp;
   };
 
   meta = with lib; {

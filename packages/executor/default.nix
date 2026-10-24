@@ -9,6 +9,7 @@
   lib,
   libarchive,
   makeWrapper,
+  mkMacAppPassthru,
   nixcfgElectron,
   nodejs_24,
   outputs,
@@ -409,13 +410,7 @@ let
     postPatch = ''
       patch -p1 < ${bunLockPatch}
       PYTHONPATH=${
-        lib.fileset.toSource {
-          root = ../..;
-          fileset = lib.fileset.unions [
-            ../../lib/__init__.py
-            ../../lib/exact_text_patch.py
-          ];
-        }
+        import ../../lib/codemods-pythonpath.nix { inherit lib; }
       } ${lib.getExe python3} ${./patch_nix_managed.py} "$PWD"
     '';
 
@@ -710,12 +705,13 @@ let
           "$out/bin/${pname}"
       '';
 
-      macApp = {
-        bundleId = appId;
-        bundleName = appBundleName;
-        bundleRelPath = "Applications/Executor.app";
-        installMode = "copy";
-      };
+      inherit
+        (mkMacAppPassthru {
+          bundleName = appBundleName;
+          macApp.bundleId = appId;
+        })
+        macApp
+        ;
     };
 
     meta = {

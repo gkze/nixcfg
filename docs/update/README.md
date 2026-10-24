@@ -117,8 +117,12 @@ waits, and cache reuse.
 
 For one bounded local repair attempt, use
 `nixcfg update --repair codex TARGET`. Use `--repair copilot` with that CLI
-installed and authenticated. Both attempts run in isolation. A repair starts
-fresh execution and must pass updater validation, repository quality gates, and
+installed and authenticated. Both agents work in a disposable copy of the
+repository. Codex runs with `--sandbox workspace-write`. Copilot runs in that
+directory with all tools allowed and no OS sandbox, so it can reach anything
+your user can. Before promotion, the repair must stay inside the repair
+allow-list and pass the checkPhase-skip check. A repair then starts fresh
+execution and must pass updater validation, repository quality gates, and
 root builds before atomic promotion.
 
 `--check` keeps the result unapplied, and `--patch PATH` exports it. Normal

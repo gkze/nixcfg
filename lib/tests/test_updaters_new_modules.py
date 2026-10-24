@@ -21,7 +21,7 @@ from lib.update.events import (
     UpdateEventKind,
     ignore_event,
 )
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import VersionInfo, vendor_feeds
 from lib.update.updaters import materialization as materialization_mod
 from lib.update.updaters.core import UpdateContext
 from lib.update.updaters.flake_backed import FlakeInputMetadataUpdater
@@ -325,13 +325,13 @@ def test_chatgpt_reads_platform_appcasts_and_linux_deb_indexes(
             </rss>
         """.encode()
 
-    def _deb_index(filename: str) -> bytes:
+    def _deb_index(filename: str, architecture: str) -> bytes:
         # Real ``Packages`` stanzas are unindented; continuation lines start
         # with whitespace and must not be mistaken for fields.
         return (
             "Package: chatgpt\n"
             f"Version: {deb_version}\n"
-            "Architecture: arm64\n"
+            f"Architecture: {architecture}\n"
             "Depends: libgtk-3-0,\n libnotify4\n"
             f"Filename: {filename}\n"
             f"SHA256: {'0' * 64}\n"
@@ -349,13 +349,13 @@ def test_chatgpt_reads_platform_appcasts_and_linux_deb_indexes(
         if url == updater.DEB_INDEXES["aarch64-linux"]:
             # The deb index is a plain repository file, not a Sparkle request.
             assert "user_agent" not in kwargs
-            return _deb_index(arm_deb_name)
+            return _deb_index(arm_deb_name, "arm64")
         if url == updater.DEB_INDEXES["x86_64-linux"]:
             assert "user_agent" not in kwargs
-            return _deb_index(x64_deb_name)
+            return _deb_index(x64_deb_name, "amd64")
         raise AssertionError(url)
 
-    monkeypatch.setattr(chatgpt_module, "fetch_url", _fetch_url)
+    _patch_chatgpt_fetch(monkeypatch, chatgpt_module, _fetch_url)
 
     latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
@@ -373,93 +373,69 @@ def test_chatgpt_reads_platform_appcasts_and_linux_deb_indexes(
     assert set(updater._platform_urls(latest)) == set(updater.PLATFORMS)
 
 
+def _patch_chatgpt_fetch(
+    monkeypatch: pytest.MonkeyPatch, module: ModuleType, fetch: object
+) -> None:
+    """Serve both the module's deb index and the shared Sparkle appcast fetches."""
+    monkeypatch.setattr(module, "fetch_url", fetch)
+    monkeypatch.setattr(vendor_feeds, "fetch_url", fetch)
+
+
+def _chatgpt_deb_stanza(version: str) -> str:
+    return (
+        "Package: chatgpt\n"
+        f"Version: {version}\n"
+        "Architecture: arm64\n"
+        f"Filename: pool/main/c/chatgpt/chatgpt_{version}_arm64.deb\n"
+        f"SHA256: {'0' * 64}\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("versions", "expected"),
+    [
+        (("26.429.20946", "26.1007.21434"), "26.1007.21434"),
+        (("27.1~rc1", "26.9"), "27.1~rc1"),
+        (("27.1", "27.1~rc1"), "27.1"),
+        (("27.1~rc1", "27.1"), "27.1"),
+    ],
+)
 def test_chatgpt_selects_newest_deb_stanza(
     chatgpt_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    versions: tuple[str, ...],
+    expected: str,
 ) -> None:
-    """Pick the highest deb version when the index lists several."""
+    """Pick the dpkg-newest version (``~`` sorts before its release)."""
     updater = chatgpt_module.ChatGPTUpdater()
-    payload = (
-        "Package: chatgpt\n"
-        "Version: 26.429.20946\n"
-        "Filename: pool/main/c/chatgpt/chatgpt_26.429.20946_arm64.deb\n"
-        "\n"
-        "Package: chatgpt\n"
-        "Version: 26.1007.21434\n"
-        "Filename: pool/main/c/chatgpt/chatgpt_26.1007.21434_arm64.deb\n"
-        "\n"
-        "Package: unrelated\n"
-        "Version: 99.99.99\n"
-        "Filename: pool/main/u/unrelated/unrelated_99.99.99_arm64.deb\n"
+    payload = "\n".join(_chatgpt_deb_stanza(version) for version in versions)
+    payload += "\nPackage: unrelated\nVersion: 99\n"
+    monkeypatch.setattr(
+        chatgpt_module,
+        "fetch_url",
+        lambda *_a, **_k: asyncio.sleep(0, result=payload.encode()),
     )
 
-    stanza = updater._select_deb_stanza(
-        payload,
-        index_url=updater.DEB_INDEXES["aarch64-linux"],
-    )
+    url = _run(updater._fetch_deb_artifact_url(object(), platform="aarch64-linux"))
 
-    assert stanza["Version"] == "26.1007.21434"
+    assert url == (
+        f"{updater.DEB_BASE_URL}/pool/main/c/chatgpt/chatgpt_{expected}_arm64.deb"
+    )
 
 
 def test_chatgpt_rejects_deb_index_without_package(
     chatgpt_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Fail closed when the deb index has no ChatGPT stanza."""
+    """Fail closed when the deb index has no ChatGPT stanza for the architecture."""
     updater = chatgpt_module.ChatGPTUpdater()
-    with pytest.raises(RuntimeError, match="No chatgpt package found in ChatGPT"):
-        updater._select_deb_stanza(
-            "Package: something-else\nVersion: 1.0\n",
-            index_url=updater.DEB_INDEXES["aarch64-linux"],
-        )
-
-
-def test_chatgpt_rejects_incomplete_deb_stanza(
-    chatgpt_module: ModuleType,
-) -> None:
-    """Fail closed when a deb stanza omits its version or pool path."""
-    updater = chatgpt_module.ChatGPTUpdater()
-    index_url = updater.DEB_INDEXES["aarch64-linux"]
-    with pytest.raises(RuntimeError, match="Incomplete chatgpt stanza"):
-        updater._deb_artifact_url({"Package": "chatgpt"}, index_url=index_url)
-    with pytest.raises(RuntimeError, match="Incomplete chatgpt stanza"):
-        updater._deb_artifact_url(
-            {"Version": "26.1007.21434", "Filename": ""},
-            index_url=index_url,
-        )
-
-
-def test_chatgpt_rejects_unpinned_deb_url(
-    chatgpt_module: ModuleType,
-) -> None:
-    """Fail closed when the deb pool path omits the release version."""
-    updater = chatgpt_module.ChatGPTUpdater()
-    with pytest.raises(RuntimeError, match="ChatGPT deb URL is not version-pinned"):
-        updater._deb_artifact_url(
-            {
-                "Version": "26.1007.21434",
-                "Filename": "pool/main/c/chatgpt/chatgpt_latest_arm64.deb",
-            },
-            index_url=updater.DEB_INDEXES["aarch64-linux"],
-        )
-
-
-def test_chatgpt_ignores_malformed_deb_index_lines(
-    chatgpt_module: ModuleType,
-) -> None:
-    """Ignore continuation lines and lines that are not ``Key: value`` fields."""
-    updater = chatgpt_module.ChatGPTUpdater()
-
-    stanza = updater._parse_deb_stanza(
-        "Package: chatgpt\n"
-        "Depends: libgtk-3-0,\n libnotify4\n"
-        "not a field\n"
-        "Version: 26.1007.21434\n"
+    monkeypatch.setattr(
+        chatgpt_module,
+        "fetch_url",
+        lambda *_a, **_k: asyncio.sleep(0, result=_chatgpt_deb_stanza("26.1").encode()),
     )
-
-    assert stanza == {
-        "Package": "chatgpt",
-        "Depends": "libgtk-3-0,",
-        "Version": "26.1007.21434",
-    }
+    with pytest.raises(RuntimeError, match="No chatgpt package found in ChatGPT"):
+        _run(updater._fetch_deb_artifact_url(object(), platform="x86_64-linux"))
 
 
 def test_chatgpt_requires_metadata_for_linux_fallback(
@@ -522,9 +498,9 @@ def test_chatgpt_rejects_latest_only_archive_url(
           </item></channel>
         </rss>
     """
-    monkeypatch.setattr(
+    _patch_chatgpt_fetch(
+        monkeypatch,
         chatgpt_module,
-        "fetch_url",
         lambda *_a, **_k: asyncio.sleep(0, result=payload),
     )
 
@@ -551,7 +527,7 @@ def test_chatgpt_rejects_appcasts_without_common_release(
             </rss>
         """.encode()
 
-    monkeypatch.setattr(chatgpt_module, "fetch_url", _fetch_url)
+    _patch_chatgpt_fetch(monkeypatch, chatgpt_module, _fetch_url)
 
     with pytest.raises(RuntimeError, match="No common ChatGPT desktop release"):
         _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
@@ -563,13 +539,13 @@ def test_chatgpt_rejects_invalid_appcast_shape(
 ) -> None:
     """Surface appcast parsing errors with ChatGPT-specific messages."""
     updater = chatgpt_module.ChatGPTUpdater()
-    monkeypatch.setattr(
+    _patch_chatgpt_fetch(
+        monkeypatch,
         chatgpt_module,
-        "fetch_url",
         lambda *_a, **_k: asyncio.sleep(0, result=b"<rss><channel /></rss>"),
     )
 
-    with pytest.raises(RuntimeError, match="No items found in ChatGPT appcast"):
+    with pytest.raises(RuntimeError, match="No items found in Sparkle appcast"):
         _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
@@ -582,7 +558,7 @@ def test_chatgpt_rejects_invalid_appcast_shape(
             <sparkle:shortVersionString />
             <enclosure url="https://example.invalid/Codex.zip" />
             """,
-            "Blank short version found in ChatGPT appcast",
+            "Missing version in ChatGPT appcast",
         ),
         (
             """
@@ -590,7 +566,7 @@ def test_chatgpt_rejects_invalid_appcast_shape(
             <sparkle:shortVersionString>26.429.20946</sparkle:shortVersionString>
             <enclosure />
             """,
-            "No URL found in ChatGPT appcast enclosure",
+            "Missing download URL in ChatGPT appcast",
         ),
     ],
 )
@@ -607,9 +583,9 @@ def test_chatgpt_rejects_blank_appcast_fields(
           <channel><item>{item_xml}</item></channel>
         </rss>
     """.encode()
-    monkeypatch.setattr(
+    _patch_chatgpt_fetch(
+        monkeypatch,
         chatgpt_module,
-        "fetch_url",
         lambda *_a, **_k: asyncio.sleep(0, result=payload),
     )
 

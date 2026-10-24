@@ -27,17 +27,20 @@ from lib.diagnostics import redact_urls
 from lib.nix.models.derivation import DerivationInputs  # noqa: TC001 -- Pydantic field
 from lib.system_policy import RootClosureKind, required_root_kinds
 from lib.update import persistence as update_persistence
-from lib.update.nix import (
+from lib.update.failures import (
     failed_derivation_paths,
-    get_current_nix_platform,
     is_retryable_nix_network_failure,
     is_retryable_nix_store_failure,
+    should_consult_nix_builder_logs,
+)
+from lib.update.nix import (
+    get_current_nix_platform,
     recover_nix_store_after_fault,
     repair_corrupt_nix_store_paths,
-    should_consult_nix_builder_logs,
     should_restart_nix_daemon,
 )
 from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
+from lib.update.nix_policy import NO_IMPORT_FROM_DERIVATION_ARGS
 from lib.update.paths import get_repo_root
 from lib.update.runtime import measure
 
@@ -519,15 +522,13 @@ def _read_nix_builder_log(drv: str, *, cwd: Path) -> str:
 def _builder_log_supplement(result: _RunResult, *, cwd: Path) -> str:
     """Fetch truncated builder tails Nix omitted from the last-25 window.
 
-    Pytest must not shell out to ``nix log`` for fixture ``.drv`` paths.
-    Hosted validation consults the real log so a write-EIO that scrolled
-    out of streamed stderr can still retry.
+    A write-EIO that scrolled out of streamed stderr can then still retry. Only
+    derivations present in this store have a log to read.
     """
-    if os.environ.get("PYTEST_CURRENT_TEST"):
-        return ""
     return "\n".join(
         _read_nix_builder_log(drv, cwd=cwd)
         for drv in failed_derivation_paths(f"{result.stderr}\n{result.stdout}")
+        if os.path.exists(drv)  # noqa: PTH110 -- one seam the tests replace
     )
 
 
@@ -572,6 +573,16 @@ def _timeout_for_attempt(
         return timeout
     if remaining <= 0:
         raise subprocess.TimeoutExpired(args, timeout)
+    return remaining
+
+
+def _remaining_budget(args: list[str], deadline: float | None) -> float | None:
+    """Return the time left before *deadline*, or raise once it has passed."""
+    if deadline is None:
+        return None
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise subprocess.TimeoutExpired(args, 0)
     return remaining
 
 
@@ -667,19 +678,23 @@ def _run_validation_command_impl(
                     stderr=result.stderr,
                 )
             return result
+        recovered = True
         if should_restart_nix_daemon(stdout=result.stdout, stderr=result.stderr):
-            recover_nix_store_after_fault(sleep=sleep)
-        if is_retryable_nix_store_failure(
-            stdout=result.stdout,
-            stderr=result.stderr,
-        ):
-            repair_corrupt_nix_store_paths(
+            check_cancelled()
+            recovered = recover_nix_store_after_fault(
+                sleep=sleep, timeout=_remaining_budget(args, active_deadline)
+            )
+        if is_retryable_nix_store_failure(stdout=result.stdout, stderr=result.stderr):
+            check_cancelled()
+            recovered &= repair_corrupt_nix_store_paths(
                 stdout=result.stdout,
                 stderr=result.stderr,
+                timeout=_remaining_budget(args, active_deadline),
             )
         if progress is not None:
             progress(
                 f"Retrying transient Nix failure (attempt {attempt + 2}/{max_attempts})"
+                + ("" if recovered else "; Nix store recovery failed")
             )
         sleep(_retry_backoff(attempt, active_deadline))
     raise AssertionError  # pragma: no cover -- finite loop always returns
@@ -848,7 +863,7 @@ def _validation_args(
                 *(["-L"] if print_build_logs else []),
             ]
             if request.mode == "build"
-            else ["--option", "allow-import-from-derivation", "false", "--raw"]
+            else [*NO_IMPORT_FROM_DERIVATION_ARGS, "--raw"]
         ),
         _normalize_local_installable(request.installable, flake_root=flake_root),
     ]
@@ -1213,7 +1228,14 @@ def _load_root_closure_manifest(
         _ROOT_CLOSURE_MANIFEST_INSTALLABLE,
         flake_root=snapshot_root,
     )
-    args = ["nix", "eval", "--no-update-lock-file", "--json", installable]
+    args = [
+        "nix",
+        "eval",
+        "--no-update-lock-file",
+        "--json",
+        *NO_IMPORT_FROM_DERIVATION_ARGS,
+        installable,
+    ]
     result = _run_validation_command(
         args,
         cwd=snapshot_root,
@@ -1379,9 +1401,7 @@ def validate_root_closures(
                 "show",
                 "--recursive",
                 "--no-update-lock-file",
-                "--option",
-                "allow-import-from-derivation",
-                "false",
+                *NO_IMPORT_FROM_DERIVATION_ARGS,
                 *(
                     f"path:{snapshot_root}#checks.{system}.{root_closure_check_attr(name)}"
                     for system in graph_systems

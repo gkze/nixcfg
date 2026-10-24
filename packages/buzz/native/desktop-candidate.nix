@@ -3,6 +3,7 @@
   desktopUnsigned,
   lib,
   meshRuntimeBundle,
+  mkMacAppPassthru,
   nativeLock ? builtins.fromJSON (builtins.readFile ../native-lock.json),
   patchedBuzzSource,
   python3,
@@ -541,12 +542,13 @@ stdenv.mkDerivation {
 
   passthru = {
     buzzNativeContract = implementedContract;
-    macApp = {
-      bundleId = "xyz.block.buzz.app";
-      bundleName = "Buzz.app";
-      bundleRelPath = "Applications/Buzz.app";
-      installMode = "copy";
-    };
+    inherit
+      (mkMacAppPassthru {
+        bundleName = "Buzz.app";
+        macApp.bundleId = "xyz.block.buzz.app";
+      })
+      macApp
+      ;
   };
 
   meta = {

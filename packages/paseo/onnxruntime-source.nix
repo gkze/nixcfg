@@ -126,6 +126,7 @@ stdenv.mkDerivation (_finalAttrs: {
     (lib.cmakeFeature "CMAKE_OSX_ARCHITECTURES" "arm64")
   ];
 
+  # onnxruntime_BUILD_UNIT_TESTS is off above, so no test targets exist.
   doCheck = false;
   checkInputs = [ ];
   nativeCheckInputs = [ ];

@@ -69,13 +69,40 @@ def _registered_bundle_ids() -> frozenset[str]:
     happens to prefix a registered one, silently hiding a dead row from the
     audit instead of reporting it.
     """
-    completed = subprocess.run(  # noqa: S603 -- fixed local Apple LS binary, argv is constant
-        [_LSREGISTER, "-dump"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return frozenset(_IDENTIFIER_RE.findall(completed.stdout))
+    try:
+        completed = subprocess.run(  # noqa: S603 -- fixed local Apple LS binary, argv is constant
+            [_LSREGISTER, "-dump"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as error:
+        typer.echo(
+            f"Cannot inspect LaunchServices registrations: could not launch "
+            f"{_LSREGISTER}: {error}",
+            err=True,
+        )
+        raise typer.Exit(code=2) from error
+
+    if completed.returncode != 0:
+        detail = completed.stderr.strip()
+        typer.echo(
+            f"Cannot inspect LaunchServices registrations: lsregister -dump "
+            f"exited {completed.returncode}{f': {detail}' if detail else ''}.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    identifiers = frozenset(_IDENTIFIER_RE.findall(completed.stdout))
+    if not identifiers:
+        typer.echo(
+            "Cannot inspect LaunchServices registrations: lsregister -dump "
+            "returned no bundle identifiers; refusing to classify installed "
+            "applications as unregistered.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    return identifiers
 
 
 def _registered(bundle_id: str) -> bool:
@@ -384,6 +411,18 @@ def clean_command(
                 f"shows {outcome.observed or '<untitled>'!r}.",
                 err=True,
             )
+        if isinstance(outcome, removal_module.Unverified):
+            typer.echo(
+                f"{dead_path.name!r} removal is unverified: System Settings "
+                f"stopped showing {pane_label(pane)} ({pane.value}) and now "
+                f"shows {outcome.observed or '<untitled>'!r} "
+                + (
+                    "after Remove was pressed."
+                    if outcome.pressed
+                    else "before Remove was pressed."
+                ),
+                err=True,
+            )
         if isinstance(outcome, removal_module.StillPresent):
             typer.echo(
                 f"{dead_path.name!r} is still listed - the prompt was likely "
@@ -443,9 +482,11 @@ def remove_command(
         ),
     ] = False,
 ) -> None:
-    """Select and Remove a row from a macOS privacy pane.
+    """Select and Remove a row, or only verify selection with --dry-run.
 
-    macOS will demand Touch ID (or your password) to complete the removal.
+    A real removal asks macOS for Touch ID (or your password). A dry run exits
+    0 after confirming the expected pane and selected row; it never presses
+    Remove and performs no removal.
     """
     if not settings_module.ensure_running(pane):
         typer.echo("System Settings did not start.", err=True)
@@ -456,11 +497,29 @@ def remove_command(
         raise typer.Exit(code=1)
     outcome = removal_module.remove_and_verify(process, pane, name, dry_run=dry_run)
     match outcome:
+        case removal_module.Selection():
+            typer.echo(
+                f"Selected {name!r} - verified selection in the "
+                f"{pane_label(pane)} pane; no removal performed."
+            )
         case removal_module.Removed():
             typer.echo(f"Removed {name!r} - verified gone from the pane.")
         case removal_module.StillPresent():
             typer.echo(
                 f"{name!r} is still listed - the prompt was likely cancelled.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        case removal_module.Unverified():
+            typer.echo(
+                f"Removal unverified for {name!r}: expected the "
+                f"{pane_label(pane)} pane ({pane.value}), but System Settings "
+                f"shows {outcome.observed or '<untitled>'!r}. "
+                + (
+                    "Remove was pressed; no removal is confirmed."
+                    if outcome.pressed
+                    else "Remove was not pressed; selection was not revalidated."
+                ),
                 err=True,
             )
             raise typer.Exit(code=1)

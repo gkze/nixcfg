@@ -37,6 +37,9 @@ class GooseV8Updater(FlakeInputUpdater, HashEntryUpdater):
 
     name = "goose-v8"
     input_name = "goose-v8"
+    # Opt out of HashEntryUpdater's default: ``_is_latest`` below proves the
+    # pinned revision's hashes are complete.
+    always_rehash = False
     bulk_update_hold = (
         "A goose-v8 pin change rebuilds goose-cli-v8-native on hosted macos-15 "
         "and overflows the runner. Remove with GooseCliUpdater.bulk_update_hold "

@@ -4,7 +4,6 @@
   pkgs,
   slib,
   src,
-  system,
   username,
   ...
 }:
@@ -22,12 +21,9 @@ in
     # External modules (nixvim and stylix) are imported via lib.mkHomeModules.
     fonts.fontconfig.enable = true;
     home = {
-      homeDirectory = lib.mkForce "${slib.homeDirBase system}/${username}";
+      homeDirectory = lib.mkForce "${slib.homeDirBase pkgs.stdenv.hostPlatform.system}/${username}";
       stateVersion = lib.removeSuffix "\n" (builtins.readFile "${src}/NIXOS_VERSION");
     };
-    nix = {
-      package = lib.mkForce pkgs.nixVersions.git;
-      checkConfig = true;
-    };
+    nix.checkConfig = true;
   };
 }

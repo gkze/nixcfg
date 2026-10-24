@@ -55,6 +55,8 @@ let
     inputs = {
       nix-homebrew.darwinModules.nix-homebrew = "nix-homebrew-module";
       nix-rosetta-builder.darwinModules.default = "rosetta-builder-module";
+      nixvim.homeModules.nixvim = "nixvim-module";
+      stylix.homeModules.stylix = "stylix-module";
     };
     lib = fakeLib;
     pkgsFor = { };
@@ -125,6 +127,25 @@ let
     builder = "original";
     args = [ "image" ];
   };
+  directHomeModules = flake.lib.mkHomeModules {
+    system = "aarch64-darwin";
+    username = "alice";
+    includeDefaultUserModule = false;
+    extraModules = [
+      flake.homeModules.nixcfgPackages
+      flake.homeModules.nixcfgStylix
+    ];
+  };
+  expectedDirectHomeModules = [
+    "nixvim-module"
+    "stylix-module"
+    "${flake.lib.modulesPath}/home/theme.nix"
+    "${flake.lib.modulesPath}/home/fonts.nix"
+    "${flake.lib.modulesPath}/home/base.nix"
+    "${flake.lib.modulesPath}/home/darwin.nix"
+    flake.homeModules.nixcfgPackages
+    flake.homeModules.nixcfgStylix
+  ];
 in
 if expected != actual then
   throw "default.nix constructors mismatch: expected ${builtins.toJSON expected}, got ${builtins.toJSON actual}"
@@ -146,6 +167,8 @@ else if
   } shortLingerDarwinModules)
 then
   throw "mkDarwinHost must forward the Rosetta builder idle linger policy"
+else if directHomeModules != expectedDirectHomeModules then
+  throw "mkHomeModules must compose external, base, platform and explicit feature dependencies"
 else if
   portableImage != {
     builder = "original";

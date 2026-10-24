@@ -79,7 +79,12 @@ targets:
     source_path = source.path if isinstance(source, DirectorySource) else None
     assert isinstance(source_path, Path)
     assert source_path == (tmp_path / "schemas").resolve()
-    assert target.generator.output == (tmp_path / "generated/models.py").resolve()
+    assert target.generator.output == Path("generated/models.py")
+    resolved = _resolve_target(loaded, target_name="demo")
+    assert (
+        resolved.generator_options["output"]
+        == (tmp_path / "generated/models.py").resolve()
+    )
 
 
 def test_list_schema_codegen_targets_reads_repo_config() -> None:
@@ -92,6 +97,45 @@ def test_list_schema_codegen_targets_reads_repo_config() -> None:
     ]
     assert str(summaries[0].output).endswith("lib/schema_codegen/models/_generated.py")
     assert str(summaries[1].output).endswith("lib/nix/models/_generated.py")
+
+
+def test_defaults_only_output_is_shared_by_list_generate_and_verify(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Resolve an inherited output once for every target consumer."""
+    config_path = tmp_path / "schema_codegen.yaml"
+    config_path.write_text(
+        """
+defaults:
+  generator:
+    output: generated/models.py
+sources: {}
+registry_profiles: {}
+targets:
+  demo:
+    sources: []
+    registry_profile: local
+    entrypoints: []
+    generator: {}
+""".lstrip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        codegen_runner,
+        "_render_schema_codegen_target",
+        lambda *_args, **_kwargs: "models\n",
+    )
+    expected = (tmp_path / "generated/models.py").resolve()
+
+    assert list_schema_codegen_targets(config_path=config_path) == (
+        codegen_runner.SchemaTargetSummary(name="demo", output=expected),
+    )
+    assert (
+        generate_schema_codegen_target(config_path=config_path, target_name="demo")
+        == expected
+    )
+    assert verify_schema_codegen_target(config_path=config_path, target_name="demo")
 
 
 def test_repo_nix_schema_models_are_fresh() -> None:
@@ -177,7 +221,9 @@ targets:
     loaded = load_schema_codegen_config(config_path=Path("custom.yaml"))
 
     assert loaded.path == config_path.resolve()
-    assert loaded.config.targets["demo"].generator.output == (tmp_path / "generated.py")
+    assert loaded.config.targets["demo"].generator.output == Path("generated.py")
+    resolved = _resolve_target(loaded, target_name="demo")
+    assert resolved.generator_options["output"] == tmp_path / "generated.py"
 
 
 def test_generate_schema_codegen_target_from_directory_source(tmp_path: Path) -> None:
@@ -268,6 +314,81 @@ targets:
     assert output_path == (tmp_path / "generated.py").resolve()
     assert "class Person" in rendered
     assert "age:" in rendered
+
+
+def test_rewrite_constr_without_annotated_generation_builds_validating_models(
+    tmp_path: Path,
+) -> None:
+    """Import and rebuild rewritten models when the generator omits Annotated."""
+    schemas_dir = tmp_path / "schemas"
+    schemas_dir.mkdir()
+    (schemas_dir / "root.json").write_text(
+        json.dumps({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "PatternModel",
+            "type": "object",
+            "properties": {
+                "code": {"type": "string", "pattern": "^[A-Z]{3}$"},
+            },
+            "required": ["code"],
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "schema_codegen.yaml"
+    config_path.write_text(
+        """
+defaults:
+  generator:
+    input_file_type: jsonschema
+    output_model_type: pydantic_v2.BaseModel
+    target_python_version: "3.14"
+    use_annotated: false
+    field_constraints: true
+    formatters:
+      - ruff-format
+      - ruff-check
+sources:
+  local:
+    kind: directory
+    path: schemas
+    include:
+      - "*.json"
+    format: json
+registry_profiles:
+  local:
+    aliases:
+      - relative-path
+    resource:
+      mode: from-contents
+targets:
+  demo:
+    sources:
+      - local
+    registry_profile: local
+    entrypoints:
+      - ./root.json
+    prepare:
+      python_transforms:
+        - rewrite-constr-annotations
+        - normalize-pydantic-imports
+    generator:
+      output: generated.py
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    output_path = generate_schema_codegen_target(
+        config_path=config_path,
+        target_name="demo",
+    )
+    module = _load_generated_module(output_path, module_name="_generated_constraints")
+    model = module.PatternModel
+
+    assert model.model_rebuild() is None
+    assert model.model_validate({"code": "ABC"}).code == "ABC"
+    with pytest.raises(ValueError, match="String should match pattern"):
+        model.model_validate({"code": "abc"})
 
 
 def test_verify_schema_codegen_target_is_check_only(

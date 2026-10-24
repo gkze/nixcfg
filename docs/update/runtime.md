@@ -124,6 +124,23 @@ over a shared Postgres service for the single CLI owner and the per-run
 lifetime. That deployment choice must change before a database share
 across hosts.
 
+## Generation snapshot file recovery
+
+`nixcfg recover files --apply` and `nixcfg recover hashes --apply` perform
+planned writes and then removals in plan order. A multi-path recovery is
+not atomic and does not roll back completed changes after a failure. The
+`RecoveryApplyError` preserves the original exception as its cause and
+retains the completed write and removal paths. Plain errors report the
+number of completed changes. JSON errors add `completed_paths`,
+`completed_write_paths`, `completed_remove_paths`, and `stage_state`.
+
+`--stage` starts only after all planned filesystem operations complete.
+`stage_state` is `not_requested` when staging was not requested, `pending`
+when a filesystem failure prevented the staging attempt, or `failed` when
+`git add` was attempted but did not complete. After a staging failure, the
+completed filesystem changes remain and Git may contain a partially staged
+subset; inspect `git status` before retrying or changing the index.
+
 ## Admission and scheduling
 
 An updater can declare `bulk_update_hold` with a reason. That declaration
@@ -253,17 +270,18 @@ semaphore, and condition primitives.
 
 ## Probe preparation and reuse
 
-`PreparedProbe` retains the exact isolated derivation path and the
-fingerprint of the original fake-hash derivation. A platform matrix is
-evaluated in one JSON command with a shared native nixpkgs binding for
-probe isolation. Platform package evaluation contexts remain distinct. The
-build uses `drvPath^out`. A retry reuses that path and does not evaluate
-the expression again.
+`PreparedProbe` retains the exact isolated derivation path, the full path
+and fingerprint of the original fake-hash derivation, and the probe
+expression. A platform matrix is evaluated in one JSON command with a
+shared native nixpkgs binding for probe isolation. Platform package
+evaluation contexts remain distinct. The build uses `drvPath^out`. A retry
+reuses that path and does not evaluate the expression again.
 
 The hash parser associates each hash with its own mismatch block. A
-prepared probe accepts only a mismatch that names its exact derivation. A
-nested fixed-output dependency therefore cannot certify its parent by
-accident.
+prepared probe accepts a mismatch that names either its prepared wrapper or
+the original fingerprint derivation. The latter is the supported nested
+fixed-output mismatch produced while Nix builds the original expression.
+A mismatch from any other nested derivation cannot certify the probe.
 
 A shared hash strategy targets its fixed-output dependency directly:
 `goModules`, `cargoDeps`, `npmDeps`, or `node_modules`. A custom
@@ -287,6 +305,17 @@ still chooses the lowest compatible version. A whole-package inventory is
 not memoized against a mutable checkout. Locked source realization is
 shared within a run through the immutable locked node expression. Each
 caller validates the returned path.
+
+## Warmup plan provenance
+
+A generated `WarmupPlan` records the exact candidate `tree` alongside its
+output and derivation sets. Native validation passes that same candidate tree
+to every warmup realization. The Zed-only workflow restores plans by branch,
+but accepts one only when its tree exactly equals the checked-out `HEAD` tree;
+a default-branch fallback is not an exception. Unbound legacy plans remain
+readable by inspection helpers only and cannot cross a realization boundary.
+A mismatch fails closed so the caller can regenerate the plan instead of
+realizing stale store paths while reporting a current candidate.
 
 ## Generated artifacts and downloads
 

@@ -28,6 +28,7 @@ _HASH = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
 _NEW_HASH = "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="
 _DRV = "/nix/store/" + "0" * 32 + "-probe.drv"
 _ORIGINAL = "/nix/store/" + "1" * 32 + "-original.drv"
+_UNRELATED = "/nix/store/" + "2" * 32 + "-unrelated.drv"
 
 
 def test_prepare_matrix_preserves_paths_and_uses_one_evaluation(
@@ -53,8 +54,20 @@ def test_prepare_matrix_preserves_paths_and_uses_one_evaluation(
     monkeypatch.setattr("lib.update.nix.run_command", command)
     result = asyncio.run(prepare_fixed_output_probes("matrix", expressions))
     assert len(calls) == 1
+    assert calls[0][:-1] == [
+        "nix",
+        "eval",
+        "--quiet",
+        "--json",
+        "--impure",
+        "--option",
+        "allow-import-from-derivation",
+        "false",
+        "--expr",
+    ]
     assert result == {
-        key: PreparedProbe(_DRV, "1" * 32, expr) for key, expr in expressions.items()
+        key: PreparedProbe(_DRV, "1" * 32, expr, _ORIGINAL)
+        for key, expr in expressions.items()
     }
     # Parse the generated AST rather than accepting ad hoc interpolation.
     assert parse(_prepared_probe_expr(expressions)).expr is not None
@@ -150,7 +163,7 @@ def test_retry_builds_the_same_prepared_derivation(
     assert calls == [("", _DRV), ("", _DRV)]
 
 
-def test_prepared_probe_accepts_a_dependency_hash_mismatch(
+def test_prepared_probe_accepts_original_fingerprint_hash_mismatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A nested FOD mismatch supplies the probe hash.
@@ -173,9 +186,52 @@ def test_prepared_probe_accepts_a_dependency_hash_mismatch(
 
     monkeypatch.setattr("lib.update.nix._run_fixed_output_build", build)
     result = asyncio.run(
-        compute_fixed_output_hash("probe", PreparedProbe(_DRV, "cert"))
+        compute_fixed_output_hash(
+            "probe", PreparedProbe(_DRV, "cert", fingerprint_drv_path=_ORIGINAL)
+        )
     )
     assert result == _NEW_HASH
+
+
+def test_prepared_probe_rejects_an_unrelated_dependency_hash_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A different nested FOD cannot supply the prepared probe's hash."""
+
+    async def build(_source, _expr, **_kwargs):
+        return CommandResult(
+            args=["nix", "build"],
+            returncode=1,
+            stdout="",
+            stderr=(
+                f"error: hash mismatch in fixed-output derivation '{_UNRELATED}':\n"
+                f" specified: {_HASH}\n got: {_NEW_HASH}\n"
+            ),
+        )
+
+    monkeypatch.setattr("lib.update.nix._run_fixed_output_build", build)
+    with pytest.raises(RuntimeError, match="unexpected derivation") as exc_info:
+        asyncio.run(
+            compute_fixed_output_hash(
+                "probe", PreparedProbe(_DRV, "cert", fingerprint_drv_path=_ORIGINAL)
+            )
+        )
+    assert _UNRELATED in str(exc_info.value)
+
+
+def test_prepared_probe_without_a_mismatch_keeps_the_extraction_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-mismatch build failure still reaches the existing hash diagnostic."""
+
+    async def build(_source, _expr, **_kwargs):
+        return CommandResult(
+            args=["nix", "build"], returncode=1, stdout="", stderr="build failed"
+        )
+
+    monkeypatch.setattr("lib.update.nix._run_fixed_output_build", build)
+    with pytest.raises(RuntimeError, match="Could not find hash"):
+        asyncio.run(compute_fixed_output_hash("probe", PreparedProbe(_DRV, "cert")))
 
 
 class _Updater(FlakeInputHashUpdater):

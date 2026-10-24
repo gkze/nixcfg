@@ -647,6 +647,63 @@ def test_updater_is_latest_and_update_stream_paths() -> None:
     )
 
 
+def test_always_rehash_recomputes_hashes_for_an_unchanged_version() -> None:
+    """``always_rehash`` never trusts version equality as proof of currency."""
+    hashed: list[str] = []
+
+    class _RehashUpdater(_DummyUpdater):
+        name = "rehash"
+        always_rehash = True
+
+        async def fetch_hashes(
+            self,
+            info: VersionInfo,
+            session: object,
+            *,
+            context: object | None = None,
+            emit: EventSink = ignore_event,
+        ) -> object:
+            hashed.append(info.version)
+            return await super().fetch_hashes(info, session, context=context, emit=emit)
+
+    current = SourceEntry.model_validate({
+        "version": "1.0.0",
+        "hashes": {"x86_64-linux": HASH_A},
+    })
+
+    async def _collect() -> list[UpdateEvent]:
+        async with aiohttp.ClientSession() as session:
+            return await collect_events(
+                lambda emit: _RehashUpdater().update_stream(current, session, emit=emit)
+            )
+
+    events = asyncio.run(_collect())
+
+    assert hashed == ["1.0.0"]
+    assert not any(
+        isinstance(e.payload, StatusPayload)
+        and e.payload.info is not None
+        and e.payload.info.kind is StatusKind.UP_TO_DATE
+        and e.payload.info.scope == "version"
+        for e in events
+    )
+
+
+def test_always_rehash_rejects_an_unreachable_is_latest_override() -> None:
+    """A class cannot both force rehashing and claim a currency proof."""
+    with pytest.raises(TypeError, match="always_rehash"):
+
+        class _Conflicting(_DummyUpdater):
+            name = "conflicting"
+            always_rehash = True
+
+            async def _is_latest(
+                self, context: UpdateContext, info: VersionInfo
+            ) -> bool:
+                _ = (context, info)
+                return True
+
+
 def test_flake_input_metadata_updater_is_latest_requires_exact_witness() -> None:
     """Metadata-only flake inputs should only short-circuit on exact state matches."""
 

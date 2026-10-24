@@ -189,6 +189,9 @@ class GooseDesktopUpdater(HashEntryUpdater):
                             "inputs",
                         ),
                     ),
+                    # The fragment reads final.goose-v8; the flake package
+                    # set already contains it.
+                    Binding(name="final", value=Identifier(name="pkgs")),
                     Binding(name="prev", value=Identifier(name="pkgs")),
                     Binding(name="slib", value=flake_lib),
                     Binding(name="sources", value=flake_sources),

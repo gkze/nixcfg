@@ -3,7 +3,6 @@
 import ast
 import asyncio
 import json
-from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
@@ -22,7 +21,6 @@ from lib.update.events import (
 )
 from lib.update.process import NixBuildOptions, RunCommandOptions
 from lib.update.ui_state import OperationKind, OperationState, _set_operation_status
-from lib.update.updaters.core import UpdateContext
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -79,11 +77,8 @@ def test_compute_drv_fingerprint_without_store_prefix(
     assert asyncio.run(compute_drv_fingerprint("demo")) == "abc123"
 
 
-@pytest.mark.parametrize("legacy_timeout", [False, True])
 def test_run_command_timeout_override_and_empty_sanitized_line(
     monkeypatch: pytest.MonkeyPatch,
-    *,
-    legacy_timeout: bool,
 ) -> None:
     """Use explicit timeout and skip empty sanitized lines."""
     from lib.update.process import run_command
@@ -93,13 +88,13 @@ def test_run_command_timeout_override_and_empty_sanitized_line(
     async def _stream_process(
         _args: list[str],
         *,
-        timeout: float,
+        command_timeout: float,
         env: object,
         output_limit: int | None,
     ) -> AsyncIterator[ProcessLine | ProcessDone]:
         _ = env
         assert output_limit is None
-        captured["timeout"] = timeout
+        captured["timeout"] = command_timeout
         yield ProcessLine("stdout", "\x1b[31m\x1b[0m\n")
         yield ProcessDone(
             LibCommandResult(args=["echo", "x"], returncode=0, stdout="", stderr="")
@@ -109,11 +104,8 @@ def test_run_command_timeout_override_and_empty_sanitized_line(
     events = _collect(
         lambda emit: run_command(
             ["echo", "x"],
-            options=RunCommandOptions(
-                source="demo", command_timeout=None if legacy_timeout else 2.5
-            ),
+            options=RunCommandOptions(source="demo", command_timeout=2.5),
             emit=emit,
-            **({"timeout": 2.5} if legacy_timeout else {}),
         )
     )
     assert captured["timeout"] == 2.5
@@ -172,19 +164,14 @@ def test_packaging_source_policy_parser_and_python_audit_edges() -> None:
     """Cover source-modification policy helpers without scanning the repo."""
     from lib.codemods import packaging_source_policy as policy
     from lib.codemods.errors import CodemodError
+    from lib.codemods.nix_parse import strip_trailing_formal_commas
     from lib.update.paths import REPO_ROOT
 
-    assert policy._rewrite_function_formals_for_parser("let x = 1; in x") == (
-        "let x = 1; in x"
-    )
-    assert policy._rewrite_function_formals_for_parser("{\n  lib,\n") == "{\n  lib,\n"
-    assert policy._rewrite_function_formals_for_parser("{\n}:\nnull\n") == (
-        "{\n}:\nnull\n"
-    )
+    assert strip_trailing_formal_commas("let x = 1; in x") == ("let x = 1; in x")
+    assert strip_trailing_formal_commas("{\n  lib,\n") == "{\n  lib,\n"
+    assert strip_trailing_formal_commas("{\n}:\nnull\n") == ("{\n}:\nnull\n")
     indented_header = "{\n    lib,\n}:\nnull\n"
-    assert policy._rewrite_function_formals_for_parser(indented_header) == (
-        "{\n    lib\n}:\nnull\n"
-    )
+    assert strip_trailing_formal_commas(indented_header) == ("{\n    lib\n}:\nnull\n")
 
     multiline_formals = (
         "{\n"
@@ -194,7 +181,7 @@ def test_packaging_source_policy_parser_and_python_audit_edges() -> None:
         "}:\n"
         'stdenv.mkDerivation { pname = "demo"; }\n'
     )
-    rewritten = policy._rewrite_function_formals_for_parser(multiline_formals)
+    rewritten = strip_trailing_formal_commas(multiline_formals)
     assert rewritten == (
         "{\n"
         "  lib,\n"
@@ -524,79 +511,17 @@ def test_compute_sri_hash_reraises_non_retryable_prefetch_failure(
     assert calls == 1
 
 
-def test_update_cli_reexec_and_entrypoint_short_circuit(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Cover update CLI checkout re-exec argument construction."""
-    from lib.update import cli as update_cli
-
-    captured: dict[str, object] = {}
-    monkeypatch.setattr(update_cli.sys, "argv", ["nixcfg", "update", "demo"])
-    monkeypatch.setattr(update_cli, "get_repo_root", lambda: Path("/repo"))
-    monkeypatch.setattr(
-        update_cli, "_update_library_matches_checkout", lambda _root: False
-    )
-    monkeypatch.delenv(update_cli._REEXEC_ENV, raising=False)
-    monkeypatch.setattr(update_cli.shutil, "which", lambda _name: "/bin/nix")
-    monkeypatch.setattr(
-        update_cli.update_persistence,
-        "visible_source_snapshot",
-        lambda _root: nullcontext(Path("/snapshot")),
-    )
-
-    def _run(
-        args: list[str],
-        *,
-        cwd: Path,
-        env: dict[str, str],
-        check: bool,
-    ) -> SimpleNamespace:
-        captured["args"] = args
-        captured["cwd"] = cwd
-        captured["env"] = env
-        captured["check"] = check
-        return SimpleNamespace(returncode=0)
-
-    monkeypatch.setattr(update_cli.subprocess, "run", _run)
-
-    assert update_cli._maybe_reexec_checkout_update() == 0
-
-    assert captured["cwd"] == Path("/repo")
-    assert captured["args"] == [
-        "/bin/nix",
-        "run",
-        "path:/snapshot#nixcfg",
-        "--",
-        "update",
-        "demo",
-    ]
-    assert captured["check"] is False
-    assert cast("dict[str, str]", captured["env"])[update_cli._REEXEC_ENV] == "1"
-    assert cast("dict[str, str]", captured["env"])["REPO_ROOT"] == "/repo"
-
-    monkeypatch.setattr(update_cli, "_maybe_reexec_checkout_update", lambda: 42)
-    assert update_cli.run_update_command() == 42
-
-
 def test_superconductor_branch_edges(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Cover Superconductor's current-source guard and transient retries."""
     from lib.tests._updater_helpers import load_repo_module
-    from lib.update.updaters import VersionInfo
 
     superconductor = load_repo_module(
         "packages/superconductor/updater.py",
         "superconductor_updater_branch_more",
     )
-    assert (
-        asyncio.run(
-            superconductor.SuperconductorUpdater()._is_latest(
-                UpdateContext(current=None), VersionInfo("x")
-            )
-        )
-        is False
-    )
+    assert superconductor.SuperconductorUpdater.always_rehash
 
 
 def test_nixcfg_command_tree_ignores_non_group_nodes() -> None:

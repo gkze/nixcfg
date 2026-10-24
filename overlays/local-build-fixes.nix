@@ -1,4 +1,4 @@
-{ prev, ... }:
+{ final, prev, ... }:
 {
   czkawka =
     if prev.stdenv.hostPlatform.isDarwin then
@@ -15,7 +15,7 @@
       let
         extraSkip = "--skip=shell::environment::env::path_is_a_list_in_repl";
       in
-      prev.lib.replaceStrings
+      final.replaceStringsExact
         [ "--skip=repl::test_config_path::test_default_config_path" ]
         [ "${extraSkip} --skip=repl::test_config_path::test_default_config_path" ]
         old.checkPhase;

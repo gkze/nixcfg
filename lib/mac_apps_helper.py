@@ -7,6 +7,15 @@ therefore import only the standard library and ``packaging`` -- never ``lib.*``,
 which is not on that interpreter's path. ``_as_object_dict`` is deliberately
 kept in step with ``lib.json_utils.as_object_dict`` for that reason: dedup by
 importing the shared helper would pass the test suite and then fail activation.
+
+System applications are staged in a transaction directory on the target
+filesystem. Live bundles change only by rename after every install stages, and
+the ownership manifest is published only after current and stale promotions.
+A target-wide lock serializes managers, while a durable journal records the
+previous manifest and every rename. Activation recovers recognized incomplete
+transactions under that lock; unrelated legacy transaction directories remain
+untouched. Any failure before the publication commit point restores both apps
+and manifest, and incomplete rollback retains artifacts with recovery guidance.
 """
 
 import json
@@ -23,6 +32,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Never, ReadOnly, TypedDict, TypeIs
 
 from packaging.version import InvalidVersion, Version
+
+# flock is provided by macOS's standard library; the shipped helper still has
+# no third-party runtime dependency beyond packaging.
+fcntl = __import__("fcntl")
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -41,6 +54,13 @@ SPOTLIGHT_REFRESH_MAX_TIMEOUT_SECONDS = 60.0
 SPOTLIGHT_COMMAND_TIMEOUT_SECONDS = 2.0
 SPOTLIGHT_VERIFY_INTERVAL_SECONDS = 0.5
 SPOTLIGHT_PLIST_ERRORS = (OSError, plistlib.InvalidFileException)
+APPLICATION_LOCK_NAME = ".nixcfg-app-activation.lock"
+APPLICATION_TRANSACTION_PREFIX = ".nixcfg-app-activation-"
+APPLICATION_JOURNAL_NAME = "journal.json"
+APPLICATION_JOURNAL_VERSION = 1
+MAX_FILE_MODE = 0o7777
+APPLICATION_ACTIVE_PHASES = {"prepared", "publishing"}
+APPLICATION_FINISHED_PHASES = {"committed", "recovered"}
 
 
 class _ProfileBundleLeakAuditPayload(TypedDict):
@@ -70,6 +90,119 @@ class _SystemApplicationsPayload(TypedDict):
     writable: ReadOnly[bool]
 
 
+class _ApplicationChange:
+    """One journaled rename pair, including stale removal with no replacement."""
+
+    __slots__ = (
+        "backup",
+        "original_exists",
+        "original_mode",
+        "original_moved",
+        "replacement",
+        "replacement_mode",
+        "replacement_moved",
+        "target",
+    )
+
+    def __init__(
+        self,
+        *,
+        target: Path,
+        backup: Path,
+        replacement: Path | None,
+    ) -> None:
+        self.target = target
+        self.backup = backup
+        self.replacement = replacement
+        self.original_exists = _path_exists(target)
+        self.original_mode = _directory_mode(target)
+        self.replacement_mode = (
+            _directory_mode(replacement) if replacement is not None else None
+        )
+        self.original_moved = False
+        self.replacement_moved = False
+
+    @classmethod
+    def from_journal(cls, payload: Mapping[str, object]) -> _ApplicationChange:
+        """Rehydrate recorded state without inspecting the interrupted live paths."""
+        change = cls.__new__(cls)
+        change.target = Path(_journal_string(payload, "target"))
+        change.backup = Path(_journal_string(payload, "backup"))
+        replacement = payload.get("replacement")
+        if replacement is not None and not isinstance(replacement, str):
+            msg = "journal field 'replacement' must be a string or null"
+            raise TypeError(msg)
+        change.replacement = Path(replacement) if replacement is not None else None
+        change.original_exists = _journal_bool(payload, "originalExists")
+        change.original_mode = _journal_mode(payload, "originalMode")
+        change.replacement_mode = _journal_mode(payload, "replacementMode")
+        change.original_moved = _journal_bool(payload, "originalMoved")
+        change.replacement_moved = _journal_bool(payload, "replacementMoved")
+        return change
+
+    def journal_payload(self) -> dict[str, object]:
+        return {
+            "target": str(self.target),
+            "backup": str(self.backup),
+            "replacement": (
+                str(self.replacement) if self.replacement is not None else None
+            ),
+            "originalExists": self.original_exists,
+            "originalMode": self.original_mode,
+            "replacementMode": self.replacement_mode,
+            "originalMoved": self.original_moved,
+            "replacementMoved": self.replacement_moved,
+        }
+
+
+class _ApplicationTransaction:
+    """The single durable app transaction owned by one target directory."""
+
+    __slots__ = (
+        "changes",
+        "directory",
+        "phase",
+        "previous_manifest_exists",
+        "state_file",
+        "target_directory",
+    )
+
+    def __init__(
+        self,
+        *,
+        directory: Path,
+        target_directory: Path,
+        state_file: Path,
+        previous_manifest_exists: bool,
+        changes: Sequence[_ApplicationChange],
+        phase: str = "prepared",
+    ) -> None:
+        self.directory = directory
+        self.target_directory = target_directory
+        self.state_file = state_file
+        self.previous_manifest_exists = previous_manifest_exists
+        self.changes = list(changes)
+        self.phase = phase
+
+    @property
+    def journal_path(self) -> Path:
+        return self.directory / APPLICATION_JOURNAL_NAME
+
+    @property
+    def previous_manifest_path(self) -> Path:
+        return self.directory / "previous-manifest"
+
+    def journal_payload(self) -> dict[str, object]:
+        return {
+            "version": APPLICATION_JOURNAL_VERSION,
+            "phase": self.phase,
+            "targetDirectory": str(self.target_directory),
+            "stateFile": str(self.state_file),
+            "previousManifestExists": self.previous_manifest_exists,
+            "changes": [change.journal_payload() for change in self.changes],
+        }
+
+
 type _BundleVersionMetadata = tuple[str | None, str | None, str | None]
 
 
@@ -82,26 +215,50 @@ def _write_managed_app_manifest(
     bundle_names: Sequence[str],
 ) -> None:
     """Atomically replace one manager's complete app-ownership manifest."""
+    contents = "".join(f"{bundle_name}\n" for bundle_name in bundle_names)
+    _atomic_write_bytes(state_file, contents.encode("utf-8"))
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _atomic_write_bytes(path: Path, contents: bytes) -> None:
+    """Durably replace one file without exposing partial contents."""
     temporary_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=state_file.parent,
-            prefix=f".{state_file.name}.",
+            mode="wb",
+            dir=path.parent,
+            prefix=f".{path.name}.",
             suffix=".tmp",
             delete=False,
         ) as temporary:
             temporary_path = Path(temporary.name)
             os.fchmod(temporary.fileno(), 0o644)
-            temporary.write("".join(f"{bundle_name}\n" for bundle_name in bundle_names))
+            temporary.write(contents)
             temporary.flush()
             os.fsync(temporary.fileno())
-        temporary_path.replace(state_file)
+        temporary_path.replace(path)
         temporary_path = None
+        _fsync_directory(path.parent)
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
+
+
+def _write_application_journal(transaction: _ApplicationTransaction) -> None:
+    """Atomically record a transaction phase or completed rename."""
+    contents = json.dumps(
+        transaction.journal_payload(),
+        indent=2,
+        sort_keys=True,
+    ).encode("utf-8")
+    _atomic_write_bytes(transaction.journal_path, contents + b"\n")
 
 
 def _payload_error(message: str) -> Never:
@@ -231,6 +388,12 @@ def _path_exists(path: Path) -> bool:
     return os.path.lexists(path)
 
 
+def _directory_mode(path: Path | None) -> int | None:
+    if path is None or path.is_symlink() or not path.is_dir():
+        return None
+    return stat.S_IMODE(path.stat().st_mode)
+
+
 def _remove_path(path: Path) -> None:
     if not _path_exists(path):
         return
@@ -302,12 +465,136 @@ def _app_in_other_manifests(
     return False
 
 
+def _journal_object(value: object, *, context: str) -> dict[str, object]:
+    return _as_object_dict(value, context=context)
+
+
+def _journal_string(payload: Mapping[str, object], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str):
+        msg = f"journal field {key!r} must be a string"
+        raise TypeError(msg)
+    return value
+
+
+def _journal_bool(payload: Mapping[str, object], key: str) -> bool:
+    value = payload.get(key)
+    if not isinstance(value, bool):
+        msg = f"journal field {key!r} must be a boolean"
+        raise TypeError(msg)
+    return value
+
+
+def _journal_mode(payload: Mapping[str, object], key: str) -> int | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        msg = f"journal field {key!r} must be a file mode or null"
+        raise TypeError(msg)
+    if not 0 <= value <= MAX_FILE_MODE:
+        msg = f"journal field {key!r} is outside the file-mode range"
+        raise ValueError(msg)
+    return value
+
+
+def _load_application_transaction(
+    transaction_directory: Path,
+    target_directory: Path,
+) -> _ApplicationTransaction:
+    """Read and validate one journal before using any of its paths."""
+    journal_path = transaction_directory / APPLICATION_JOURNAL_NAME
+    payload = _journal_object(
+        json.loads(journal_path.read_text(encoding="utf-8")),
+        context=str(journal_path),
+    )
+    version = payload.get("version")
+    if isinstance(version, bool) or version != APPLICATION_JOURNAL_VERSION:
+        msg = f"unsupported application journal version: {version!r}"
+        raise ValueError(msg)
+    recorded_target = Path(_journal_string(payload, "targetDirectory"))
+    if recorded_target != target_directory:
+        msg = f"journal target {recorded_target} does not match {target_directory}"
+        raise ValueError(msg)
+    state_file = Path(_journal_string(payload, "stateFile"))
+    if (
+        not state_file.is_absolute()
+        or state_file.suffix != ".txt"
+        or state_file.is_relative_to(transaction_directory)
+    ):
+        msg = f"journal has an unsafe state file path: {state_file}"
+        raise ValueError(msg)
+    phase = _journal_string(payload, "phase")
+    if phase not in APPLICATION_ACTIVE_PHASES | APPLICATION_FINISHED_PHASES:
+        msg = f"unknown application transaction phase: {phase!r}"
+        raise ValueError(msg)
+    raw_changes = payload.get("changes")
+    if not isinstance(raw_changes, list):
+        msg = "journal field 'changes' must be a list"
+        raise TypeError(msg)
+
+    changes: list[_ApplicationChange] = []
+    targets: set[Path] = set()
+    for index, raw_change in enumerate(raw_changes):
+        change = _ApplicationChange.from_journal(
+            _journal_object(raw_change, context=f"journal changes[{index}]")
+        )
+        if (
+            change.target.parent != target_directory
+            or change.target.name in {"", ".", ".."}
+            or change.target in targets
+        ):
+            msg = f"journal has an unsafe or duplicate app target: {change.target}"
+            raise ValueError(msg)
+        expected_backup = (
+            transaction_directory / "backups" / str(index) / change.target.name
+        )
+        expected_replacement = (
+            transaction_directory / "staged" / str(index) / change.target.name
+        )
+        if change.backup != expected_backup or (
+            change.replacement is not None
+            and change.replacement != expected_replacement
+        ):
+            msg = f"journal has unsafe artifact paths for {change.target}"
+            raise ValueError(msg)
+        targets.add(change.target)
+        changes.append(change)
+
+    return _ApplicationTransaction(
+        directory=transaction_directory,
+        target_directory=target_directory,
+        state_file=state_file,
+        previous_manifest_exists=_journal_bool(payload, "previousManifestExists"),
+        changes=changes,
+        phase=phase,
+    )
+
+
+def _acquire_application_lock(target_directory: Path) -> int:
+    """Hold the stable target-wide lock until the caller closes its descriptor."""
+    descriptor = os.open(
+        target_directory / APPLICATION_LOCK_NAME,
+        os.O_RDWR | os.O_CREAT,
+        0o600,
+    )
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+    except BaseException:
+        os.close(descriptor)
+        raise
+    return descriptor
+
+
 def _rsync_copy(src: Path, dst: Path, *, rsync_path: str, writable: bool) -> None:
     rsync_flags = [
         "--checksum",
         "--copy-unsafe-links",
         "--archive",
         "--delete",
+        # Finder stores a bundle's custom icon in Icon\r and marks the directory
+        # separately. Deleting only the resource leaves a generic folder icon.
+        "--filter=P /Icon\r",
         "--chmod=+w" if writable else "--chmod=-w",
         "--no-group",
         "--no-owner",
@@ -725,6 +1012,8 @@ def _install_managed_app(
     target_directory: Path,
     rsync_path: str,
     writable: bool,
+    announce: bool = True,
+    register: bool = True,
 ) -> None:
     _ensure_single_path_component(bundle_name, field="bundleName")
     src = Path(source_path)
@@ -734,13 +1023,15 @@ def _install_managed_app(
         _print_stderr(f"Expected macOS app bundle at {src}")
         raise SystemExit(1)
 
-    _print_stderr(f"setting up {dst}...")
+    if announce:
+        _print_stderr(f"setting up {dst}...")
 
     if mode == "symlink":
         if _path_exists(dst):
             _remove_path(dst)
         dst.symlink_to(src)
-        _refresh_launch_services_registration(dst)
+        if register:
+            _refresh_launch_services_registration(dst)
         return
 
     if dst.is_symlink() or (_path_exists(dst) and not dst.is_dir()):
@@ -748,7 +1039,8 @@ def _install_managed_app(
 
     dst.mkdir(parents=True, exist_ok=True)
     _rsync_copy(src, dst, rsync_path=rsync_path, writable=writable)
-    _refresh_launch_services_registration(dst)
+    if register:
+        _refresh_launch_services_registration(dst)
 
 
 def _profile_bundle_leak_audit(payload: Mapping[str, object]) -> None:
@@ -806,69 +1098,441 @@ def _remove_profile_copies(payload: Mapping[str, object]) -> None:
         _remove_path(target_path)
 
 
+def _stage_managed_apps(
+    entries: Sequence[_SystemApplicationEntryPayload],
+    *,
+    staging_directory: Path,
+    target_directory: Path,
+    rsync_path: str,
+    writable: bool,
+) -> None:
+    """Stage every app without changing a live bundle or registering a temp path."""
+    if not entries:
+        return
+
+    with ThreadPoolExecutor(
+        max_workers=min(len(entries), MAX_INSTALL_WORKERS)
+    ) as executor:
+        futures = []
+        for index, entry in enumerate(entries):
+            bundle_name = entry["bundleName"]
+            staged_parent = staging_directory / str(index)
+            staged_parent.mkdir(parents=True)
+            _print_stderr(f"setting up {target_directory / bundle_name}...")
+            futures.append(
+                executor.submit(
+                    _install_managed_app,
+                    bundle_name=bundle_name,
+                    mode=entry["mode"],
+                    source_path=entry["sourcePath"],
+                    target_directory=staged_parent,
+                    rsync_path=rsync_path,
+                    writable=writable,
+                    announce=False,
+                    register=False,
+                )
+            )
+        for future in as_completed(futures):
+            future.result()
+
+
+def _make_directory_renameable(path: Path) -> int | None:
+    """Temporarily add user-write permission to a bundle root for macOS rename."""
+    if path.is_symlink() or not path.is_dir():
+        return None
+    mode = stat.S_IMODE(path.stat().st_mode)
+    if mode & stat.S_IWUSR:
+        return None
+    path.chmod(mode | stat.S_IWUSR)
+    return mode
+
+
+def _apply_application_change(
+    change: _ApplicationChange,
+    transaction: _ApplicationTransaction,
+) -> None:
+    """Apply one rename pair, durably recording each completed rename."""
+    if change.original_exists != _path_exists(change.target):
+        msg = f"app changed after transaction preparation: {change.target}"
+        raise OSError(msg)
+
+    if change.original_exists:
+        change.backup.parent.mkdir(parents=True, exist_ok=True)
+        if change.original_mode is not None and not change.original_mode & stat.S_IWUSR:
+            change.target.chmod(change.original_mode | stat.S_IWUSR)
+        change.target.replace(change.backup)
+        change.original_moved = True
+        _write_application_journal(transaction)
+
+    if change.replacement is not None:
+        if not _path_exists(change.replacement):
+            msg = f"staged app disappeared before promotion: {change.replacement}"
+            raise OSError(msg)
+        if (
+            change.replacement_mode is not None
+            and not change.replacement_mode & stat.S_IWUSR
+        ):
+            change.replacement.chmod(change.replacement_mode | stat.S_IWUSR)
+        change.replacement.replace(change.target)
+        change.replacement_moved = True
+        if change.replacement_mode is not None:
+            change.target.chmod(change.replacement_mode)
+        _write_application_journal(transaction)
+
+
+def _restore_replacement_to_staging(
+    change: _ApplicationChange,
+    replacement: Path,
+) -> None:
+    """Move a promoted replacement out of the live target before restoring backup."""
+    _make_directory_renameable(change.target)
+    change.target.replace(replacement)
+    if change.replacement_mode is not None:
+        replacement.chmod(change.replacement_mode)
+
+
+def _restore_application_change(change: _ApplicationChange) -> None:
+    """Infer the interrupted position from artifacts and restore the old target.
+
+    A crash can happen after a rename but before its journal update. The recorded
+    flags alone therefore cannot identify the state; the backup, replacement,
+    and target existence pattern can, including a partially completed rollback.
+    """
+    target_exists = _path_exists(change.target)
+    backup_exists = _path_exists(change.backup)
+    replacement = change.replacement
+
+    if replacement is None:
+        if not change.original_exists:
+            if backup_exists:
+                msg = f"unexpected backup for originally absent app {change.target}"
+                raise OSError(msg)
+            return
+        if backup_exists:
+            if target_exists:
+                msg = f"both target and backup exist for stale app {change.target}"
+                raise OSError(msg)
+            change.backup.replace(change.target)
+        elif not target_exists:
+            msg = f"stale app and its backup are both missing: {change.target}"
+            raise OSError(msg)
+        if change.original_mode is not None:
+            change.target.chmod(change.original_mode)
+        return
+
+    replacement_exists = _path_exists(replacement)
+    if not change.original_exists:
+        if backup_exists:
+            msg = f"unexpected backup for originally absent app {change.target}"
+            raise OSError(msg)
+        if replacement_exists:
+            if target_exists:
+                msg = f"unrecorded target appeared beside staged app {change.target}"
+                raise OSError(msg)
+            return
+        if not target_exists:
+            msg = (
+                f"promoted app and its staged replacement are missing: {change.target}"
+            )
+            raise OSError(msg)
+        _restore_replacement_to_staging(change, replacement)
+        return
+
+    if backup_exists:
+        if replacement_exists:
+            if target_exists:
+                msg = f"target, backup, and staged app all exist for {change.target}"
+                raise OSError(msg)
+        else:
+            if not target_exists:
+                msg = f"all live and staged copies are incomplete for {change.target}"
+                raise OSError(msg)
+            _restore_replacement_to_staging(change, replacement)
+        change.backup.replace(change.target)
+    elif not replacement_exists or not target_exists:
+        msg = f"cannot locate original and staged copies for {change.target}"
+        raise OSError(msg)
+
+    if change.original_mode is not None:
+        change.target.chmod(change.original_mode)
+
+
+def _rollback_application_changes(
+    changes: Sequence[_ApplicationChange],
+) -> list[str]:
+    """Restore prior paths in reverse order and retain artifacts after any failure."""
+    problems: list[str] = []
+    for change in reversed(changes):
+        try:
+            _restore_application_change(change)
+        except OSError as error:
+            problems.append(f"could not restore {change.target}: {error}")
+    return problems
+
+
+def _restore_application_manifest(transaction: _ApplicationTransaction) -> None:
+    """Restore exact prior manifest bytes, or its prior absence, atomically."""
+    if transaction.previous_manifest_exists:
+        _atomic_write_bytes(
+            transaction.state_file,
+            transaction.previous_manifest_path.read_bytes(),
+        )
+        return
+    if _path_exists(transaction.state_file):
+        transaction.state_file.unlink()
+    _fsync_directory(transaction.state_file.parent)
+
+
+def _rollback_application_transaction(
+    transaction: _ApplicationTransaction,
+) -> list[str]:
+    """Roll back apps and manifest, reporting every failed restoration."""
+    problems = _rollback_application_changes(transaction.changes)
+    try:
+        _restore_application_manifest(transaction)
+    except OSError as error:
+        problems.append(f"could not restore manifest {transaction.state_file}: {error}")
+    return problems
+
+
+def _cleanup_application_transaction(transaction_directory: Path) -> None:
+    """Remove artifacts without masking an outcome; explicitly retain them on error."""
+    try:
+        _make_tree_user_writable(transaction_directory)
+        _remove_path(transaction_directory)
+    except OSError as error:
+        _print_stderr(
+            f"warning: could not remove application transaction "
+            f"{transaction_directory}: {error}; transaction artifacts remain there."
+        )
+
+
+def _recovery_guidance(transaction_directory: Path, detail: str) -> str:
+    return (
+        f"cannot safely recover application transaction {transaction_directory}: "
+        f"{detail}. Activation did not start a new transaction. Inspect "
+        f"{transaction_directory / APPLICATION_JOURNAL_NAME} and its artifacts, "
+        "restore the recorded app bundles and ownership manifest manually, then "
+        "remove only that transaction directory after verification and rerun "
+        "activation."
+    )
+
+
+def _recover_application_transactions(target_directory: Path) -> None:
+    """Reconcile recognized transactions; preserve unknown legacy directories."""
+    candidates = sorted(target_directory.glob(f"{APPLICATION_TRANSACTION_PREFIX}*"))
+    for transaction_directory in candidates:
+        if transaction_directory.is_symlink() or not transaction_directory.is_dir():
+            continue
+        journal_path = transaction_directory / APPLICATION_JOURNAL_NAME
+        if not _path_exists(journal_path):
+            continue
+        try:
+            transaction = _load_application_transaction(
+                transaction_directory,
+                target_directory,
+            )
+        except (OSError, TypeError, UnicodeError, ValueError) as error:
+            raise RuntimeError(
+                _recovery_guidance(transaction_directory, str(error))
+            ) from error
+
+        if transaction.phase in APPLICATION_FINISHED_PHASES:
+            _cleanup_application_transaction(transaction_directory)
+            continue
+
+        problems = _rollback_application_transaction(transaction)
+        if problems:
+            raise RuntimeError(
+                _recovery_guidance(transaction_directory, "; ".join(problems))
+            )
+        transaction.phase = "recovered"
+        try:
+            _write_application_journal(transaction)
+        except OSError as error:
+            raise RuntimeError(
+                _recovery_guidance(
+                    transaction_directory,
+                    f"could not record completed recovery: {error}",
+                )
+            ) from error
+        _cleanup_application_transaction(transaction_directory)
+
+
+def _report_incomplete_rollback(
+    error: BaseException,
+    *,
+    problems: Sequence[str],
+    transaction_directory: Path,
+    state_file: Path,
+) -> None:
+    _print_stderr(
+        f"application activation failed ({type(error).__name__}: {error}) and "
+        f"rollback is incomplete; live applications may differ from {state_file}."
+    )
+    for problem in problems:
+        _print_stderr(f"rollback error: {problem}")
+    _print_stderr(
+        f"transaction artifacts were retained at {transaction_directory}; "
+        "reconcile the reported paths and manifest manually, or fix the reported "
+        "error so the next activation can retry recovery under the target lock."
+    )
+
+
+def _reconcile_managed_apps(
+    entries: Sequence[_SystemApplicationEntryPayload],
+    *,
+    stale_apps: Sequence[str],
+    state_file: Path,
+    target_directory: Path,
+    rsync_path: str,
+    writable: bool,
+) -> None:
+    """Stage, promote, publish ownership, and clean up as one app transaction."""
+    current_apps = [entry["bundleName"] for entry in entries]
+    previous_manifest = state_file.read_bytes() if _path_exists(state_file) else None
+    transaction_directory = Path(
+        tempfile.mkdtemp(prefix=APPLICATION_TRANSACTION_PREFIX, dir=target_directory)
+    )
+    staging_directory = transaction_directory / "staged"
+    backup_directory = transaction_directory / "backups"
+    transaction: _ApplicationTransaction | None = None
+    try:
+        _stage_managed_apps(
+            entries,
+            staging_directory=staging_directory,
+            target_directory=target_directory,
+            rsync_path=rsync_path,
+            writable=writable,
+        )
+
+        changes: list[_ApplicationChange] = []
+        for index, entry in enumerate(entries):
+            bundle_name = entry["bundleName"]
+            changes.append(
+                _ApplicationChange(
+                    target=target_directory / bundle_name,
+                    backup=backup_directory / str(index) / bundle_name,
+                    replacement=staging_directory / str(index) / bundle_name,
+                )
+            )
+        for stale_index, managed_app in enumerate(stale_apps, start=len(entries)):
+            changes.append(
+                _ApplicationChange(
+                    target=target_directory / managed_app,
+                    backup=backup_directory / str(stale_index) / managed_app,
+                    replacement=None,
+                )
+            )
+
+        transaction = _ApplicationTransaction(
+            directory=transaction_directory,
+            target_directory=target_directory,
+            state_file=state_file,
+            previous_manifest_exists=previous_manifest is not None,
+            changes=changes,
+        )
+        if previous_manifest is not None:
+            _atomic_write_bytes(
+                transaction.previous_manifest_path,
+                previous_manifest,
+            )
+        _write_application_journal(transaction)
+
+        for change in changes:
+            if change.replacement is None:
+                _print_stderr(f"removing stale managed app {change.target}...")
+            _apply_application_change(change, transaction)
+
+        transaction.phase = "publishing"
+        _write_application_journal(transaction)
+        _write_managed_app_manifest(state_file, current_apps)
+    except BaseException as error:
+        if transaction is None:
+            _cleanup_application_transaction(transaction_directory)
+            raise
+        rollback_problems = _rollback_application_transaction(transaction)
+        if not rollback_problems:
+            transaction.phase = "recovered"
+            try:
+                _write_application_journal(transaction)
+            except (OSError, KeyboardInterrupt) as journal_error:
+                rollback_problems.append(
+                    f"could not record completed rollback: {journal_error}"
+                )
+        if rollback_problems:
+            _report_incomplete_rollback(
+                error,
+                problems=rollback_problems,
+                transaction_directory=transaction_directory,
+                state_file=state_file,
+            )
+        else:
+            _cleanup_application_transaction(transaction_directory)
+        raise
+
+    # Successful return from the manifest writer is the commit point. Cleanup,
+    # commit recording, and metadata failures must never roll back live apps.
+    transaction.phase = "committed"
+    _write_application_journal(transaction)
+    _cleanup_application_transaction(transaction_directory)
+
+    for entry in entries:
+        _refresh_launch_services_registration(target_directory / entry["bundleName"])
+    _refresh_spotlight_metadata([
+        target_directory / entry["bundleName"] for entry in entries
+    ])
+
+
 def _system_applications(payload: Mapping[str, object]) -> None:
     parsed = _system_applications_payload(payload)
     entries = parsed["entries"]
     state_name = parsed["stateName"]
-    target_directory = Path(parsed["targetDirectory"])
-    state_directory = Path(parsed["stateDirectory"])
+    target_directory = Path(parsed["targetDirectory"]).absolute()
+    state_directory = Path(parsed["stateDirectory"]).absolute()
     _ensure_single_path_component(state_name, field="stateName")
     for entry in entries:
         _ensure_single_path_component(entry["bundleName"], field="entries.bundleName")
 
     state_file = state_directory / f"{state_name}.txt"
-    current_apps = [entry["bundleName"] for entry in entries]
-    current_app_set = set(current_apps)
+    current_app_set = {entry["bundleName"] for entry in entries}
     rsync_path = parsed["rsyncPath"]
     writable = parsed["writable"]
 
-    _preflight_managed_apps(entries, target_directory)
-
     target_directory.mkdir(parents=True, exist_ok=True)
-    state_directory.mkdir(parents=True, exist_ok=True)
-    if state_file.is_file():
-        state_file.chmod(0o644)
+    lock_descriptor = _acquire_application_lock(target_directory)
+    try:
+        _recover_application_transactions(target_directory)
+        _preflight_managed_apps(entries, target_directory)
 
-    for managed_app in _read_manifest(state_file):
-        if not managed_app or managed_app in current_app_set:
-            continue
-        _ensure_single_path_component(managed_app, field="manifest entry")
+        state_directory.mkdir(parents=True, exist_ok=True)
+        if state_file.is_file():
+            state_file.chmod(0o644)
 
-        target_path = target_directory / managed_app
-        if _app_in_other_manifests(managed_app, state_directory, state_file):
-            _print_stderr(
-                f"keeping {target_path} because another manifest still manages it..."
-            )
-            continue
+        stale_apps: list[str] = []
+        for managed_app in _read_manifest(state_file):
+            if not managed_app or managed_app in current_app_set:
+                continue
+            _ensure_single_path_component(managed_app, field="manifest entry")
 
-        _print_stderr(f"removing stale managed app {target_path}...")
-        _make_tree_user_writable(target_path)
-        _remove_path(target_path)
-
-    if entries:
-        with ThreadPoolExecutor(
-            max_workers=min(len(entries), MAX_INSTALL_WORKERS)
-        ) as executor:
-            futures = [
-                executor.submit(
-                    _install_managed_app,
-                    bundle_name=entry["bundleName"],
-                    mode=entry["mode"],
-                    source_path=entry["sourcePath"],
-                    target_directory=target_directory,
-                    rsync_path=rsync_path,
-                    writable=writable,
+            target_path = target_directory / managed_app
+            if _app_in_other_manifests(managed_app, state_directory, state_file):
+                _print_stderr(
+                    f"keeping {target_path} because another manifest still manages it..."
                 )
-                for entry in entries
-            ]
-            for future in as_completed(futures):
-                future.result()
+                continue
+            stale_apps.append(managed_app)
 
-    _write_managed_app_manifest(state_file, current_apps)
-
-    _refresh_spotlight_metadata([
-        target_directory / entry["bundleName"] for entry in entries
-    ])
+        _reconcile_managed_apps(
+            entries,
+            stale_apps=stale_apps,
+            state_file=state_file,
+            target_directory=target_directory,
+            rsync_path=rsync_path,
+            writable=writable,
+        )
+    finally:
+        os.close(lock_descriptor)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -892,5 +1556,5 @@ def main(argv: list[str] | None = None) -> int:
     return 2
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover -- standalone module entry point
     raise SystemExit(main())

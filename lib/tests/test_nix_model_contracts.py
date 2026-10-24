@@ -220,6 +220,64 @@ def test_runtime_content_addresses_reject_invalid_wire_hashes(value: str) -> Non
             model.model_validate({"method": "nar", "hash": value})
 
 
+def test_store_hashes_and_content_address_keep_ergonomic_shapes() -> None:
+    """Wire validation must not turn public strings and dicts into model objects."""
+    content_address = {"method": "nar", "hash": _HASH}
+    store = StoreObjectInfo(narHash=_HASH, narSize=1, ca=content_address)
+    assert store.nar_hash == _HASH
+    assert store.ca == content_address
+    assert isinstance(store.ca, dict)
+    assert StoreObjectInfo(narHash=_HASH, narSize=1, ca=None).ca is None
+
+    nar = NarInfo(
+        narHash=_HASH,
+        narSize=1,
+        url="https://cache.example/object.nar.xz",
+        compression="xz",
+        downloadHash=_HASH,
+        downloadSize=1,
+    )
+    assert nar.download_hash == _HASH
+    assert nar.ca is None
+
+
+@pytest.mark.parametrize(
+    "content_address",
+    [
+        {"method": "unknown", "hash": _HASH},
+        {"method": "nar", "hash": "not-an-sri"},
+        {"method": "nar", "hash": _HASH, "unexpected": "field"},
+    ],
+)
+def test_store_content_address_rejects_nested_malformed_values(
+    content_address: dict[str, str],
+) -> None:
+    """Nested method, hash, and additional-property constraints stay enforced."""
+    with pytest.raises(ValidationError):
+        StoreObjectInfo(narHash=_HASH, narSize=1, ca=content_address)
+
+
+@pytest.mark.parametrize(
+    ("model", "field"),
+    [(StoreObjectInfo, "narHash"), (NarInfo, "downloadHash")],
+)
+def test_store_hash_fields_reject_malformed_sri(
+    model: type[BaseModel], field: str
+) -> None:
+    """Both standalone hash fields reuse the Nix SRI constraint."""
+    values: dict[str, object] = {
+        "narHash": _HASH,
+        "narSize": 1,
+        "url": "https://cache.example/object.nar.xz",
+        "compression": "xz",
+        "downloadHash": _HASH,
+        "downloadSize": 1,
+        field: "malformed",
+    }
+    with pytest.raises(ValidationError):
+        model.model_validate(values)
+
+
 def test_derivation_compatibility_defaults_and_unknown_fields_are_preserved() -> None:
     model = Derivation.model_validate({
         "name": "example",

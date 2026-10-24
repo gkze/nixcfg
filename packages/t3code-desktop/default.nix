@@ -5,6 +5,7 @@
   inputs,
   lib,
   makeWrapper,
+  mkMacAppPassthru,
   nixcfgElectron,
   nodejs,
   outputs,
@@ -475,11 +476,7 @@ stdenv.mkDerivation {
       updateRuntimeLocks
       ;
 
-    macApp = {
-      bundleName = appBundleName;
-      bundleRelPath = "Applications/${appBundleName}";
-      installMode = "copy";
-    };
+    inherit (mkMacAppPassthru { bundleName = appBundleName; }) macApp;
   };
 
   meta = with lib; {

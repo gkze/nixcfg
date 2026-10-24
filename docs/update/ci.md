@@ -16,26 +16,53 @@ exercise run cancels an older in-progress run, so a newer HEAD can start.
 
 ## Pipeline shape
 
-The pipeline has four phases: prepare, validate, certify, and publish.
+The pipeline has four phases: prepare, validate, certify, and publish. The
+diagram follows the `needs:` graph in `.github/workflows/update.yml`.
 
 ```mermaid
 flowchart TD
-  Trigger[Weekly schedule, manual dispatch, or kick file] --> P1[Prepare: macOS ARM64]
-  P1 --> P2[Prepare: Linux ARM64]
-  P2 --> P3[Prepare: Linux x86_64]
-  P3 --> PKG[Validate Darwin packages]
-  P3 --> L1[Validate Linux ARM64]
-  P3 --> L2[Validate Linux x86_64]
-  L1 --> SH[Darwin root-closure shards]
-  L2 --> SH
-  PKG --> CERT[Certify all platforms]
-  SH --> CERT
-  CERT --> COMMIT[Signed commit]
-  COMMIT --> PR[Pull request and squash merge]
+  Trigger[Schedule, dispatch, or push to main] --> PINS[prepare-pins: Linux x86_64]
+  PINS --> PD[prepare-darwin]
+  PINS --> PA[prepare-arm]
+  PINS --> PX[prepare-x86]
+  PD --> MERGE[prepare-merge: merge-candidates]
+  PA --> MERGE
+  PX --> MERGE
+  MERGE --> VA[validate-arm]
+  MERGE --> VX[validate-x86]
+  MERGE --> PLAN[plan-darwin-closures]
+  MERGE --> FODS[canary-darwin-fods]
+  PLAN --> RUST[validate-darwin-warm-rust: 5 slots]
+  FODS --> RUST
+  PLAN --> CR[canary-warm-rust]
+  FODS --> CR
+  CR --> CC[canary-warm-cascade]
+  RUST --> CASCADE[validate-darwin-cascade-warmup: 5 slots]
+  CC --> CASCADE
+  RUST --> DEPS[cache-darwin-linux-deps-arm and -x86]
+  CASCADE --> PKG[validate-darwin-packages]
+  CASCADE --> ROOTS[validate-darwin-roots: planned shards]
+  DEPS --> ROOTS
+  ROOTS --> CLOS[validate-darwin-closures]
+  DEPS --> CLOS
+  VA --> PUB[publish: coverage, certify, signed PR]
+  VX --> PUB
+  PKG --> PUB
+  CLOS --> PUB
+  PUB -->|any job failed| REPAIR[repair: read-only agent]
+  REPAIR --> START[start-repair: commit and dispatch]
 ```
 
-Preparation must finish before validation starts. Both Linux validators must
-finish before the Darwin root-closure shards start.
+`publish` also needs `prepare-merge`, `plan-darwin-closures`, both warmups,
+and `validate-darwin-roots`. `repair` needs every job above it, so it can
+collect each failure. `canary-slots` reads `.github/update-kick` on a push or
+the canary inputs on a dispatch. A canary dispatch runs the prepare/merge and
+plan producers followed by the requested canary jobs; full validation and
+publish stay skipped, so a green canary always has real current artifacts.
+
+The workflow runs weekly on Monday at 07:17 UTC. A push to `main` that changes
+`.github/update-kick` or `lib/update/**` also starts it, so a pipeline fix can
+start Update without a kick-file bump.
 
 ## Execution and ownership
 
@@ -43,21 +70,22 @@ Three stages own the work: preparation, validation, and certification.
 
 ### Preparation
 
-Preparation runs on macOS ARM64, then Linux ARM64, then Linux x86_64. Each
-stage extends one candidate. Each stage keeps the release metadata and native
-hashes that earlier stages selected.
-
-Preparation runs sequentially because updaters can share generated files.
-Dependent updaters recompute metadata from their pinned prerequisites.
+`prepare-pins` refreshes flake references and versions on Linux x86_64 and
+keeps the existing hashes. A version bump without its hashes is not a legal
+persist. The three native `prepare` jobs then compute their native hashes in
+parallel from that pinned candidate. `prepare-merge` combines the three
+results into one candidate. Each native job keeps the release metadata that
+`prepare-pins` selected.
 
 ### Validation
 
 Validation builds the final identical tree on all three native builders. The
-two Linux validators and Darwin package validation run in parallel after
-preparation. Darwin root-closure shards start only after both Linux validators
-finish, so the Linux VM image already exists in `gkze`. Package evidence and
-closure evidence are separate reports. Certification requires both gates for
-every system.
+two Linux validators run after `prepare-merge`. On Darwin, the rust and
+cascade warmups fill `gkze` before the package and root jobs start, so the
+five hosted macOS runners substitute shared outputs. The
+`cache-darwin-linux-deps-*` jobs recache the Linux builder image that the
+Darwin roots embed. Package evidence and closure evidence are separate
+reports. Certification requires both gates for every system.
 
 One hosted macOS job cannot realize `checks.aarch64-darwin.root-closures`
 inside the 360-minute job cap. That build is therefore a chain of shards. Each
@@ -102,14 +130,22 @@ Certification requires that every required platform reported success for that
 exact Git tree. Certification applies the certified patch and runs repository
 hooks and the full Python/coverage gates. It checks that validation did not
 alter the candidate. CI creates the signed update commit and PR only after
-those checks pass.
+those checks pass. Publish and repair quality export the pinned nixpkgs path
+from the runtime action and set `NIXCFG_REQUIRE_NIX_EVAL=true`. Marked Nix
+semantic tests therefore cannot silently skip in those required gates; local
+runs without Nix retain an explicit runtime skip instead.
 
-Publication always opens that PR against the default branch from
-`origin/<default>` with the certified tree as one commit. Publication then
-squash-merges that PR. `--auto` queues the merge when required checks are still
-pending. When GitHub reports the PR is already clean, publication squash-merges
-it immediately. This rule includes runs dispatched from a feature or repair
-ref. Exercise runs therefore never merge into the branch under review.
+Publication refuses a default branch whose tree is no longer the certified
+baseline. A later run prepares again from the new base. Normal publication opens
+its PR from `origin/<default>` with the certified tree as one commit. A repair
+follow-up instead checks the default branch against the parent tree of
+`repair_commit`, keeps the approved repair branch as its PR head, and adds a
+commit only when the follow-up changes that tree; a no-op still publishes the
+approved repair. In both cases a later base change fails the same exact-tree
+guard. Publication then squash-merges the PR. `--auto` queues the merge when
+required checks are still pending. When GitHub reports the PR is already clean,
+publication squash-merges it immediately. Feature exercise runs still target the
+default branch rather than merging into the branch under review.
 
 ### Component ownership
 
@@ -135,16 +171,22 @@ independent overrides.
 
 Prefetches append store paths to an invocation-local JSONL receipt that stays
 with the job artifacts. Publication validates and deduplicates these paths
-without a scan of the runner's store.
+without a scan of the runner's store. The Cachix flush proof separates trusted
+write validation from fork pull requests: trusted events require the unique
+path and post-failure flush proof, while fork jobs only run `nix store ping`
+against `gkze` with no Cachix secret. The aggregate `proof` check requires the
+appropriate branch's success and never uses `pull_request_target`.
 
-Every job that starts the daemon ends with `flush-cachix`. That step stops
-the daemon, then pushes and pins the job's recorded root receipts. Cachix's
-HTTP client has no response timeout. In run 40048292663 a stalled request
-froze the daemon's queue, so `cachix daemon stop` never returned, and the
-flush spent the job's last three hours. Flush therefore runs inside a
-40-minute budget, and the workflow step has a 45-minute timeout as a
-backstop. Each Cachix or Nix call in flush has its own timeout, and pushes
-retry with fresh connections.
+Every job that passes an explicit `cachix-token` input to `update-runtime`
+ends with `flush-cachix`; read-only `repair` and `start-repair` do not. That
+step stops the daemon, then pushes and pins the job's recorded root receipts.
+Cachix's HTTP client has no response timeout. In run 40048292663 a stalled
+request froze the daemon's queue, so `cachix daemon stop` never returned, and
+the flush spent the job's last three hours. Flush therefore runs inside a
+40-minute budget. `native` and `publish` use a 45-minute step timeout as a
+backstop; trusted proof flushes use 15 minutes. `fork-read-only` has no
+step-level override and remains within its 30-minute job cap. Each Cachix or
+Nix call in flush has its own timeout, and pushes retry with fresh connections.
 
 The daemon logs a queued path only when a worker starts it, so its log
 cannot name what a stuck queue dropped. When `daemon stop` fails or times
@@ -153,7 +195,8 @@ out, flush kills the daemon and pushes every path the runner built itself
 `gkze.cachix.org` or `cache.nixos.org`, the upstream that `cachix push`
 skips. Flush fails the job unless every one of those paths is served. The
 `cachix-flush-proof` workflow freezes the daemon with `SIGSTOP` to exercise
-this recovery path on every PR.
+this recovery path on same-repository pull requests and workflow dispatches;
+fork pull requests run only the read-only proof.
 
 ### Generator cache
 
@@ -200,6 +243,10 @@ history.
 CI carries a versioned JSON candidate with a binary Git patch, exact
 base/result tree identities, resolved metadata, and completed platforms.
 Neither SQLite nor a retained checkout is a CI persistence requirement.
+Warmup plans also carry their source `tree`. Zed plan restore accepts only an
+artifact whose tree exactly equals the checked-out `HEAD` tree; a stale or
+unbound legacy artifact is rejected, including one found through the default
+branch fallback.
 
 ## Credentials and runtime
 
@@ -245,13 +292,16 @@ The workflow uses these repository secrets:
 - `CACHIX_AUTH_TOKEN`: populate the `gkze` binary cache. The workflow also
   reads `zed`.
 - Job `GITHUB_TOKEN` on `publish` (`contents: write`, `pull-requests: write`):
-  push the update branch and open the PR. `start-repair` also needs
-  `actions: write` so `gh workflow run` can create the follow-up dispatch.
+  push the update branch and open the PR. The `start-repair` job has
+  `contents: write` and `actions: write` so it can push the repair branch and
+  `gh workflow run` can create the follow-up dispatch.
   `GH_TOKEN_FOR_UPDATES` has no use until it can authenticate `git push`.
 - `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE`: sign the update commit.
 
-The repair agent uses the short-lived Actions `GITHUB_TOKEN` with job-scoped
-`copilot-requests: write`, and explicitly selects `gpt-6-astra`. The repair
+The `repair` job runs the agent. Its short-lived Actions `GITHUB_TOKEN` has
+only `actions: read`, `contents: read`, and `copilot-requests: write`. That
+job receives no repository secret: Nix uses the same read token, and Cachix
+is read-only. The agent explicitly selects `gpt-6-astra`. The repair
 agent supplies no stored Copilot token, because a supplied
 `COPILOT_GITHUB_TOKEN` overrides the built-in token. See [GitHub Copilot CLI in
 Actions](https://docs.github.com/en/copilot/how-tos/copilot-cli/use-copilot-cli-in-actions).
@@ -261,10 +311,18 @@ with a single tool-free response before a real repair run. It shares the pinned
 CLI installer and also accepts a manual dispatch.
 
 Checkout never persists Git credentials. Write credentials go only to
-publication steps. The workflow needs no persistent-runner registration or
-state-root variables. Native package and root builds still require sufficient
-cache coverage and runner capacity. Tests of workflow wiring do not establish
-either.
+`publish` and `start-repair`, which run no agent. `start-repair` uses the
+`update-repair-approval` GitHub environment. A repository administrator must
+configure required reviewers for that environment in GitHub settings; the
+checked-in YAML selects the environment but cannot configure its protection.
+The repair artifact includes a tree and patch-digest receipt. After that
+approval, `start-repair` verifies the exact artifact and applied tree before
+signing, pushing, or dispatching. The follow-up uses the approved branch and
+pins every checkout to its `repair_commit`, so branch movement cannot change
+the reviewed executable tree. The workflow needs no persistent-runner
+registration or state-root variables. Native package and root
+builds still require sufficient cache coverage and runner capacity. Tests of
+workflow wiring do not establish either.
 
 ## Failure and retry
 
@@ -356,36 +414,46 @@ packaging under `packages/` and `overlays/`, plus `flake.nix`, `flake.lock`,
 and planner/selection coherence in `lib/update/planner.py` (with
 `lib/tests/test_update_planner.py`). CI rejects changes outside that scope. CI,
 acceptance-gate, and persistence changes are outside that scope. The agent
-receives no publication credentials.
+job receives no write credentials. It uploads the checked patch and its
+tree/digest receipt as the `repair` artifact. `start-repair` re-runs the path
+and check-skip policy on that patch (`nixcfg ci update check-repair`) and
+verifies the approved tree before it commits it. The follow-up dispatch uses
+the approved branch and pins checkouts to `repair_commit`, preserving the
+one-shot bound with `repair=false`.
 
 See the [packaging source modification policy](../source-modifications.md) for
 the rules that govern packaging changes.
 
 ### checkPhase exception
 
-The repair prompt encodes a narrow checkPhase exception. The agent can skip or
-disable **checkPhase only** when every condition holds:
+The repair prompt states the checkPhase rule from the
+[agent guide](../../AGENTS.md) verbatim. The agent may disable `checkPhase`
+only when all of the following are true:
 
-1. The failure is an upstream package's own tests (`checkPhase` / XCTest /
-   pytest / similar), not compile or link.
-1. The derivation build itself succeeded before checks.
-1. The failure is not in George's overlay, app, or home-manager module code.
-   CI allows wrapping an upstream project in `packages/`.
-1. Prefer `doCheck = false` (or equivalent) pinned to the version that fails,
-   with a short comment that cites the test and its signal.
-1. Document the skip so it is visible in the change.
+1. the failure is an upstream package's own tests (not compile/link)
+1. the derivation built before checks
+1. the failure is not in George's overlay/app/home-manager module code
+1. the skip is `doCheck = false` (or equivalent) pinned to the failing version
+   with a comment that cites the test and signal
+1. the skip is documented in the change
 
-CI still hard-fails on several classes. It never skips or waives Darwin for
-these classes. The classes are SIGBUS, hosted runner lost communication, store
-`ValidationIncomplete` (infra fault, retry), compile/link failures, and
-failures in George's own overlay/app/home-manager module code. CI also does not
-waive Darwin validation entirely.
+Never skip SIGBUS, runner-lost-communication, store `ValidationIncomplete`,
+compile/link failures, George's own overlay/app/module code, or Darwin
+validation itself.
+
+`repair.reject_unsafe_skips` checks the diff with the Nix and Python syntax
+trees. It rejects an added `doCheck`, `dontCheck`, or `checkFlags` `--skip`
+unless the whole binding disables checks only at one package-owned literal
+version with binding-specific polarity and an adjacent comment. Relocated and
+duplicate occurrences are checked again. It also rejects a new
+`bulk_update_hold`. Conditions 1, 2, and 5 still depend on the prompt and
+review.
 
 ### Repair validation flow
 
 Repair runs on the Darwin runner and uses the repository hooks and the
-Python/coverage gates there. Those gates must pass before CI commits the repair
-to a separate branch. A fresh Update run then prepares and validates it on
+Python/coverage gates there. Those gates must pass before `start-repair`
+commits the repair to a separate branch. A fresh Update run then prepares and validates it on
 every native builder. That run has repair disabled, so failures cannot create
 an unbounded retry loop.
 
@@ -432,9 +500,8 @@ Until the App has Actions write, the recommended path for cloud agents is a
 one-line timestamp bump to `.github/update-kick` on `main`. They open and merge
 that bump. That push queues one Update run with the same path filter. Kick-file
 pushes set `validate_all_packages` and enable the repair job, so they match
-EM's `repair=true` + `validate_all_packages=true` dispatches. The same file
-still kicks `copilot/gkzenixcfg-update-automation` when that WIP branch
-changes. Only one main Update runs at a time.
+EM's `repair=true` + `validate_all_packages=true` dispatches. Only one main
+Update runs at a time.
 
 Push events that touch `.github/update-kick` therefore enable repair. That path
 exists because some tokens cannot create `workflow_dispatch` events. A

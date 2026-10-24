@@ -1,8 +1,18 @@
 # System appearance
 
-macOS uses automatic appearance. An application with native system-theme
-support selects [Catppuccin](https://github.com/catppuccin/catppuccin) Latte for
-light mode and Frappé for dark mode, where the application offers those themes.
+The exported `darwinDefaults.appearance` option of `modules/darwin/base.nix`
+selects the macOS appearance. Its default, `"automatic"`, switches between Light
+and Dark by time of day. `"dark"` fixes Dark appearance.
+
+George's hosts set `darwinDefaults.appearance = "dark"` in the `georgeBase`
+profile of `darwin/george/profiles.nix`. This records his current preference.
+Set the option back to `"automatic"` to restore automatic switching.
+
+An application with native system-theme support selects
+[Catppuccin](https://github.com/catppuccin/catppuccin) Latte for light mode and
+Frappé for dark mode, where the application offers those themes. With the
+appearance fixed to Dark, these applications and the bridge below stay on
+Frappé.
 
 Read [architecture.md](architecture.md) for the Home Manager module layers.
 
@@ -11,8 +21,9 @@ Read [architecture.md](architecture.md) for the Home Manager module layers.
 `home/george/appearance.nix` bridges terminal tools that have no native
 paired-theme setting. It uses the `dark-mode-notify` launch agent. The agent
 initializes on login and updates files in `$XDG_STATE_HOME/nixcfg/appearance` on
-macOS appearance events. The bridge replaces a file atomically and leaves an
-unchanged file alone.
+macOS appearance events. With Dark fixed, the login run selects Frappé, and only
+a manual appearance change triggers another update. The bridge replaces a file
+atomically and leaves an unchanged file alone.
 
 | Tool      | Mechanism                                                              |
 | --------- | ---------------------------------------------------------------------- |
@@ -41,7 +52,8 @@ not write an unsupported `system` value to its light or dark theme preference.
 
 Validation on 2026-09-26 covered actual macOS Light and Dark events, the runtime
 files, Git's effective palette, and ptpython's real `DynamicStyle`. macOS Auto
-was restored afterwards.
+was restored afterwards. The hosts have since been fixed to Dark, as described
+above, so that validation predates the current setting.
 
 That validation was an appearance-only live apply. It was not a full nix-darwin
 activation. The Element config default changed, but app control timed out during

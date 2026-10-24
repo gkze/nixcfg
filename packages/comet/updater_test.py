@@ -30,9 +30,13 @@ class _FakeResponse:
     status: int = 307
     reason: str = "Temporary Redirect"
     headers: dict[str, str] = field(default_factory=dict)
+    url: str = "https://www.perplexity.ai/rest/browser/download"
 
     async def __aenter__(self) -> _FakeResponse:
         return self
+
+    async def read(self) -> bytes:
+        return b""
 
     async def __aexit__(self, *_args: object) -> None:
         return None
@@ -104,7 +108,7 @@ def test_comet_rejects_untrusted_or_malformed_artifact_redirects(
     [
         (
             _FakeResponse(status=200, reason="OK"),
-            "Expected Comet download redirect",
+            "Expected a redirect",
         ),
         (_FakeResponse(), "did not include Location"),
     ],

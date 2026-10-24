@@ -156,8 +156,8 @@ each purge is diagnostic only.
 - Do not pin every rust\_\* (thousands of pins, still churns on the next
   crate bump). Pin the four Darwin roots and the linux-builder image.
 - Do not `workflow_dispatch` or `gh run cancel` from the Cursor GitHub
-  App token (403). Kick remains a `lib/update/**` push, and these
-  speed-up branches are **not** `cursor/no-skip-darwin-shards-6614`.
+  App token (403). Kick remains a `lib/update/**` or
+  `.github/update-kick` push to `main`.
 - Do not buy `macos-15-xlarge`. Do not drop the combined closures proof.
 - Do not remove canaries. Do not overlap cascade canary with the cascade
   5-wide stripe (duplicate buzz compile / 6 macos vs a 5 pool).

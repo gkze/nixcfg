@@ -19,6 +19,7 @@ _EXPECTED_MULTI_EXCEPT_HANDLERS = (
     (("OSError", "configparser.Error"), None),
     (("RuntimeError", "ValueError"), "exc"),
     (("OSError", "ValueError"), "exc"),
+    (("OSError", "sqlite3.Error"), "exc"),
     (("FileNotFoundError", "subprocess.SubprocessError", "OSError"), "exc"),
     (("OSError", "urllib.error.URLError", "ZenFoldersError"), None),
     (("OSError", "urllib.error.URLError", "ZenFoldersError"), None),

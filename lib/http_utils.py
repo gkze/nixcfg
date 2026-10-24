@@ -170,12 +170,13 @@ def raise_status_error(status: int, detail: str) -> None:
     raise NonRetryableStatusError(status, detail)
 
 
-def _validate_request_target(
+def validate_request_target(
     url: str,
     *,
     allowed_schemes: frozenset[str],
     attempts: int,
 ) -> None:
+    """Validate a URL before sending a retrying HTTP request."""
     parsed = urlsplit(url)
     if parsed.scheme not in allowed_schemes or not parsed.netloc:
         schemes = "/".join(sorted(allowed_schemes))
@@ -189,18 +190,37 @@ def _validate_request_target(
         raise RuntimeError(msg)
 
 
-def validate_request_target(
-    url: str,
-    *,
-    allowed_schemes: frozenset[str],
-    attempts: int,
+def _validate_redirect_chain(
+    response: httpx.Response, *, allowed_schemes: frozenset[str]
 ) -> None:
-    """Validate a URL before sending a retrying HTTP request."""
-    _validate_request_target(
-        url,
-        allowed_schemes=allowed_schemes,
-        attempts=attempts,
+    """Reject a followed redirect that left the allowed URL schemes."""
+    for hop in (*response.history, response):
+        validate_request_target(
+            str(hop.url), allowed_schemes=allowed_schemes, attempts=1
+        )
+
+
+_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+_REDIRECT_LIMIT_MESSAGE = "Exceeded maximum allowed redirects."
+
+
+def _next_redirect_request(
+    response: httpx.Response, *, allowed_schemes: frozenset[str]
+) -> httpx.Request | None:
+    """Build and validate the next httpx request without sending it."""
+    if (
+        response.status_code not in _REDIRECT_STATUSES
+        or "Location" not in response.headers
+    ):
+        return None
+    next_request = response.next_request
+    if next_request is None:
+        msg = "Redirect response did not include a next request"
+        raise RuntimeError(msg)
+    validate_request_target(
+        str(next_request.url), allowed_schemes=allowed_schemes, attempts=1
     )
+    return next_request
 
 
 def _retry_wait(
@@ -263,7 +283,7 @@ def fetch_url_bytes(
     timeout: float = 30.0,
 ) -> tuple[bytes, dict[str, str]]:
     """Fetch ``url`` and return response bytes plus response headers."""
-    _validate_request_target(url, allowed_schemes=allowed_schemes, attempts=attempts)
+    validate_request_target(url, allowed_schemes=allowed_schemes, attempts=attempts)
 
     all_headers = dict(headers or {})
     attempt_count = 0
@@ -278,20 +298,50 @@ def fetch_url_bytes(
     )
 
     try:
-        with httpx.Client(follow_redirects=True, timeout=timeout) as client:
+        with httpx.Client(follow_redirects=False, timeout=timeout) as client:
             for attempt in retryer:
                 with attempt:
                     attempt_count += 1
-                    response = client.request(method, url, headers=all_headers)
-                    payload = response.content
-                    if response.status_code < HTTP_BAD_REQUEST:
-                        return payload, dict(response.headers)
-                    detail = format_http_error(
-                        response.status_code,
-                        response.reason_phrase,
-                        payload,
-                    )
-                    raise_status_error(response.status_code, detail)
+                    redirect_request: httpx.Request | None = None
+                    history: list[httpx.Response] = []
+                    redirect_count = 0
+                    while True:
+                        if redirect_request is None:
+                            response = client.request(
+                                method,
+                                url,
+                                headers=all_headers,
+                                follow_redirects=False,
+                            )
+                        else:
+                            response = client.send(
+                                redirect_request, follow_redirects=False
+                            )
+                        response.history = list(history)
+                        _validate_redirect_chain(
+                            response, allowed_schemes=allowed_schemes
+                        )
+                        next_request = _next_redirect_request(
+                            response, allowed_schemes=allowed_schemes
+                        )
+                        if next_request is None:
+                            payload = response.content
+                            if response.status_code < HTTP_BAD_REQUEST:
+                                return payload, dict(response.headers)
+                            detail = format_http_error(
+                                response.status_code,
+                                response.reason_phrase,
+                                payload,
+                            )
+                            raise_status_error(response.status_code, detail)
+                        redirect_count += 1
+                        if redirect_count > client.max_redirects:
+                            raise httpx.TooManyRedirects(
+                                _REDIRECT_LIMIT_MESSAGE,
+                                request=next_request,
+                            )
+                        history.append(response)
+                        redirect_request = next_request
     except (
         NonRetryableStatusError,
         RetryableStatusError,
@@ -318,7 +368,7 @@ async def fetch_url_bytes_async(
     client: httpx.AsyncClient | None = None,
 ) -> tuple[bytes, dict[str, str]]:
     """Fetch ``url`` asynchronously and return response bytes plus headers."""
-    _validate_request_target(url, allowed_schemes=allowed_schemes, attempts=attempts)
+    validate_request_target(url, allowed_schemes=allowed_schemes, attempts=attempts)
 
     all_headers = dict(headers or {})
     attempt_count = 0
@@ -337,22 +387,46 @@ async def fetch_url_bytes_async(
         async for attempt in retryer:
             with attempt:
                 attempt_count += 1
-                response = await async_client.request(
-                    method,
-                    url,
-                    headers=all_headers,
-                    cookies=cookies,
-                    timeout=request_timeout,
-                )
-                payload = response.content
-                if response.status_code < HTTP_BAD_REQUEST:
-                    return payload, dict(response.headers)
-                detail = format_http_error(
-                    response.status_code,
-                    response.reason_phrase,
-                    payload,
-                )
-                raise_status_error(response.status_code, detail)
+                redirect_request: httpx.Request | None = None
+                history: list[httpx.Response] = []
+                redirect_count = 0
+                while True:
+                    if redirect_request is None:
+                        response = await async_client.request(
+                            method,
+                            url,
+                            headers=all_headers,
+                            cookies=cookies,
+                            timeout=request_timeout,
+                            follow_redirects=False,
+                        )
+                    else:
+                        response = await async_client.send(
+                            redirect_request, follow_redirects=False
+                        )
+                    response.history = list(history)
+                    _validate_redirect_chain(response, allowed_schemes=allowed_schemes)
+                    next_request = _next_redirect_request(
+                        response, allowed_schemes=allowed_schemes
+                    )
+                    if next_request is None:
+                        payload = response.content
+                        if response.status_code < HTTP_BAD_REQUEST:
+                            return payload, dict(response.headers)
+                        detail = format_http_error(
+                            response.status_code,
+                            response.reason_phrase,
+                            payload,
+                        )
+                        raise_status_error(response.status_code, detail)
+                    redirect_count += 1
+                    if redirect_count > async_client.max_redirects:
+                        raise httpx.TooManyRedirects(
+                            _REDIRECT_LIMIT_MESSAGE,
+                            request=next_request,
+                        )
+                    history.append(response)
+                    redirect_request = next_request
         msg = f"Failed fetching {url}"
         raise RuntimeError(msg)
 
@@ -360,7 +434,7 @@ async def fetch_url_bytes_async(
         if client is not None:
             return await _run(client)
         async with httpx.AsyncClient(
-            follow_redirects=True,
+            follow_redirects=False,
             timeout=request_timeout,
         ) as async_client:
             return await _run(async_client)

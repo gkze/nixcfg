@@ -6,7 +6,6 @@ from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, Sourc
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import EventSink, ignore_event
 from lib.update.nix import (
-    _build_fetch_from_github_expr,
     _build_package_path_attr_expr,
 )
 from lib.update.updaters import (
@@ -40,24 +39,8 @@ class WriterComputerUpdater(GitHubReleaseUpdater):
             systems=("aarch64-darwin",),
         ),
     )
-
-    async def _is_latest(
-        self,
-        context: UpdateContext,
-        info: VersionInfo,
-    ) -> bool:
-        """Recompute source closures before accepting release metadata."""
-        _ = (context, info)
-        return False
-
-    @classmethod
-    def _src_expr(cls, commit: str) -> str:
-        return _build_fetch_from_github_expr(
-            cls.GITHUB_OWNER,
-            cls.GITHUB_REPO,
-            rev=commit,
-            fetch_submodules=False,
-        )
+    # Recompute source closures before accepting release metadata.
+    always_rehash = True
 
     def _source_override(
         self,

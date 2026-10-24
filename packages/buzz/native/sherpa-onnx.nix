@@ -174,6 +174,7 @@ base.overrideAttrs (old: {
     SHERPA_ONNXRUNTIME_LIB_DIR = "${lib.getLib onnxRuntime}/lib";
   };
 
+  # SHERPA_ONNX_ENABLE_TESTS is off above, so no test targets exist to run.
   doCheck = false;
   doInstallCheck = false;
   checkInputs = [ ];

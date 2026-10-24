@@ -1,7 +1,6 @@
 """Updater for Turso source and Cargo vendor hashes."""
 
 from lib.update.derivation_validation import DerivationValidation
-from lib.update.nix import _build_fetch_from_github_expr
 from lib.update.updaters import (
     GitHubReleaseUpdater,
     SourceThenOverlayHashMixin,
@@ -23,12 +22,3 @@ class TursoUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
             mode="build",
         ),
     )
-
-    @staticmethod
-    def _src_expr(commit: str) -> str:
-        return _build_fetch_from_github_expr(
-            "tursodatabase",
-            "turso",
-            rev=commit,
-            fetch_submodules=False,
-        )

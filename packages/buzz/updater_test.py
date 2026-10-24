@@ -14,7 +14,6 @@ from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.if_expression import IfExpression
 from nix_manipulator.expressions.parenthesis import Parenthesis
-from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
@@ -22,13 +21,15 @@ from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     binding_map,
-    darwin_guarded_exports,
     expect_binding,
     nix_attrset_call,
     parse_nix_expr,
 )
 from lib.tests._nix_source import nix_file_expr, nix_source_fragment_expr
-from lib.tests._package_registry import registry_override_metadata
+from lib.tests._package_registry import (
+    is_darwin_overlay_export,
+    registry_override_metadata,
+)
 from lib.tests._updater_helpers import (
     collect_events,
     install_fixed_hash_stream,
@@ -46,6 +47,7 @@ from lib.update.nix import (
     _build_fetch_from_github_call,
     _build_repo_package_attr_expr,
 )
+from lib.update.nix_expr import nix_str
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters import UpdateContext, VersionInfo
 
@@ -880,11 +882,20 @@ def test_buzz_audits_the_exact_release_source_topology(
         fetched_urls.append(url)
         return raw_payloads[url]
 
+    async def github_payload(
+        session: object,
+        path: str,
+        *,
+        config: object,
+    ) -> dict[str, str]:
+        if "/commits/" in path:
+            return await commit_payload(session, path, config=config)
+        return await release_payload(session, path, config=config)
+
     monkeypatch.setattr(
         "lib.update.updaters.github_release.fetch_github_api",
-        release_payload,
+        github_payload,
     )
-    monkeypatch.setattr(module, "fetch_github_api", commit_payload)
     monkeypatch.setattr(module, "fetch_url", raw_payload)
 
     assert run_async(
@@ -2137,12 +2148,6 @@ def test_buzz_contract_helpers_reject_malformed_or_incomplete_sources(
     payloads = _source_payloads()
     mesh_payloads = _mesh_source_payloads()
 
-    with pytest.raises(TypeError, match="not an object"):
-        module._require_object([], context="object")
-    with pytest.raises(TypeError, match="not a list"):
-        module._require_list({}, context="list")
-    with pytest.raises(TypeError, match="missing key"):
-        module._require_string({}, "key", context="mapping")
     with pytest.raises(RuntimeError, match="valid UTF-8 JSON"):
         module._decode_json(b"\xff", context="JSON")
     with pytest.raises(RuntimeError, match="valid UTF-8 TOML"):
@@ -2449,8 +2454,11 @@ def test_buzz_hashes_source_pnpm_and_both_cargo_locks_without_exporting(
         FunctionCall,
     )
     assert_nix_ast_equal(native_lock_expr.name, "builtins.fromJSON")
-    embedded_lock = expect_instance(native_lock_expr.argument, StringPrimitive)
-    assert json.loads(embedded_lock.value) == prospective_native_lock
+    canonical_lock = json.dumps(
+        prospective_native_lock, sort_keys=True, separators=(",", ":")
+    )
+    assert json.loads(canonical_lock) == prospective_native_lock
+    assert_nix_ast_equal(native_lock_expr.argument, nix_str(canonical_lock))
     package_args = {"nativeLock": native_lock_expr}
 
     fake_hash = updater.config.fake_hash
@@ -2585,7 +2593,7 @@ def test_buzz_hashes_source_pnpm_and_both_cargo_locks_without_exporting(
         },
     )
     assert updater.build_result(info, hashes) == expected_result
-    assert run_async(updater._is_latest(UpdateContext(current=None), info)) is False
+    assert updater.always_rehash
 
 
 def test_buzz_hashing_requires_a_discovered_artifact_directory(
@@ -2916,10 +2924,7 @@ def test_buzz_onnxruntime_slot_uses_the_url_scoped_promoted_hash() -> None:
     assert_nix_ast_equal(
         expect_binding(scope, "hashEntryFor").value,
         """hashType: url:
-          lib.findFirst
-            (entry: entry.hashType == hashType && (entry.url or null) == url)
-            null
-            source.hashes""",
+          outputs.lib.selectSourceHashEntry source.hashes hashType { inherit url; }""",
     )
     for binding, hash_type in (
         ("srcHashEntry", "srcHash"),
@@ -4155,15 +4160,11 @@ def test_buzz_enters_the_effective_arm64_darwin_app_graph() -> None:
         packageMaterialization.packageFunctionsForSystem resolvedSystem""",
     )
 
-    overlay = expect_instance(
-        nix_file_expr("overlays/binary-darwin-apps.nix"),
-        FunctionDefinition,
+    registry = expect_instance(
+        nix_file_expr("packages/registry.nix"), FunctionDefinition
     )
-    # The exports are the argument of the Darwin-only guard.
-    overlay_exports = darwin_guarded_exports(overlay)
-    assert_nix_ast_equal(
-        expect_binding(overlay_exports.values, "buzz").value,
-        'callDarwinAppPackage "buzz"',
+    assert is_darwin_overlay_export(
+        expect_instance(registry.output, AttributeSet), "buzz"
     )
 
     routing = expect_instance(

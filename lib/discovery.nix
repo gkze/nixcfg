@@ -78,35 +78,49 @@
         name: entries.${name} == "directory" && builtins.pathExists (root + "/${name}/default.nix")
       ) entryNames;
 
-      fileEntries =
-        builtins.filter
-          (entry: !(builtins.elem entry.stem dirNames) && includeFile entry.fileName entry.stem)
+      includedFileEntries = builtins.filter (entry: includeFile entry.fileName entry.stem) (
+        builtins.map
+          (fileName: {
+            inherit fileName;
+            stem = stripNixSuffix fileName;
+          })
           (
-            builtins.map
-              (fileName: {
-                inherit fileName;
-                stem = stripNixSuffix fileName;
-              })
-              (
-                builtins.filter (
-                  fileName:
-                  entries.${fileName} == "regular"
-                  && builtins.match ".*\\.nix" fileName != null
-                  && !(builtins.elem fileName excludeFiles)
-                ) entryNames
-              )
+            builtins.filter (
+              fileName:
+              entries.${fileName} == "regular"
+              && builtins.match ".*\\.nix" fileName != null
+              && !(builtins.elem fileName excludeFiles)
+            ) entryNames
+          )
+      );
+
+      entryNameCollisions = builtins.map (entry: entry.stem) (
+        builtins.filter (entry: builtins.elem entry.stem dirNames) includedFileEntries
+      );
+      collisionGuard =
+        if entryNameCollisions == [ ] then
+          null
+        else
+          throw (
+            "Duplicate default.nix entries under "
+            + toString root
+            + ": "
+            + builtins.concatStringsSep ", " entryNameCollisions
           );
 
+      fileEntries = builtins.filter (entry: !(builtins.elem entry.stem dirNames)) includedFileEntries;
       fileNames = builtins.map (entry: entry.stem) fileEntries;
     in
     {
-      inherit
-        dirNames
-        fileEntries
-        fileNames
-        ;
-      names = dirNames ++ fileNames;
-      pathFor = name: if builtins.elem name dirNames then root + "/${name}" else root + "/${name}.nix";
+      dirNames = builtins.seq collisionGuard dirNames;
+      fileEntries = builtins.seq collisionGuard fileEntries;
+      fileNames = builtins.seq collisionGuard fileNames;
+      names = builtins.seq collisionGuard (dirNames ++ fileNames);
+      pathFor =
+        name:
+        builtins.seq collisionGuard (
+          if builtins.elem name dirNames then root + "/${name}" else root + "/${name}.nix"
+        );
     };
 
   discoverCompanionEntries =

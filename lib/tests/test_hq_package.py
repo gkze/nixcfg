@@ -19,15 +19,18 @@ from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.tests._assertions import expect_instance
+from lib.tests._mac_app_passthru import mac_app_passthru_args
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     binding_map,
-    darwin_guarded_exports,
     expect_binding,
     parse_nix_expr,
 )
 from lib.tests._nix_source import nix_file_expr, nix_source_fragment_expr
-from lib.tests._package_registry import registry_override_metadata
+from lib.tests._package_registry import (
+    is_darwin_overlay_export,
+    registry_override_metadata,
+)
 from lib.tests._shell_ast import (
     command_texts,
     indented_string_body,
@@ -1289,18 +1292,12 @@ def test_hq_package_is_an_unfree_nix_owned_signed_app() -> None:
         '"$app"',
     ]
 
-    passthru = expect_instance(
-        expect_binding(args.values, "passthru").value,
-        AttributeSet,
-    )
     assert_nix_ast_equal(
-        expect_binding(passthru.values, "macApp").value,
+        mac_app_passthru_args(expect_binding(args.values, "passthru").value),
         """
         {
-          bundleId = "ai.indigo.hq-sync-menubar";
           bundleName = "HQ.app";
-          bundleRelPath = "Applications/HQ.app";
-          installMode = "copy";
+          macApp.bundleId = "ai.indigo.hq-sync-menubar";
         }
         """,
     )
@@ -1322,16 +1319,11 @@ def test_hq_registry_exports_only_on_arm64_darwin() -> None:
 
 def test_hq_overlay_and_system_route_replace_the_unmanaged_app() -> None:
     """The completed package must own the existing system application path."""
-    overlay = expect_instance(
-        nix_file_expr("overlays/binary-darwin-apps.nix"),
-        FunctionDefinition,
+    registry = expect_instance(
+        nix_file_expr("packages/registry.nix"), FunctionDefinition
     )
-    # The fragment exports are the argument of the Darwin-only guard, so a
-    # non-Darwin system does not receive these attributes at all.
-    exports = darwin_guarded_exports(overlay)
-    assert_nix_ast_equal(
-        expect_binding(exports.values, "hq").value,
-        'callDarwinAppPackage "hq"',
+    assert is_darwin_overlay_export(
+        expect_instance(registry.output, AttributeSet), "hq"
     )
 
     routing = expect_instance(

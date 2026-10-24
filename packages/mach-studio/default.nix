@@ -4,6 +4,7 @@
   mkDmgApp,
   python3,
   selfSource,
+  signAndVerifyBundle,
   ...
 }:
 mkSimpleDarwinApp {
@@ -25,13 +26,15 @@ mkSimpleDarwinApp {
     } ${lib.getExe python3} ${./patch_updater.py} \
       "$app_bundle/Contents/Resources/app.asar" \
       "$app_bundle/Contents/Info.plist"
-    /usr/bin/codesign \
-      --force \
-      --deep \
-      --sign - \
-      --preserve-metadata=identifier,entitlements,flags,runtime \
-      "$app_bundle"
-    /usr/bin/codesign --verify --deep --strict "$app_bundle"
+    ${signAndVerifyBundle {
+      bundle = ''"$app_bundle"'';
+      preserveMetadata = [
+        "identifier"
+        "entitlements"
+        "flags"
+        "runtime"
+      ];
+    }}
   '';
   description = "Local AI workspace for running open models on Apple Silicon";
   homepage = "https://withsyzygy.com/product";

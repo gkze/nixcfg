@@ -33,6 +33,7 @@ from lib.tests._buzz_native_lock import (
     buzz_native_lock_string,
     render_buzz_native_lock_interpolations,
 )
+from lib.tests._mac_app_passthru import mac_app_passthru_args
 from lib.tests._macho import build_version, macho, string_command
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
@@ -605,6 +606,7 @@ def test_candidate_has_narrow_provenance_checked_interface() -> None:
         "desktopUnsigned",
         "lib",
         "meshRuntimeBundle",
+        "mkMacAppPassthru",
         "nativeLock",
         "patchedBuzzSource",
         "python3",
@@ -645,13 +647,11 @@ def test_candidate_has_narrow_provenance_checked_interface() -> None:
         "implementedContract",
     )
     assert_nix_ast_equal(
-        expect_binding(passthru.values, "macApp").value,
+        mac_app_passthru_args(passthru),
         """
         {
-          bundleId = "xyz.block.buzz.app";
           bundleName = "Buzz.app";
-          bundleRelPath = "Applications/Buzz.app";
-          installMode = "copy";
+          macApp.bundleId = "xyz.block.buzz.app";
         }
         """,
     )

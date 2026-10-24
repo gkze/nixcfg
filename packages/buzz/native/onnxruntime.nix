@@ -111,6 +111,7 @@ base.overrideAttrs (old: {
     (lib.cmakeFeature "PLATFORM_NAME" "macosx")
   ];
 
+  # onnxruntime_BUILD_UNIT_TESTS is off above, so no test targets exist.
   doCheck = false;
   doInstallCheck = false;
   checkInputs = [ ];

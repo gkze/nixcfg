@@ -5,9 +5,11 @@ import os
 import pickle
 import sys
 import types
+from collections.abc import AsyncGenerator
 
 import pytest
 
+from lib.nix.commands import base
 from lib.nix.commands.base import (
     CommandResult,
     HashMismatchError,
@@ -16,7 +18,6 @@ from lib.nix.commands.base import (
     ProcessLine,
     _merge_env,
     _raise_timeout,
-    _resolve_timeout_alias,
     run_nix,
     stream_nix,
     stream_process,
@@ -49,6 +50,24 @@ class _BlockingLineStream:
             self.cancelled = True
             raise
 
+    async def read(self, _size: int) -> bytes:
+        try:
+            await asyncio.Future()
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+
+
+class _FiniteStream:
+    def __init__(self, lines: list[bytes] | None = None) -> None:
+        self._lines = list(lines or [])
+
+    async def readline(self) -> bytes:
+        return self._lines.pop(0) if self._lines else b""
+
+    async def read(self, _size: int) -> bytes:
+        return b""
+
 
 class _LiveStreamProc:
     def __init__(self) -> None:
@@ -64,6 +83,18 @@ class _LiveStreamProc:
     async def wait(self) -> int:
         self.wait_count += 1
         self.returncode = -9
+        return self.returncode
+
+
+class _CompletedStreamProc(_LiveStreamProc):
+    def __init__(self) -> None:
+        super().__init__()
+        self.stdout = _FiniteStream([b"ready\n"])
+        self.stderr = _FiniteStream()
+
+    async def wait(self) -> int:
+        self.wait_count += 1
+        self.returncode = 0
         return self.returncode
 
 
@@ -177,27 +208,6 @@ def test_command_errors_preserve_diagnostics_through_pickle(
             error.drv_path,
         )
     assert str(restored) == str(error)
-
-
-def test_resolve_timeout_alias_validates_kwargs() -> None:
-    """Run this test case."""
-    assert (
-        _resolve_timeout_alias(command_timeout=_THREE_SECONDS, kwargs={})
-        == _THREE_SECONDS
-    )
-    with pytest.raises(TypeError, match=r"Unexpected keyword argument\(s\): extra"):
-        _resolve_timeout_alias(command_timeout=_THREE_SECONDS, kwargs={"extra": True})
-
-    with pytest.raises(TypeError, match=r"Unexpected keyword argument\(s\): extra"):
-        _resolve_timeout_alias(
-            command_timeout=_THREE_SECONDS,
-            kwargs={"extra": True, "timeout": 1.0},
-        )
-
-    with pytest.raises(TypeError, match="timeout must be a number"):
-        _resolve_timeout_alias(
-            command_timeout=_THREE_SECONDS, kwargs={"timeout": "slow"}
-        )
 
 
 def test_hash_mismatch_parsing_and_properties() -> None:
@@ -317,7 +327,10 @@ def test_stream_process_success_events() -> None:
             "import sys; print('out-1'); sys.stderr.write('err-1\\n'); print('out-2')"
         )
         return [
-            event async for event in stream_process([PYTHON, "-c", script], timeout=5.0)
+            event
+            async for event in stream_process(
+                [PYTHON, "-c", script], command_timeout=5.0
+            )
         ]
 
     events = asyncio.run(_run())
@@ -349,7 +362,7 @@ def test_stream_process_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     async def _run() -> None:
-        async for _event in stream_process(["nix"], timeout=5.0):
+        async for _event in stream_process(["nix"], command_timeout=5.0):
             pass
 
     with pytest.raises(TimeoutError):
@@ -404,7 +417,7 @@ def test_stream_process_handles_missing_streams(
     )
 
     async def _collect() -> list[object]:
-        return [event async for event in stream_process(["nix"], timeout=1.0)]
+        return [event async for event in stream_process(["nix"], command_timeout=1.0)]
 
     events = asyncio.run(_collect())
     assert len(events) == 1
@@ -417,7 +430,7 @@ def test_stream_process_zero_timeout_uses_deadline_check() -> None:
     async def _run() -> None:
         async for _event in stream_process(
             [PYTHON, "-c", "import time; time.sleep(2)"],
-            timeout=0.0,
+            command_timeout=0.0,
         ):
             pass
 
@@ -427,7 +440,7 @@ def test_stream_process_zero_timeout_uses_deadline_check() -> None:
 
 def test_run_nix_success_and_capture_modes() -> None:
     """Run this test case."""
-    result = asyncio.run(run_nix([PYTHON, "-c", "print('ok')"], timeout=5.0))
+    result = asyncio.run(run_nix([PYTHON, "-c", "print('ok')"], command_timeout=5.0))
     assert result.returncode == 0
     assert result.stdout.strip() == "ok"
 
@@ -435,7 +448,7 @@ def test_run_nix_success_and_capture_modes() -> None:
         run_nix(
             [PYTHON, "-c", "print('ok')"],
             capture=False,
-            timeout=5.0,
+            command_timeout=5.0,
         )
     )
     assert no_capture.returncode == 0
@@ -445,11 +458,13 @@ def test_run_nix_success_and_capture_modes() -> None:
 def test_run_nix_nonzero_paths() -> None:
     """Run this test case."""
     script = "import sys; sys.stderr.write('boom\\n'); sys.exit(3)"
-    result = asyncio.run(run_nix([PYTHON, "-c", script], check=False, timeout=5.0))
+    result = asyncio.run(
+        run_nix([PYTHON, "-c", script], check=False, command_timeout=5.0)
+    )
     assert result.returncode == _EXIT_STATUS_THREE
 
     with pytest.raises(NixCommandError):
-        asyncio.run(run_nix([PYTHON, "-c", script], timeout=5.0))
+        asyncio.run(run_nix([PYTHON, "-c", script], command_timeout=5.0))
 
 
 def test_run_nix_hash_mismatch_error() -> None:
@@ -462,7 +477,7 @@ def test_run_nix_hash_mismatch_error() -> None:
         "sys.exit(1)"
     )
     with pytest.raises(HashMismatchError):
-        asyncio.run(run_nix([PYTHON, "-c", script], timeout=5.0))
+        asyncio.run(run_nix([PYTHON, "-c", script], command_timeout=5.0))
 
 
 def test_run_nix_timeout_raises_command_error(
@@ -486,7 +501,7 @@ def test_run_nix_timeout_raises_command_error(
     )
 
     with pytest.raises(NixCommandError, match="timed out"):
-        asyncio.run(run_nix(["nix"], timeout=5.0))
+        asyncio.run(run_nix(["nix"], command_timeout=5.0))
 
     assert proc.killed
 
@@ -495,7 +510,7 @@ def test_stream_nix_success_and_error_paths() -> None:
     """Run this test case."""
 
     async def _collect(cmd: list[str], timeout_s: float = 5.0) -> list[str]:
-        return [line async for line in stream_nix(cmd, timeout=timeout_s)]
+        return [line async for line in stream_nix(cmd, command_timeout=timeout_s)]
 
     lines = asyncio.run(_collect([PYTHON, "-c", "print('a'); print('b')"]))
     assert lines == ["a", "b"]
@@ -540,12 +555,276 @@ def test_stream_nix_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     async def _run() -> list[str]:
-        return [line async for line in stream_nix(["nix"], timeout=5.0)]
+        return [line async for line in stream_nix(["nix"], command_timeout=5.0)]
 
     with pytest.raises(NixCommandError, match="timed out"):
         asyncio.run(_run())
 
     assert proc.killed
+
+
+def _install_live_stream_nix(
+    monkeypatch: pytest.MonkeyPatch, proc: _LiveStreamProc
+) -> None:
+    async def _create_stream_process(*_args: object, **_kwargs: object):
+        return proc, proc.stdout, proc.stderr
+
+    monkeypatch.setattr(base, "_create_stream_process", _create_stream_process)
+
+
+def _install_live_stream_process(
+    monkeypatch: pytest.MonkeyPatch, proc: _LiveStreamProc
+) -> None:
+    async def _create_subprocess_exec(
+        *_args: object, **_kwargs: object
+    ) -> _LiveStreamProc:
+        return proc
+
+    monkeypatch.setattr(base.asyncio, "create_subprocess_exec", _create_subprocess_exec)
+
+
+def _install_failing_stream_cleanup(monkeypatch: pytest.MonkeyPatch) -> None:
+    stop = base._stop_stream_process
+
+    async def _fail_cleanup(process: object, tasks: list[asyncio.Task[None]]) -> None:
+        await stop(process, tasks)
+        raise RuntimeError("cleanup failed")
+
+    monkeypatch.setattr(base, "_stop_stream_process", _fail_cleanup)
+
+
+def _install_blocking_stream_cleanup(
+    monkeypatch: pytest.MonkeyPatch, *, cleanup_failure: bool
+) -> tuple[asyncio.Event, asyncio.Event]:
+    cleanup_started = asyncio.Event()
+    finish_cleanup = asyncio.Event()
+    stop = base._stop_stream_process
+
+    async def _block_cleanup(process: object, tasks: list[asyncio.Task[None]]) -> None:
+        cleanup_started.set()
+        await finish_cleanup.wait()
+        await stop(process, tasks)
+        if cleanup_failure:
+            raise RuntimeError("cleanup failed")
+
+    monkeypatch.setattr(base, "_stop_stream_process", _block_cleanup)
+    return cleanup_started, finish_cleanup
+
+
+async def _assert_cancellation_during_close(
+    stream: AsyncGenerator[object],
+    *,
+    cleanup_started: asyncio.Event,
+    finish_cleanup: asyncio.Event,
+    cleanup_failure: bool,
+) -> None:
+    close_task = asyncio.create_task(stream.aclose())
+    await cleanup_started.wait()
+    close_task.cancel()
+    await asyncio.sleep(0)
+    assert not close_task.done()
+
+    finish_cleanup.set()
+    with pytest.raises(asyncio.CancelledError) as caught:
+        await close_task
+    if cleanup_failure:
+        assert any("cleanup failed" in note for note in caught.value.__notes__)
+
+
+def test_stream_nix_reaps_child_on_early_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Closing after a yielded line must synchronously stop and reap the child."""
+    proc = _LiveStreamProc()
+    _install_live_stream_nix(monkeypatch, proc)
+
+    async def _run() -> None:
+        stream = stream_nix(["nix", "build"], command_timeout=5.0)
+        assert await anext(stream) == "ready"
+        await stream.aclose()
+
+    asyncio.run(_run())
+    assert proc.killed
+    assert proc.wait_count == 1
+    assert proc.stderr.cancelled
+
+
+@pytest.mark.parametrize("cleanup_failure", [False, True])
+def test_stream_nix_close_defers_cancellation_until_cleanup_finishes(
+    monkeypatch: pytest.MonkeyPatch, *, cleanup_failure: bool
+) -> None:
+    """Closing cannot swallow cancellation or interrupt subprocess ownership."""
+    proc = _LiveStreamProc()
+    _install_live_stream_nix(monkeypatch, proc)
+    cleanup_started, finish_cleanup = _install_blocking_stream_cleanup(
+        monkeypatch, cleanup_failure=cleanup_failure
+    )
+
+    async def _run() -> None:
+        stream = stream_nix(["nix"], command_timeout=5.0)
+        assert await anext(stream) == "ready"
+        await _assert_cancellation_during_close(
+            stream,
+            cleanup_started=cleanup_started,
+            finish_cleanup=finish_cleanup,
+            cleanup_failure=cleanup_failure,
+        )
+
+    asyncio.run(_run())
+    assert proc.killed
+    assert proc.wait_count == 1
+    assert proc.stderr.cancelled
+
+
+def test_stream_nix_reaps_child_on_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancellation while awaiting stdout must not strand the child or stderr task."""
+    proc = _LiveStreamProc()
+    _install_live_stream_nix(monkeypatch, proc)
+
+    async def _run() -> None:
+        first_line_seen = asyncio.Event()
+
+        async def _consume() -> None:
+            async for line in stream_nix(["nix", "build"], command_timeout=5.0):
+                if line == "ready":
+                    first_line_seen.set()
+
+        task = asyncio.create_task(_consume())
+        await first_line_seen.wait()
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(_run())
+    assert proc.killed
+    assert proc.wait_count == 1
+    assert proc.stderr.cancelled
+
+
+def test_stream_nix_normal_completion_does_not_stop_reaped_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fully drained process is not killed a second time by generator teardown."""
+    proc = _CompletedStreamProc()
+    _install_live_stream_nix(monkeypatch, proc)
+
+    async def _run() -> list[str]:
+        return [line async for line in stream_nix(["nix"], command_timeout=5.0)]
+
+    assert asyncio.run(_run()) == ["ready"]
+    assert not proc.killed
+    assert proc.wait_count == 1
+
+
+def test_stream_nix_early_close_surfaces_cleanup_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An otherwise clean close must not hide a failed cleanup operation."""
+    proc = _LiveStreamProc()
+    _install_live_stream_nix(monkeypatch, proc)
+    _install_failing_stream_cleanup(monkeypatch)
+
+    async def _run() -> None:
+        stream = stream_nix(["nix"], command_timeout=5.0)
+        assert await anext(stream) == "ready"
+        await stream.aclose()
+
+    with pytest.raises(RuntimeError, match="cleanup failed"):
+        asyncio.run(_run())
+    assert proc.killed
+    assert proc.stderr.cancelled
+
+
+def test_stream_nix_preserves_primary_error_when_cleanup_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A timeout remains the causal error when its teardown also fails."""
+    proc = _LiveStreamProc()
+    _install_live_stream_nix(monkeypatch, proc)
+    monkeypatch.setattr(base, "_iter_timed_stdout_lines", _timed_out_stdout_lines)
+    _install_failing_stream_cleanup(monkeypatch)
+
+    async def _run() -> list[str]:
+        return [line async for line in stream_nix(["nix"], command_timeout=5.0)]
+
+    with pytest.raises(NixCommandError, match="timed out") as caught:
+        asyncio.run(_run())
+    assert any("cleanup failed" in note for note in caught.value.__notes__)
+    assert proc.killed
+    assert proc.stderr.cancelled
+
+
+def test_stream_nix_preserves_consumer_error_when_cleanup_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An exception thrown into the generator remains primary during teardown."""
+    proc = _LiveStreamProc()
+    _install_live_stream_nix(monkeypatch, proc)
+    _install_failing_stream_cleanup(monkeypatch)
+    primary_error = RuntimeError("consumer failed")
+
+    async def _run() -> None:
+        stream = stream_nix(["nix"], command_timeout=5.0)
+        assert await anext(stream) == "ready"
+        await stream.athrow(primary_error)
+
+    with pytest.raises(RuntimeError, match="consumer failed") as caught:
+        asyncio.run(_run())
+    assert caught.value is primary_error
+    assert any("cleanup failed" in note for note in caught.value.__notes__)
+    assert proc.killed
+    assert proc.stderr.cancelled
+
+
+def test_stream_process_preserves_timeout_when_cleanup_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stream timeout cannot be replaced by a subprocess teardown failure."""
+    proc = _TimeoutProc(stdout=_NeverEndingStream(), stderr=_NeverEndingStream())
+
+    async def _create_subprocess_exec(
+        *_args: object, **_kwargs: object
+    ) -> _TimeoutProc:
+        return proc
+
+    monkeypatch.setattr(base.asyncio, "create_subprocess_exec", _create_subprocess_exec)
+    monkeypatch.setattr(base.asyncio, "wait_for", _raise_timeout_immediately)
+    _install_failing_stream_cleanup(monkeypatch)
+
+    async def _run() -> None:
+        async for _event in stream_process(["nix"], command_timeout=5.0):
+            pass
+
+    with pytest.raises(TimeoutError) as caught:
+        asyncio.run(_run())
+    assert any("cleanup failed" in note for note in caught.value.__notes__)
+    assert proc.killed
+
+
+def test_stream_process_preserves_consumer_error_when_cleanup_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Consumer failures survive cleanup with the teardown error as diagnostic context."""
+    proc = _LiveStreamProc()
+    _install_live_stream_process(monkeypatch, proc)
+    _install_failing_stream_cleanup(monkeypatch)
+    primary_error = RuntimeError("consumer failed")
+
+    async def _run() -> None:
+        stream = stream_process(["nix"], command_timeout=5.0)
+        assert await anext(stream) == ProcessLine("stdout", "ready\n")
+        await stream.athrow(primary_error)
+
+    with pytest.raises(RuntimeError, match="consumer failed") as caught:
+        asyncio.run(_run())
+    assert caught.value is primary_error
+    assert any("cleanup failed" in note for note in caught.value.__notes__)
+    assert proc.killed
+    assert proc.stdout.cancelled
+    assert proc.stderr.cancelled
 
 
 def test_stream_nix_zero_timeout_uses_deadline_check() -> None:
@@ -556,7 +835,7 @@ def test_stream_nix_zero_timeout_uses_deadline_check() -> None:
             line
             async for line in stream_nix(
                 [PYTHON, "-c", "import time; time.sleep(2)"],
-                timeout=0.0,
+                command_timeout=0.0,
             )
         ]
 
@@ -581,13 +860,41 @@ def test_stream_process_reaps_child_when_generator_is_closed(
     )
 
     async def _run() -> None:
-        stream = stream_process(["nix", "build"], timeout=5.0)
+        stream = stream_process(["nix", "build"], command_timeout=5.0)
         assert await anext(stream) == ProcessLine("stdout", "ready\n")
         await stream.aclose()
         await stream.aclose()
 
     asyncio.run(_run())
 
+    assert proc.killed
+    assert proc.wait_count == 1
+    assert proc.stdout.cancelled
+    assert proc.stderr.cancelled
+
+
+@pytest.mark.parametrize("cleanup_failure", [False, True])
+def test_stream_process_close_defers_cancellation_until_cleanup_finishes(
+    monkeypatch: pytest.MonkeyPatch, *, cleanup_failure: bool
+) -> None:
+    """Event streaming and Nix streaming share close-cancellation semantics."""
+    proc = _LiveStreamProc()
+    _install_live_stream_process(monkeypatch, proc)
+    cleanup_started, finish_cleanup = _install_blocking_stream_cleanup(
+        monkeypatch, cleanup_failure=cleanup_failure
+    )
+
+    async def _run() -> None:
+        stream = stream_process(["nix"], command_timeout=5.0)
+        assert await anext(stream) == ProcessLine("stdout", "ready\n")
+        await _assert_cancellation_during_close(
+            stream,
+            cleanup_started=cleanup_started,
+            finish_cleanup=finish_cleanup,
+            cleanup_failure=cleanup_failure,
+        )
+
+    asyncio.run(_run())
     assert proc.killed
     assert proc.wait_count == 1
     assert proc.stdout.cancelled
@@ -614,7 +921,7 @@ def test_stream_process_reaps_child_when_consumer_is_cancelled(
         first_line_seen = asyncio.Event()
 
         async def _consume() -> None:
-            async for event in stream_process(["nix", "build"], timeout=5.0):
+            async for event in stream_process(["nix", "build"], command_timeout=5.0):
                 if event == ProcessLine("stdout", "ready\n"):
                     first_line_seen.set()
 
@@ -650,7 +957,7 @@ def test_stream_nix_raises_when_subprocess_streams_missing(
     )
 
     async def _run() -> list[str]:
-        return [line async for line in stream_nix(["nix"], timeout=5.0)]
+        return [line async for line in stream_nix(["nix"], command_timeout=5.0)]
 
     with pytest.raises(RuntimeError, match="Subprocess was not created"):
         asyncio.run(_run())

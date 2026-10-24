@@ -177,7 +177,7 @@ def _graph_node(source: Node) -> Node:
         None,
     )
     body = function.child_by_field_name("body") if function is not None else None
-    if body is None:
+    if body is None:  # pragma: no cover -- normalize() rejects non-function roots
         msg = "Expected GitButler Cargo.nix to have a function body"
         raise ValueError(msg)
     graph = _binding_node(body, "crates") or _binding_node(body, "internal.crates")

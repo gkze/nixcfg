@@ -2,7 +2,13 @@
 
 import pytest
 
-from lib.update.npm_semver import require_npm_version_matches_spec
+from lib.update.npm_semver import (
+    is_exact_semantic_version,
+    release_version_triplet,
+    require_exact_semantic_version,
+    require_npm_version_matches_spec,
+    same_semantic_version,
+)
 
 
 @pytest.mark.parametrize(
@@ -76,3 +82,53 @@ def test_prerelease_requires_an_explicit_compatible_prerelease_comparator() -> N
             ">=23 <25",
             context="Node",
         )
+
+
+@pytest.mark.parametrize("version", ["1.0.0+build.1", "1.0.0-rc.1+b.2", "1.2.3"])
+def test_exact_versions_keep_build_metadata(version: str) -> None:
+    """SemVer build metadata is part of an exact version, not a loose spelling."""
+    assert require_exact_semantic_version(version, context="Pin") == version
+
+
+@pytest.mark.parametrize(
+    "version",
+    ["1.x", "1", "x", "next", "canary", "v1.2.3", " 1.2.3", "1.0.0-01", "01.2.3"],
+)
+def test_ranges_tags_and_loose_spellings_are_not_exact(version: str) -> None:
+    """Reject ranges, dist-tags, and spellings nodesemver would normalize."""
+    assert is_exact_semantic_version(version) is False
+    with pytest.raises(RuntimeError, match="exact semantic version"):
+        require_exact_semantic_version(version, context="Pin")
+
+
+@pytest.mark.parametrize("version", ["1.2.3-rc.1", "1.2.3+build.1"])
+def test_release_only_rejects_prerelease_and_build(version: str) -> None:
+    """Release-only callers accept nothing beyond major.minor.patch."""
+    assert require_exact_semantic_version(version, context="Pin") == version
+    with pytest.raises(RuntimeError, match="without prerelease or build"):
+        require_exact_semantic_version(version, context="Pin", release_only=True)
+    with pytest.raises(RuntimeError, match="without prerelease or build"):
+        release_version_triplet(version, context="Pin")
+
+
+def test_release_version_triplet_returns_numeric_components() -> None:
+    """Expose the parsed components for numeric comparisons."""
+    assert release_version_triplet("0.15.12", context="Zig") == (0, 15, 12)
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "expected"),
+    [
+        ("1.2.3", "1.2.3", True),
+        ("1.2.3+a", "1.2.3", True),
+        ("1.2.3-rc.1", "1.2.3", False),
+        ("1.2.4", "1.2.3", False),
+        ("v1.2.3", "1.2.3", False),
+        ("1.2.3", "next", False),
+    ],
+)
+def test_same_semantic_version_compares_precedence(
+    left: str, right: str, expected: object
+) -> None:
+    """Compare parsed precedence; non-exact operands never compare equal."""
+    assert same_semantic_version(left, right) is expected

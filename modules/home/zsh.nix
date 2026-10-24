@@ -3,7 +3,6 @@
   lib,
   pkgs,
   slib,
-  system,
   ...
 }:
 let
@@ -67,7 +66,7 @@ in
     };
     cdpath = mkOption {
       type = types.listOf types.str;
-      default = [ (slib.srcDirBase system) ];
+      default = [ (slib.srcDirBase pkgs.stdenv.hostPlatform.system) ];
       description = "Directories used by zsh's CDPATH for quick navigation.";
     };
     historySize = mkOption {

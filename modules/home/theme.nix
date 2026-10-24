@@ -15,6 +15,13 @@ let
 in
 {
   options.theme = {
+    capitalize = mkOption {
+      type = types.functionTo types.str;
+      readOnly = true;
+      default = capitalize;
+      defaultText = lib.literalMD "uppercase the first character";
+      description = "Capitalize a theme identifier (e.g. 'frappe' to 'Frappe') for theme names and paths.";
+    };
     name = mkOption {
       type = types.str;
       default = "catppuccin";

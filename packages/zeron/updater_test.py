@@ -14,8 +14,10 @@ from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.codemods.errors import CodemodError
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance
+from lib.tests._mac_app_passthru import mac_app_passthru_args
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     binding_map,
@@ -291,58 +293,68 @@ def test_zeron_validates_the_materialized_bootstrap_source() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    ("group_name", "group_attr"),
-    [
-        ("primary", "_PATCHES"),
-        ("fallback", "_PATCHES_FALLBACK"),
-        ("0.2.94", "_PATCHES_094"),
-        ("0.2.97", "_PATCHES_097"),
-        ("0.2.115", "_PATCHES_115"),
-    ],
+_LAYOUT_NAMES = ("0.2.115", "0.2.97", "0.2.94", "primary", "fallback")
+_NO_LAYOUT = (
+    r"^expected exactly one supported source layout in .* "
+    r"\(0\.2\.115, 0\.2\.97, 0\.2\.94, primary, fallback\), found none$"
 )
+
+
+def test_zeron_declares_every_supported_update_layout() -> None:
+    """Each audited upstream layout is an explicit, exactly-selected variant."""
+    module = _load_patch_module()
+
+    assert tuple(module._LAYOUTS) == _LAYOUT_NAMES
+    assert len(module._LAYOUTS["0.2.115"]) == 13
+    assert len(module._LAYOUTS["0.2.97"]) == 13
+    assert all(
+        patch.relative_path == "crates/update/src/lib.rs"
+        for patches in module._LAYOUTS.values()
+        for patch in patches
+    )
+
+
+@pytest.mark.parametrize("layout", _LAYOUT_NAMES)
 def test_zeron_nix_policy_patch_disables_every_update_path(
     tmp_path: Path,
-    group_name: str,
-    group_attr: str,
+    layout: str,
 ) -> None:
     """One fail-closed patch set must cover checks, downloads, installs, relaunch."""
     module = _load_patch_module()
-    patches: tuple[_Patch, ...] = getattr(module, group_attr)
+    patches: tuple[_Patch, ...] = module._LAYOUTS[layout]
     update_path = _write_patch_fixture(tmp_path, patches)
     original = update_path.read_text(encoding="utf-8")
     expected = original
     for patch in patches:
         expected = expected.replace(patch.old, patch.new)
 
-    assert module.validate_update_source(original) == group_name
+    assert module.validate_update_source(original) == layout
     assert module.main([str(tmp_path)]) == 0
     assert update_path.read_text(encoding="utf-8") == expected
     assert module._PATCH_SENTINEL in expected
 
-    with pytest.raises(RuntimeError, match="already applied"):
+    with pytest.raises(
+        CodemodError, match="^Zeron update ownership patch was already applied$"
+    ):
         module.patch_tree(tmp_path)
 
 
 @pytest.mark.parametrize("copies", [0, 2])
-@pytest.mark.parametrize("group_attr", ["_PATCHES", "_PATCHES_094"])
+@pytest.mark.parametrize("layout", ["primary", "0.2.94"])
 def test_zeron_nix_policy_patch_rejects_source_drift_atomically(
     tmp_path: Path,
     copies: int,
-    group_attr: str,
+    layout: str,
 ) -> None:
     """No source file may be partially patched when an upstream anchor drifts."""
     module = _load_patch_module()
-    group = getattr(module, group_attr)
+    group = module._LAYOUTS[layout]
     target = group[-1]
     patches = [*group[:-1], *([target] * copies)]
     update_path = _write_patch_fixture(tmp_path, patches)
     original = update_path.read_text(encoding="utf-8")
 
-    with pytest.raises(
-        RuntimeError,
-        match="no Zeron updater anchor set matches this source tree",
-    ):
+    with pytest.raises(CodemodError, match=_NO_LAYOUT):
         module.patch_tree(tmp_path)
 
     assert update_path.read_text(encoding="utf-8") == original
@@ -350,16 +362,16 @@ def test_zeron_nix_policy_patch_rejects_source_drift_atomically(
 
 @pytest.mark.parametrize("copies", [0, 2])
 @pytest.mark.parametrize("anchor_index", range(13))
-@pytest.mark.parametrize("group_attr", ["_PATCHES_097", "_PATCHES_115"])
+@pytest.mark.parametrize("layout", ["0.2.97", "0.2.115"])
 def test_zeron_desktop_layouts_reject_drift_in_every_ownership_guard(
     tmp_path: Path,
     copies: int,
     anchor_index: int,
-    group_attr: str,
+    layout: str,
 ) -> None:
     """New desktop and shared-checker paths must not escape atomic admission."""
     module = _load_patch_module()
-    group = getattr(module, group_attr)
+    group = module._LAYOUTS[layout]
     assert len(group) == 13
     target = group[anchor_index]
     patches = [
@@ -370,10 +382,7 @@ def test_zeron_desktop_layouts_reject_drift_in_every_ownership_guard(
     update_path = _write_patch_fixture(tmp_path, patches)
     original = update_path.read_text(encoding="utf-8")
 
-    with pytest.raises(
-        RuntimeError,
-        match="no Zeron updater anchor set matches this source tree",
-    ):
+    with pytest.raises(CodemodError, match=_NO_LAYOUT):
         module.patch_tree(tmp_path)
 
     assert update_path.read_text(encoding="utf-8") == original
@@ -461,10 +470,14 @@ def test_zeron_package_is_a_source_built_nix_owned_arm64_app() -> None:
         expect_binding(arguments.values, "postPatch").value,
         IndentedString,
     )
-    assert command_texts(
-        parse_shell(indented_string_body(post_patch.rebuild())),
-        "__NIX_INTERP__",
-    ) == ['__NIX_INTERP__ __NIX_INTERP__ "$PWD"']
+    assert_nix_ast_equal(
+        f"{{ lib, python3 }}: {{ postPatch = {post_patch.rebuild()}; }}",
+        """{ lib, python3 }: {
+          postPatch = ''
+            PYTHONPATH=${import ../../lib/codemods-pythonpath.nix { inherit lib; }} ${lib.getExe python3} ${./patch_nix_managed.py} "$PWD"
+          '';
+        }""",
+    )
 
     post_fixup = expect_instance(
         expect_binding(arguments.values, "postFixup").value,
@@ -492,21 +505,9 @@ def test_zeron_package_is_a_source_built_nix_owned_arm64_app() -> None:
         '/usr/bin/file "$executable"',
     ]
 
-    passthru_set = expect_instance(
-        expect_binding(arguments.values, "passthru").value,
-        AttributeSet,
-    )
-    passthru = expect_instance(
-        expect_binding(passthru_set.values, "macApp").value,
-        AttributeSet,
-    )
     assert_nix_ast_equal(
-        expect_binding(passthru.values, "bundleId").value,
-        StringPrimitive(value="sh.zeron.app"),
-    )
-    assert_nix_ast_equal(
-        expect_binding(passthru.values, "bundleRelPath").value,
-        StringPrimitive(value="Applications/Zeron.app"),
+        mac_app_passthru_args(expect_binding(arguments.values, "passthru").value),
+        '{ bundleName = "Zeron.app"; macApp.bundleId = "sh.zeron.app"; }',
     )
 
     metadata = expect_instance(

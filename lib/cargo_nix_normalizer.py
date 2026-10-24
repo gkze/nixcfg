@@ -1,18 +1,25 @@
 """Shared helpers for normalizing checked-in crate2nix Cargo.nix files.
 
+``normalize`` first proves the input is a Nix function with
+:func:`lib.codemods.nix_parse.parse_nix`; anything else is a hard error. Real
+crate2nix output has helper formals with a trailing comma (``{ a, }:``) that
+nix-manipulator rejects, so it parses only after those commas are stripped.
+Rebuilding that stripped tree would reformat the whole generated file, so such
+input is edited in place by the minimal text pass (``_normalize_with_fallback``).
+The AST path over ``NixPath`` nodes runs only on input that parses verbatim.
+
 Rewriting a source root to ``${rootSrc}`` is reached from two entry families
 whose inputs differ, so it has two implementations. They are never both active
 on one input and are not interchangeable:
 
-* ``normalize`` (this module): AST-based over ``NixPath`` nodes. It rewrites
-  paths only when the caller passes ``local_path_prefixes``; the per-package
-  ``normalize_cargo_nix.py`` normalisers (gitbutler, codex, goose-cli) do.
+* ``normalize`` (this module). It rewrites paths only when the caller passes
+  ``local_path_prefixes`` (gitbutler, codex, goose-cli do) or, on the text
+  path, ``fallback_patterns`` (zed-editor-nightly does).
 * ``lib.update.crate2nix._stabilize_generated_root_src_paths``: string/regex
   based, rewriting the same concept inside ``lib.cleanSourceWith`` bindings of
   freshly generated text, with prefixes derived from the patched source and the
-  generated file's parent. The update pipeline calls ``normalize`` without
-  prefixes -- it only wants the ``rootSrc`` argument installed -- and leaves
-  the path rewrite to that pass.
+  generated file's parent. The update pipeline runs the package normalizer
+  first; this pass then rewrites the generated paths it left alone.
 
 Change one and check the other. ``tests/test_cargo_nix_normalizer.py`` and
 ``tests/test_ci_crate2nix.py`` pin both halves.
@@ -21,12 +28,14 @@ Change one and check the other. ``tests/test_cargo_nix_normalizer.py`` and
 import re
 from dataclasses import fields, is_dataclass
 
-from nix_manipulator import parse
 from nix_manipulator.expressions.expression import NixExpression
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.path import NixPath
 from nix_manipulator.expressions.primitive import StringPrimitive
+
+from lib.codemods.errors import CodemodError
+from lib.codemods.nix_parse import parse_nix
 
 _SKIP_TRAVERSAL_FIELDS = {
     "after",
@@ -211,25 +220,29 @@ def normalize(
     rewrite_nixpkgs_config: bool = False,
 ) -> tuple[str, int, bool]:
     """Return normalized Cargo.nix text plus replacement counts."""
-    parsed = parse(text)
+    parsed, verbatim = parse_nix(text)
     root = parsed.expr
+    if parsed.contains_error or not isinstance(root, FunctionDefinition):
+        msg = "Expected Cargo.nix to be a parseable Nix function"
+        raise CodemodError(msg)
 
-    if isinstance(root, FunctionDefinition) and not parsed.contains_error:
-        added_root_src = _ensure_root_src_argument(root)
-        path_rewrites = _rewrite_root_src_paths(
-            root,
+    if not verbatim:
+        # Rebuilding the comma-stripped tree would reformat the whole file.
+        return _normalize_with_fallback(
+            text,
             local_path_prefixes=local_path_prefixes,
+            fallback_patterns=fallback_patterns,
+            rewrite_nixpkgs_config=rewrite_nixpkgs_config,
         )
-        normalized = _preserve_file_preamble(text, parsed.rebuild())
-        if rewrite_nixpkgs_config:
-            normalized = normalized.replace(
-                "import nixpkgs { config = {}; }", "import nixpkgs { }"
-            )
-        return normalized, path_rewrites, added_root_src
 
-    return _normalize_with_fallback(
-        text,
+    added_root_src = _ensure_root_src_argument(root)
+    path_rewrites = _rewrite_root_src_paths(
+        root,
         local_path_prefixes=local_path_prefixes,
-        fallback_patterns=fallback_patterns,
-        rewrite_nixpkgs_config=rewrite_nixpkgs_config,
     )
+    normalized = _preserve_file_preamble(text, parsed.rebuild())
+    if rewrite_nixpkgs_config:
+        normalized = normalized.replace(
+            "import nixpkgs { config = {}; }", "import nixpkgs { }"
+        )
+    return normalized, path_rewrites, added_root_src

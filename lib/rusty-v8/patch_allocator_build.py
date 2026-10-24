@@ -5,7 +5,14 @@ from pathlib import Path
 
 _EXPECTED_ARGC = 2
 _USAGE = "usage: patch_allocator_build.py <BUILD.gn path>"
-_MISSING_ANCHOR = "allocator BUILD.gn anchor not found"
+_MISSING_ANCHOR = "allocator BUILD.gn anchor not found exactly once"
+_LEGACY_SHIM_FLAG = "--cfg=rust_allocator_no_nightly_capability"
+_LEGACY_SHIM_BLOCK = (
+    "    if (!rustc_nightly_capability) {\n"
+    f'      rustflags += [ "{_LEGACY_SHIM_FLAG}" ]\n'
+    "    }\n"
+)
+_LEGACY_SHIM_LEFT = "allocator BUILD.gn legacy shim flag survived patching"
 
 _NEEDLE = """if (toolchain_has_rust) {
   # All targets which depend on Rust code but are not linked by rustc must
@@ -50,14 +57,13 @@ def main() -> int:
 
     build_gn = Path(sys.argv[1])
     original = build_gn.read_text(encoding="utf-8")
-    if _NEEDLE not in original:
+    if original.count(_NEEDLE) != 1:
         raise SystemExit(_MISSING_ANCHOR)
 
     patched = original.replace(_NEEDLE, _REPLACEMENT, 1)
+    # Older Chromium builds carry the legacy shim block; newer ones dropped it.
     patched = patched.replace(
-        "    if (!rustc_nightly_capability) {\n"
-        '      rustflags += [ "--cfg=rust_allocator_no_nightly_capability" ]\n'
-        "    }\n",
+        _LEGACY_SHIM_BLOCK,
         """    # With our Nix-provided rustc + RUSTC_BOOTSTRAP, the legacy shim names
     # are unnecessary. Keeping both legacy and v2 variants causes rustc to emit
     # the v2 allocator shim symbols as local (`t`) instead of externally
@@ -65,6 +71,8 @@ def main() -> int:
 """,
         1,
     )
+    if _LEGACY_SHIM_FLAG in patched:
+        raise SystemExit(_LEGACY_SHIM_LEFT)
     build_gn.write_text(patched, encoding="utf-8")
     return 0
 

@@ -1,4 +1,5 @@
 {
+  final,
   selfSource,
   system,
   prev,
@@ -39,12 +40,8 @@
       meta = (old.meta or { }) // {
         platforms = builtins.attrNames info.urls;
       };
-      passthru = (old.passthru or { }) // {
-        macApp = {
-          bundleName = "Visual Studio Code - Insiders.app";
-          bundleRelPath = "Applications/Visual Studio Code - Insiders.app";
-          installMode = "copy";
-        };
-      };
+      passthru =
+        (old.passthru or { })
+        // final.mkMacAppPassthru { bundleName = "Visual Studio Code - Insiders.app"; };
     });
 }

@@ -1,4 +1,5 @@
 {
+  final,
   prev,
   selfSource,
   slib,
@@ -34,18 +35,17 @@ prev.lib.optionalAttrs (prev.stdenv.hostPlatform.system == "aarch64-darwin") {
       "rioterm"
     ];
 
-    postInstall =
-      prev.lib.replaceStrings [ "tic -xe rio,rio-direct" ] [ "tic -xe xterm-rio,rio,rio-direct" ]
-        old.postInstall
-      + ''
-        substituteInPlace "$out/Applications/Rio.app/Contents/Info.plist" \
-          --replace-fail '{{.Version}}.{{.Now.Format "20060102150405"}}' '${version}' \
-          --replace-fail '{{.Version}}' '${version}'
+    # nixpkgs' postInstall already compiles the xterm-rio and rio terminfo
+    # entries; the Rio source ships no rio-direct entry.
+    postInstall = old.postInstall + ''
+      substituteInPlace "$out/Applications/Rio.app/Contents/Info.plist" \
+        --replace-fail '{{.Version}}.{{.Now.Format "20060102150405"}}' '${version}' \
+        --replace-fail '{{.Version}}' '${version}'
 
-        rm "$out/Applications/Rio.app/Contents/MacOS/rio"
-        mv "$out/bin/rio" "$out/Applications/Rio.app/Contents/MacOS/rio"
-        ln -s "../Applications/Rio.app/Contents/MacOS/rio" "$out/bin/rio"
-      '';
+      rm "$out/Applications/Rio.app/Contents/MacOS/rio"
+      mv "$out/bin/rio" "$out/Applications/Rio.app/Contents/MacOS/rio"
+      ln -s "../Applications/Rio.app/Contents/MacOS/rio" "$out/bin/rio"
+    '';
 
     postFixup = (old.postFixup or "") + ''
       /usr/bin/xattr -cr "$out/Applications/Rio.app"
@@ -68,13 +68,7 @@ prev.lib.optionalAttrs (prev.stdenv.hostPlatform.system == "aarch64-darwin") {
       runHook postInstallCheck
     '';
 
-    passthru = (old.passthru or { }) // {
-      macApp = {
-        bundleName = "Rio.app";
-        bundleRelPath = "Applications/Rio.app";
-        installMode = "copy";
-      };
-    };
+    passthru = (old.passthru or { }) // final.mkMacAppPassthru { bundleName = "Rio.app"; };
 
     meta = (old.meta or { }) // {
       platforms = [ "aarch64-darwin" ];

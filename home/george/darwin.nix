@@ -8,7 +8,7 @@ let
   localZshSiteFuncsPath = "zsh/site-functions";
   # The app ships its Codex CLI under Resources/codex-cli and declares
   # entrypoint "bin/codex" in codex-cli/codex-package.json.
-  codexBundledCliPath = "${config.nixcfg.macApps.resolved.codex.targetPath}/Contents/Resources/codex-cli/bin";
+  codexBundledCodex = "${config.nixcfg.macApps.resolved.codex.targetPath}/Contents/Resources/codex-cli/bin/codex";
   codexBundledPluginRepair = pkgs.writeShellApplication {
     name = "codex-bundled-plugin-repair";
     runtimeInputs = [
@@ -197,33 +197,22 @@ in
     "com.meta.endo".endo_appearance_mode = "system";
   };
 
-  # Run after Home Manager removes the previous generation's store-backed link.
-  home.activation.codexBundledCli =
-    lib.hm.dag.entryAfter
-      [
-        "linkGeneration"
-        "nixcfgUserApplications"
-      ]
-      ''
-        codex_res_dir=${lib.escapeShellArg codexBundledCliPath}
-        codex_bin_dir=${lib.escapeShellArg "${config.home.homeDirectory}/.local/bin"}
-        for codex_link_name in codex codex-code-mode-host; do
-          codex_target="$codex_res_dir/$codex_link_name"
-          codex_link="$codex_bin_dir/$codex_link_name"
-          if [[ ! -v DRY_RUN && ! -x "$codex_target" ]]; then
-            echo "Bundled Codex CLI is missing or not executable: $codex_target" >&2
-            exit 1
-          fi
-          if [ -e "$codex_link" ] && [ ! -L "$codex_link" ]; then
-            echo "Refusing to replace non-symlink bundled Codex binary: $codex_link" >&2
-            exit 1
-          fi
-          if [ ! -L "$codex_link" ] || [ "$(readlink "$codex_link")" != "$codex_target" ]; then
-            run mkdir -p "$codex_bin_dir"
-            run ln -sfn "$codex_target" "$codex_link"
-          fi
-        done
-      '';
+  # Migration: the removed codexBundledCli activation created ~/.local/bin/codex
+  # and ~/.local/bin/codex-code-mode-host as symlinks straight into the ChatGPT
+  # bundle. Home Manager treats those foreign links as collisions with the cli
+  # shims now declared for the same names, so drop the legacy links first.
+  # Delete this block once no machine carries them.
+  home.activation.nixcfgDropLegacyBundledCodexLinks = lib.hm.dag.entryBefore [ "checkLinkTargets" ] ''
+    legacy_bin_dir=${lib.escapeShellArg "${config.home.homeDirectory}/.local/bin"}
+    for legacy_name in codex codex-code-mode-host; do
+      legacy_link="$legacy_bin_dir/$legacy_name"
+      case "$(readlink "$legacy_link" 2>/dev/null || true)" in
+        */Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/*)
+          run rm -f "$legacy_link"
+          ;;
+      esac
+    done
+  '';
 
   home.activation.codexBundledPluginRepair = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     ${lib.getExe codexBundledPluginRepair}
@@ -299,18 +288,18 @@ in
     # Load completions from the live bundle on demand so app updates stay aligned.
     "${localZshSiteFuncsPath}/_codex".text = ''
       #compdef codex
-      [[ -x ${lib.escapeShellArg codexBundledCliPath} ]] || return 1
+      [[ -x ${lib.escapeShellArg codexBundledCodex} ]] || return 1
       local completions
-      completions=$(${lib.escapeShellArg codexBundledCliPath} completion zsh) || return
+      completions=$(${lib.escapeShellArg codexBundledCodex} completion zsh) || return
       eval "$completions" && _codex "$@"
     '';
     "bash-completion/completions/codex".text = ''
-      [[ -x ${lib.escapeShellArg codexBundledCliPath} ]] || return 1
-      source <(${lib.escapeShellArg codexBundledCliPath} completion bash)
+      [[ -x ${lib.escapeShellArg codexBundledCodex} ]] || return 1
+      source <(${lib.escapeShellArg codexBundledCodex} completion bash)
     '';
     "fish/vendor_completions.d/codex.fish".text = ''
-      test -x ${lib.escapeShellArg codexBundledCliPath}; or return 1
-      ${lib.escapeShellArg codexBundledCliPath} completion fish | source
+      test -x ${lib.escapeShellArg codexBundledCodex}; or return 1
+      ${lib.escapeShellArg codexBundledCodex} completion fish | source
     '';
   };
 

@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 from lib.nix.models.sources import HashCollection, SourceEntry, SourceHashes
 from lib.update.flake import nixpkgs_expression
-from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
+from lib.update.nix_expr import compact_nix_expr, identifier_attr_path, nix_str
 from lib.update.paths import REPO_ROOT, local_flake_url
 from lib.update.updaters import (
     FixedOutputHashStep,
@@ -48,7 +48,7 @@ class ScratchUpdater(FlakeInputUpdater):
                     name="flake",
                     value=FunctionCall(
                         name=identifier_attr_path("builtins", "getFlake"),
-                        argument=StringPrimitive(value=repo_url),
+                        argument=nix_str(repo_url),
                     ),
                 ),
                 Binding(name="pkgs", value=nixpkgs_expression()),

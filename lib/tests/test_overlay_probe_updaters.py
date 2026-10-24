@@ -2,6 +2,12 @@
 
 import re
 
+from nix_manipulator.expressions.function.definition import FunctionDefinition
+from nix_manipulator.expressions.set import AttributeSet
+
+from lib.tests._assertions import expect_instance
+from lib.tests._nix_source import nix_file_expr
+from lib.tests._package_registry import is_darwin_overlay_export
 from lib.update.paths import REPO_ROOT
 from lib.update.planner import source_prerequisites
 from lib.update.updaters import ensure_updaters_loaded
@@ -33,7 +39,18 @@ def test_overlay_probe_updaters_are_overlay_attributes() -> None:
         if issubclass(updater, SourceThenOverlayHashMixin)
     )
     assert probe_updaters
-    assert [name for name in probe_updaters if name not in _overlay_bindings()] == []
+    registry = expect_instance(
+        expect_instance(
+            nix_file_expr("packages/registry.nix"), FunctionDefinition
+        ).output,
+        AttributeSet,
+    )
+    bindings = _overlay_bindings()
+    assert [
+        name
+        for name in probe_updaters
+        if name not in bindings and not is_darwin_overlay_export(registry, name)
+    ] == []
 
 
 def test_overlay_probe_sources_are_prerequisites() -> None:

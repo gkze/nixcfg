@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING, ClassVar
 from defusedxml import ElementTree
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
-from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
@@ -32,7 +31,7 @@ from lib.update.nix import (
     _build_fetch_from_github_expr,
     _build_package_path_attr_expr,
 )
-from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
+from lib.update.nix_expr import compact_nix_expr, identifier_attr_path, nix_str
 from lib.update.updaters import (
     FixedOutputHashStep,
     UpdateContext,
@@ -324,7 +323,7 @@ class WakuUpdater(Updater):
                     values=[
                         Binding(
                             name="url",
-                            value=StringPrimitive(value=cls._cua_archive_url()),
+                            value=nix_str(cls._cua_archive_url()),
                         ),
                         Binding(
                             name="hash",

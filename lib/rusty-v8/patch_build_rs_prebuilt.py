@@ -5,8 +5,10 @@ from pathlib import Path
 
 _EXPECTED_ARGC = 2
 _USAGE = "usage: patch_build_rs_prebuilt.py <build.rs path>"
-_MISSING_ENV_ANCHOR = "expected RUSTY_V8_SRC_BINDING_PATH env list entry not found"
-_MISSING_PREBUILT_ANCHOR = "expected prebuilt V8 branch not found"
+_MISSING_ENV_ANCHOR = (
+    "expected RUSTY_V8_SRC_BINDING_PATH env list entry not found exactly once"
+)
+_MISSING_PREBUILT_ANCHOR = "expected prebuilt V8 branch not found exactly once"
 
 _ENV_NEEDLE = '    "RUSTY_V8_SRC_BINDING_PATH",\n'
 _ENV_REPLACEMENT = '    "RUSTY_V8_SRC_BINDING_PATH",\n    "RUSTY_V8_PREBUILT_GN_OUT",\n'
@@ -34,11 +36,11 @@ _PREBUILT_REPLACEMENT = """  if let Ok(prebuilt_gn_out) = env::var("RUSTY_V8_PRE
 def patch_build_rs(build_rs: Path) -> None:
     """Patch one rusty_v8 build.rs file in place."""
     text = build_rs.read_text(encoding="utf-8")
-    if _ENV_NEEDLE not in text:
+    if text.count(_ENV_NEEDLE) != 1:
         raise SystemExit(_MISSING_ENV_ANCHOR)
     text = text.replace(_ENV_NEEDLE, _ENV_REPLACEMENT, 1)
 
-    if _PREBUILT_NEEDLE not in text:
+    if text.count(_PREBUILT_NEEDLE) != 1:
         raise SystemExit(_MISSING_PREBUILT_ANCHOR)
     text = text.replace(_PREBUILT_NEEDLE, _PREBUILT_REPLACEMENT, 1)
 

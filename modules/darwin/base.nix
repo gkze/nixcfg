@@ -38,6 +38,14 @@ in
   };
 
   options.darwinDefaults = {
+    appearance = mkOption {
+      type = types.enum [
+        "automatic"
+        "dark"
+      ];
+      default = "automatic";
+      description = "macOS appearance: switch between Light and Dark automatically, or stay Dark.";
+    };
     keyboard.capsLockToEscape = mkOption {
       type = types.bool;
       default = true;
@@ -130,7 +138,10 @@ in
       defaults = {
         NSGlobalDomain = {
           AppleEnableSwipeNavigateWithScrolls = true;
-          AppleInterfaceStyleSwitchesAutomatically = true;
+          # Always written: nix-darwin never deletes defaults keys, so a stale
+          # `true` would otherwise keep auto-switching a host pinned to Dark.
+          AppleInterfaceStyle = if cfg.appearance == "dark" then "Dark" else null;
+          AppleInterfaceStyleSwitchesAutomatically = cfg.appearance == "automatic";
           "com.apple.mouse.tapBehavior" = 1;
           "com.apple.sound.beep.feedback" = 0;
           "com.apple.trackpad.enableSecondaryClick" = true;
@@ -222,7 +233,6 @@ in
         inherit (cfg.homebrew) autoUpdate cleanup;
         upgrade = cfg.homebrew.upgrade;
       };
-      taps = builtins.attrNames config.nix-homebrew.taps;
     };
   };
 }

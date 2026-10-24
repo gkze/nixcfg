@@ -3,6 +3,7 @@
 import asyncio
 import json
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -20,8 +21,10 @@ from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.codemods.errors import CodemodError
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
 from lib.tests._assertions import expect_instance
+from lib.tests._mac_app_passthru import mac_app_passthru_args
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     binding_map,
@@ -67,7 +70,7 @@ if TYPE_CHECKING:
 
 
 class _Patch(Protocol):
-    path: Path
+    relative_path: str
     old: str
     new: str
 
@@ -204,11 +207,11 @@ def _load_patch_module() -> ModuleType:
     )
 
 
-def _write_patch_fixture(root: Path, patches: Iterable[_Patch]) -> dict[Path, str]:
-    by_path: dict[Path, list[str]] = {}
+def _write_patch_fixture(root: Path, patches: Iterable[_Patch]) -> dict[str, str]:
+    by_path: dict[str, list[str]] = {}
     for patch in patches:
-        by_path.setdefault(patch.path, []).append(patch.old)
-    originals: dict[Path, str] = {}
+        by_path.setdefault(patch.relative_path, []).append(patch.old)
+    originals: dict[str, str] = {}
     for relative, anchors in by_path.items():
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -422,7 +425,7 @@ def test_executor_resolves_release_to_exact_source_and_toolchain(
             {"packageManager": "bun@next"},
             {},
             RuntimeError,
-            "requires an exact Bun version",
+            "Executor Bun version must be an exact semantic version",
         ),
         (
             {"sha": _COMMIT},
@@ -761,7 +764,7 @@ def test_executor_validates_the_materialized_source_package() -> None:
                 "electronVersion": "41.2.1",
                 "bunVersion": "next",
             },
-            "requires an exact Bun version",
+            "Executor Bun version must be an exact semantic version",
         ),
     ],
 )
@@ -1158,15 +1161,7 @@ def test_executor_package_builds_the_owned_desktop_and_sidecar() -> None:
         """{ lib, python3 }: {
           postPatch = ''
             patch -p1 < ${bunLockPatch}
-            PYTHONPATH=${
-              lib.fileset.toSource {
-                root = ../..;
-                fileset = lib.fileset.unions [
-                  ../../lib/__init__.py
-                  ../../lib/exact_text_patch.py
-                ];
-              }
-            } ${lib.getExe python3} ${./patch_nix_managed.py} "$PWD"
+            PYTHONPATH=${import ../../lib/codemods-pythonpath.nix { inherit lib; }} ${lib.getExe python3} ${./patch_nix_managed.py} "$PWD"
           '';
         }""",
     )
@@ -1386,21 +1381,14 @@ def test_executor_package_exposes_managed_app_and_app_free_cli() -> None:
         ''
         """,
     )
-    mac_app = expect_instance(
-        expect_binding(passthru.values, "macApp").value,
-        AttributeSet,
-    )
+    mac_app = mac_app_passthru_args(passthru)
     assert_nix_ast_equal(
-        expect_binding(mac_app.values, "bundleId").value,
-        "appId",
+        mac_app,
+        "{ bundleName = appBundleName; macApp.bundleId = appId; }",
     )
     assert_nix_ast_equal(
         expect_binding(platform_assertion.scope, "appId").value,
         StringPrimitive(value="sh.executor.desktop"),
-    )
-    assert_nix_ast_equal(
-        expect_binding(mac_app.values, "bundleRelPath").value,
-        StringPrimitive(value="Applications/Executor.app"),
     )
     metadata = expect_instance(
         expect_binding(arguments.values, "meta").value,
@@ -1740,11 +1728,11 @@ def test_executor_nix_policy_patch_disables_every_mutable_surface(
 
     assert module.main([str(tmp_path)]) == 0
 
-    patched_by_path: dict[Path, str] = {}
+    patched_by_path: dict[str, str] = {}
     for relative, original in originals.items():
         expected = original
         for patch in module._PATCHES:
-            if patch.path == relative:
+            if patch.relative_path == relative:
                 expected = expected.replace(patch.old, patch.new)
         actual = (tmp_path / relative).read_text(encoding="utf-8")
         assert actual == expected
@@ -1774,7 +1762,9 @@ def test_executor_nix_policy_patch_disables_every_mutable_surface(
     )
     assert "Nix-managed Executor cannot reset data from the app." in all_patched
 
-    with pytest.raises(RuntimeError, match="already applied"):
+    with pytest.raises(
+        CodemodError, match="^Executor source-policy patch was already applied$"
+    ):
         module.patch_tree(tmp_path)
 
 
@@ -1790,8 +1780,11 @@ def test_executor_nix_policy_patch_rejects_source_drift_atomically(
     originals = _write_patch_fixture(tmp_path, patches)
 
     with pytest.raises(
-        RuntimeError,
-        match=f"expected one Executor source-policy anchor, found {copies}",
+        CodemodError,
+        match=(
+            rf"^expected 1 match for .*{re.escape(target.relative_path)}, "
+            rf"found {copies}$"
+        ),
     ):
         module.patch_tree(tmp_path)
 
@@ -1940,7 +1933,7 @@ def test_executor_cli_service_mutations_fail_before_backend_selection(
     """The exact pinned CLI excerpts must fail before selecting a backend."""
     module = _load_patch_module()
     non_cli_patches = [
-        patch for patch in module._PATCHES if patch.path != module._CLI_SOURCE
+        patch for patch in module._PATCHES if patch.relative_path != module._CLI_SOURCE
     ]
     _write_patch_fixture(tmp_path, non_cli_patches)
     cli_source = tmp_path / module._CLI_SOURCE

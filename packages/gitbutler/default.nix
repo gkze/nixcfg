@@ -8,6 +8,7 @@
   lib,
   libiconv ? null,
   librsvg,
+  mkMacAppPassthru,
   outputs,
   pkgs,
   pkg-config,
@@ -396,11 +397,7 @@ else
 
     }
     // lib.optionalAttrs stdenv.hostPlatform.isDarwin {
-      macApp = {
-        bundleName = appBundleName;
-        bundleRelPath = "Applications/${appBundleName}";
-        installMode = "copy";
-      };
+      inherit (mkMacAppPassthru { bundleName = appBundleName; }) macApp;
     };
 
     meta = with lib; {

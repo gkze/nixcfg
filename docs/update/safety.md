@@ -82,9 +82,12 @@ flowchart TD
    its dependency cluster, so a partial candidate is never promoted. The
    rounds are bounded at three. Strict mode keeps the whole run atomic.
    (`cli._withhold_failed_clusters`, `cli._validate_and_gate`)
-1. **Evaluations disable import-from-derivation.** A candidate evaluation
-   therefore cannot execute downstream build code during probing.
-   (`derivation_validation._validation_args`)
+1. **Evaluations disable import-from-derivation.** Every candidate evaluation
+   therefore cannot execute downstream build code during probing, including
+   root manifests, shard planning, coverage out paths, and realized-root
+   receipts. The dependency-free `nix_policy.NO_IMPORT_FROM_DERIVATION_ARGS`
+   tuple is shared by derivation validation, prepared probes, fingerprints,
+   crate2nix generators, source discovery, shard planning, coverage, and CI.
 1. **Batch keys stay conservative.** Only explicit local attribute paths
    from one immutable snapshot batch together. Any other path validates
    individually. (`derivation_validation._batch_key`)
@@ -129,7 +132,7 @@ flowchart TD
    all output digests must also match. Only digests are persisted.
    (`generated_artifact_commands`, `generation_receipts`)
 
-## Disposable builders and repair (20–22)
+## Disposable builders and repair (20–23)
 
 1. **Preparation cannot authorize publication.** A native stage can
    temporarily carry an incomplete platform hash. The stages extend one
@@ -144,13 +147,34 @@ flowchart TD
    post-check tree. Formatter drift and generator drift require a new
    validation attempt. (`ci.jobs.certify`, `lib/tests/test_update_ci.py`)
 
+1. **A publication target must still be the certified baseline.** The
+   certified tree is published whole, so publication refuses a default branch
+   whose tree no longer matches the tree the candidate was certified against.
+   A repair candidate retains its repair checkout as `base_tree`, while the
+   publication guard uses the approved repair commit's parent tree as the
+   original main baseline. Its follow-up keeps the approved repair branch as PR
+   head for both no-op and changed results. Publishing onto any moved base would
+   silently revert commits that landed after certification, including
+   hand-authored patches that no updater owns.
+   (`ci.jobs._commit_and_push`, `ci.jobs.publish`,
+   `lib/tests/test_update_ci.py`)
+
 1. **Repair is bounded and has no validation authority.** One isolated
    agent proposal can change packaging, flake references, and
    planner/selection coherence. A repaired attempt starts a fresh
    execution, passes the existing quality gates and builds, and cannot
-   repair itself again. CI gives publication credentials only to the later
-   publication step. A local repair keeps the same atomic promotion
-   boundary.
+   repair itself again. The CI agent job holds only read tokens; a separate
+   `update-repair-approval` environment job applies its patch, signs, pushes,
+   and dispatches only after a trusted reviewer approves the exact artifact.
+   The receipt binds its patch digest and tree, and the follow-up pins every
+   checkout to the approved `repair_commit`. The environment's required-reviewer
+   protection is configured in GitHub settings, not by repository YAML. Before promotion,
+   a structural check rejects a check skip (`doCheck`, `dontCheck`, or a
+   `checkFlags` `--skip`) unless its whole binding has the correct polarity at
+   one package-owned literal failing version and an adjacent comment. It also
+   rejects a new `bulk_update_hold`. Whether the failing tests are upstream's
+   own, not George's code, stays a review judgment. A local repair keeps the
+   same atomic promotion boundary.
 
    After an agent proposal, the local retry and the CI candidate both
    validate the complete registered updater declaration inventory. That

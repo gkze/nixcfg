@@ -320,7 +320,7 @@ def test_print_runtime_warnings_emits_each_warning(
     assert lines == ["Warning: first warning", "Warning: second warning"]
 
 
-def test_backup_session_uses_suffix_when_first_backup_name_collides(
+def test_backup_file_uses_suffix_when_first_backup_name_collides(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     zentool: ModuleType,
@@ -336,7 +336,7 @@ def test_backup_session_uses_suffix_when_first_backup_name_collides(
     )
     first_backup.write_text("existing\n", encoding="utf-8")
 
-    backup = zentool.backup_session(session_path)
+    backup = zentool.backup_file(session_path)
 
     assert (
         backup

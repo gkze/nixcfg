@@ -5,6 +5,7 @@ hosted runners' Python 3.12 with standard-library imports only. Invoke the file
 directly; Actions owns the job graph.
 """
 
+import hashlib
 import json
 import math
 import os
@@ -21,7 +22,14 @@ import urllib.request
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import TextIO
+from typing import TextIO, cast
+
+# A direct script invocation has only lib/update/ci on sys.path. The policy module
+# and both package initializers are dependency-free, preserving the bootstrap.
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+
+from lib.update.nix_policy import NO_IMPORT_FROM_DERIVATION_ARGS
 
 _BINARY_CACHE = "gkze"
 _VALIDATION_SCOPES = frozenset({
@@ -94,6 +102,7 @@ _STORE_PATH_RE = re.compile(r"/nix/store/[0-9a-z]{32}-[^\s]+")
 # ("Nothing to push") while coverage's `eval .outPath` was the
 # newly built wrapper. Remember must use the same eval as coverage.
 _REALIZED_ROOT_PATHS_NAME = "realized-root-paths.json"
+_REPAIR_RECEIPT_NAME = "repair-receipt.json"
 _LINUX_BUILDER_OUTPUT = "nixos-disk-image"
 _CACHIX_PIN_KEEP_DAYS = 14
 _BINARY_CACHE_STORE = "https://gkze.cachix.org"
@@ -268,7 +277,22 @@ def bootstrap() -> None:
         "-c",
         "pass",
     )
-    _outputs(runtime=str(runtime), devshell=str(devshell))
+    flake_url = json.dumps(f"git+file://{Path.cwd()}")
+    nixpkgs = _run(
+        "nix",
+        "eval",
+        "--impure",
+        "--raw",
+        "--no-write-lock-file",
+        *NO_IMPORT_FROM_DERIVATION_ARGS,
+        "--expr",
+        f"(builtins.getFlake {flake_url}).inputs.nixpkgs.outPath",
+        capture=True,
+    ).stdout.strip()
+    if not nixpkgs:
+        msg = "Pinned nixpkgs path is empty"
+        raise ValueError(msg)
+    _outputs(runtime=str(runtime), devshell=str(devshell), nixpkgs=nixpkgs)
     record_runner_storage("after-bootstrap")
 
 
@@ -1383,6 +1407,12 @@ def _hand_off_device_fault(faults: list[str], returncode: int) -> int:
     return 0
 
 
+def _candidate_identity() -> dict[str, str]:
+    """Return the identity of the candidate the Linux prepare runner certified."""
+    candidate = _temp() / "evidence" / "prepare-x86_64-linux" / "candidate.json"
+    return cast("dict[str, str]", json.loads(candidate.read_bytes()))
+
+
 def certify() -> None:
     """Require native evidence and quality checks for the exact published tree.
 
@@ -1419,12 +1449,13 @@ def certify() -> None:
         "--output",
         str(patch),
     )
-    if not patch.stat().st_size and not os.environ["GITHUB_REF_NAME"].startswith(
-        "codex/update-repair-"
+    if not patch.stat().st_size and not (
+        os.environ["GITHUB_REF_NAME"].startswith("codex/update-repair-")
+        or os.environ.get("NIXCFG_REPAIR_COMMIT")
     ):
         _outputs(changed="false")
         return
-    identity = json.loads(candidate.read_bytes())
+    identity = _candidate_identity()
     if _run("git", "write-tree", capture=True).stdout.strip() != identity["base_tree"]:
         msg = "Publication checkout does not match the candidate baseline"
         raise ValueError(msg)
@@ -1446,22 +1477,50 @@ def _commit_and_push(
     *,
     base: str | None = None,
     tree: str | None = None,
+    baseline_tree: str | None = None,
+    repair_commit: str | None = None,
 ) -> str:
-    branch = f"codex/update-{kind}{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}"
+    branch = (
+        os.environ["GITHUB_REF_NAME"]
+        if repair_commit is not None
+        else f"codex/update-{kind}{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}"
+    )
+    if repair_commit is not None and not branch.startswith("codex/update-repair-"):
+        msg = "Approved repair publication must keep its repair branch as the PR head"
+        raise ValueError(msg)
     if base is None:
+        if repair_commit is not None:
+            msg = "Repair publication requires its original base branch"
+            raise ValueError(msg)
         _run("git", "switch", "-c", branch)
     else:
-        if tree is None:
-            msg = "Publishing from a base requires a certified tree"
+        if tree is None or baseline_tree is None:
+            msg = (
+                "Publishing from a base requires a certified tree and the "
+                "baseline it was certified against"
+            )
             raise ValueError(msg)
         _run("git", "fetch", "origin", base)
+        # The certified tree is published whole, so the branch it lands on must
+        # still be the baseline it was certified against. Otherwise the commit
+        # silently reverts everything the base gained in the meantime.
+        target_tree = _run(
+            "git", "rev-parse", f"origin/{base}^{{tree}}", capture=True
+        ).stdout.strip()
+        if target_tree != baseline_tree:
+            msg = (
+                f"Base branch {base} no longer matches the certified baseline; "
+                "publishing the certified tree would revert the commits that "
+                "landed since certification"
+            )
+            raise ValueError(msg)
         _run(
             "git",
             "switch",
             "--discard-changes",
             "-c",
             branch,
-            f"origin/{base}",
+            repair_commit if repair_commit is not None else f"origin/{base}",
         )
         _run("git", "restore", "--source", tree, "--worktree", "--staged", ".")
     if _run("git", "diff", "--cached", "--quiet", check=False).returncode:
@@ -1503,17 +1562,34 @@ def _queue_squash_auto_merge(branch: str) -> None:
 def publish() -> None:
     """Open the verified update as a PR against the default branch and squash-merge it.
 
-    The product PR always targets the repository default branch, including when
-    Update was exercised from a feature or repair ref. That keeps validated
-    source refreshes off the branch under review and makes the PR auto-mergeable.
+    Normal exercise runs keep source refreshes off the feature branch under
+    review. Repair follow-ups keep the approved repair branch as PR head and use
+    its parent tree as the default-branch baseline, preserving auto-mergeability.
     """
     base = os.environ["UPDATE_BASE_BRANCH"]
     tree = _run("git", "write-tree", capture=True).stdout.strip()
+    identity = _candidate_identity()
+    baseline_tree = identity["base_tree"]
+    repair_commit = os.environ.get("NIXCFG_REPAIR_COMMIT", "").strip() or None
+    if repair_commit is not None:
+        approved_tree = _run(
+            "git", "rev-parse", f"{repair_commit}^{{tree}}", capture=True
+        ).stdout.strip()
+        if approved_tree != identity["base_tree"]:
+            msg = "Approved repair commit does not match the candidate repair baseline"
+            raise ValueError(msg)
+        # The repair commit sits on the original certified main checkout. Its
+        # parent, not the repair tree, is the base that a whole-tree PR may replace.
+        baseline_tree = _run(
+            "git", "rev-parse", f"{repair_commit}^1^{{tree}}", capture=True
+        ).stdout.strip()
     branch = _commit_and_push(
         "",
         "chore(update): refresh validated sources",
         base=base,
         tree=tree,
+        baseline_tree=baseline_tree,
+        repair_commit=repair_commit,
     )
     body = _temp() / "update-body.md"
     run_url = (
@@ -1590,11 +1666,64 @@ def repair() -> None:
     )
     _run("git", "apply", "--index", "--binary", str(patch))
     _run(*_quality_command())
+    tree = _run("git", "write-tree", capture=True).stdout.strip()
+    if not tree:
+        msg = "Repair proposal did not produce a Git tree receipt"
+        raise ValueError(msg)
+    receipt = {
+        "tree": tree,
+        "patchSha256": hashlib.sha256(patch.read_bytes()).hexdigest(),
+    }
+    (_temp() / _REPAIR_RECEIPT_NAME).write_text(
+        json.dumps(receipt, indent=2) + "\n", encoding="utf-8"
+    )
+    _outputs(tree=tree)
+
+
+def _approved_repair_tree(patch: Path) -> str:
+    """Verify the exact artifact and tree approved for credentialed repair."""
+    expected = os.environ.get("NIXCFG_REPAIR_TREE", "").strip()
+    if not expected:
+        msg = "NIXCFG_REPAIR_TREE is required for approved repair publication"
+        raise ValueError(msg)
+    try:
+        receipt = json.loads((_temp() / _REPAIR_RECEIPT_NAME).read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        msg = "Approved repair artifact is missing its tree receipt"
+        raise ValueError(msg) from error
+    digest = hashlib.sha256(patch.read_bytes()).hexdigest()
+    if (
+        not isinstance(receipt, dict)
+        or receipt.get("tree") != expected
+        or receipt.get("patchSha256") != digest
+    ):
+        msg = "Repair artifact does not match the approved tree and patch"
+        raise ValueError(msg)
+    return expected
 
 
 def start_repair() -> None:
-    """Start fresh execution with repair disabled, bounding automatic retries."""
+    """Commit the repair job's checked patch and start a fresh attempt.
+
+    The repair job holds no write credential, so this job applies its patch.
+    The environment-approved artifact receipt binds this exact tree before any
+    write. The fresh attempt has repair disabled, bounding automatic retries.
+    """
+    patch = _temp() / "repair.patch"
+    approved_tree = _approved_repair_tree(patch)
+    _run("git", "apply", "--index", "--binary", str(patch))
+    _run(*_develop(_runtime(), "ci", "update", "check-repair"))
+    if _run("git", "write-tree", capture=True).stdout.strip() != approved_tree:
+        msg = "Applied repair does not match the approved tree"
+        raise ValueError(msg)
     branch = _commit_and_push("repair-", "fix(update): repair packaging failure")
+    commit = _run("git", "rev-parse", "HEAD", capture=True).stdout.strip()
+    committed_tree = _run(
+        "git", "rev-parse", "HEAD^{tree}", capture=True
+    ).stdout.strip()
+    if not commit or committed_tree != approved_tree:
+        msg = "Committed repair does not match the approved tree"
+        raise ValueError(msg)
     _run(
         "gh",
         "workflow",
@@ -1604,6 +1733,8 @@ def start_repair() -> None:
         branch,
         "-f",
         "repair=false",
+        "-f",
+        f"repair_commit={commit}",
         "-f",
         "validate_all_packages=true",
         "-f",
@@ -1652,16 +1783,9 @@ def _clear_cachix_daemon_env() -> None:
     github_env = os.environ.get("GITHUB_ENV", "").strip()
     for key in (_CACHIX_DAEMON_DIR_ENV, _CACHIX_DAEMON_SOCKET_ENV):
         os.environ.pop(key, None)
-        # 39113211468: pytest on Darwin certify inherited GITHUB_ENV from the
-        # publish job. Tests that call flush_cachix() set NIXCFG_CI_STAGE to
-        # flush-cachix and then emptied CACHIX_DAEMON_* in that live file, so
-        # the always() flush saw unset sockets and masked the coverage miss.
-        # Rewrite GITHUB_ENV only in the hosted flush-cachix process.
-        if (
-            github_env
-            and os.environ.get("NIXCFG_CI_STAGE") == "flush-cachix"
-            and not os.environ.get("PYTEST_CURRENT_TEST")
-        ):
+        # Rewrite GITHUB_ENV only in the hosted flush-cachix process. Tests
+        # never see the hosted file (conftest.py, 39113211468).
+        if github_env and os.environ.get("NIXCFG_CI_STAGE") == "flush-cachix":
             with Path(github_env).open("a", encoding="utf-8") as handle:
                 handle.write(f"{key}=\n")
 
@@ -2022,6 +2146,7 @@ def _eval_installable_out_path(
         "eval",
         "--raw",
         "--no-write-lock-file",
+        *NO_IMPORT_FROM_DERIVATION_ARGS,
         f"{installable}.outPath",
         check=False,
         capture=True,
@@ -2525,22 +2650,31 @@ def flush_cachix() -> None:
         record_runner_storage("flush-end", log)
 
 
-_UPDATE_PLAN_FALLBACK_BRANCH = "cursor/no-skip-darwin-shards-6614"
+_UPDATE_PLAN_FALLBACK_BRANCH = "main"
 
 
 def restore_canary_plan(
     *,
     dest: Path | None = None,
     run: Callable[..., object] | None = None,
+    expected_tree: str | None = None,
 ) -> Path:
-    """Download the latest ``plan-shards-x86_64-linux`` artifact on this ref.
+    """Restore only a warmup plan bound to the checked-out Git tree.
 
-    Feature-branch Zed kicks have no Update runs; fall back to the
-    no-skip parent so the family loop can reuse that plan.
+    Feature-branch Zed kicks may search the default branch, but a fallback
+    artifact is usable only when its source tree is byte-for-byte identical.
+    Unbound legacy artifacts are skipped rather than realized.
     """
     target = dest if dest is not None else Path(os.environ["NIXCFG_CANARY_PLAN_DIR"])
     target.mkdir(parents=True, exist_ok=True)
     runner: Callable[..., object] = _run if run is None else run
+    if expected_tree is None:
+        identity = runner("git", "rev-parse", "HEAD^{tree}", capture=True, check=True)
+        raw_tree = getattr(identity, "stdout", identity)
+        expected_tree = str(raw_tree).strip()
+    if not expected_tree:
+        msg = "Canary plan restore could not determine the checked-out Git tree"
+        raise ValueError(msg)
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     branch = os.environ.get("GITHUB_REF_NAME", "")
     if not repo or not branch:
@@ -2586,10 +2720,19 @@ def restore_canary_plan(
                 capture=True,
             )
             code = downloaded.returncode if hasattr(downloaded, "returncode") else 0
-            if code == 0 and (target / "warmup-plan.json").is_file():
+            plan_path = target / "warmup-plan.json"
+            if code != 0 or not plan_path.is_file():
+                continue
+            try:
+                plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                plan = None
+            if isinstance(plan, dict) and plan.get("tree") == expected_tree:
                 return target
+            # Do not leave a stale plan available to a later consumer.
+            plan_path.unlink(missing_ok=True)
     loc = ", ".join(f"{repo}@{name}" for name in searched)
-    msg = f"No current warmup plan artifact on {loc}"
+    msg = f"No warmup plan artifact matches checked-out tree {expected_tree} on {loc}"
     raise RuntimeError(msg)
 
 

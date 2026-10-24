@@ -17,7 +17,7 @@ _USAGE = (
     "[--print-release-version] "
     "<update.py|compiler.gni|compiler BUILD.gn|sanitizers.gni>"
 )
-_MISSING_ANCHOR = "compiler.gni use_lld anchor not found"
+_MISSING_ANCHOR = "compiler.gni use_lld anchor not found exactly once"
 
 _RELEASE_ASSIGNMENT = "RELEASE_VERSION"
 _RELEASE_VERSION = re.compile(r"[1-9][0-9]*")
@@ -73,10 +73,12 @@ def _patch_gn_assignment(text: str, name: str, value: str) -> str:
     while index < len(lines):
         line = lines[index]
         indent = _assignment_indent(line, name)
-        if replaced or indent is None:
+        if indent is None:
             patched.append(line)
             index += 1
             continue
+        if replaced:
+            raise SystemExit(_MISSING_ANCHOR)
 
         assignment = line.lstrip()[len(name) :].lstrip()
         has_inline_value = bool(assignment.removeprefix("=").strip())

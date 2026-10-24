@@ -15,7 +15,7 @@ from pathlib import Path
 
 _EXPECTED_ARGC = 2
 _USAGE = "usage: patch_whole_archive.py <whole_archive.py path>"
-_MISSING_ANCHOR = "whole_archive.py anchor not found"
+_MISSING_ANCHOR = "whole_archive.py anchor not found exactly once"
 
 _NEEDLE = """  # The set of libraries we want to apply `--whole-archive`` to.
   whole_archive_libs = [
@@ -42,7 +42,7 @@ def main() -> int:
 
     target = Path(sys.argv[1])
     original = target.read_text(encoding="utf-8")
-    if _NEEDLE not in original:
+    if original.count(_NEEDLE) != 1:
         raise SystemExit(_MISSING_ANCHOR)
 
     target.write_text(original.replace(_NEEDLE, _REPLACEMENT, 1), encoding="utf-8")

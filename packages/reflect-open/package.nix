@@ -4,6 +4,7 @@
   fetchPnpmDeps,
   fetchurl,
   lib,
+  mkMacAppPassthru,
   nodejs_22,
   nodejs_24,
   onnxruntime,
@@ -119,13 +120,17 @@ rustPlatform.buildRustPackage {
   };
 
   postPatch = ''
-    ${lib.getExe python3} ${./patch_nix_managed.py} "$PWD" \
+    PYTHONPATH=${
+      import ../../lib/codemods-pythonpath.nix { inherit lib; }
+    } ${lib.getExe python3} ${./patch_nix_managed.py} "$PWD" \
       --package-manager ${lib.escapeShellArg "pnpm@${pnpmVersion}"}
   '';
 
   # Tauri runs upstream's source-building sidecar script before the frontend
   # build. The app is signed only after generic Mach-O fixups have completed.
   tauriBuildFlags = [ "--no-sign" ];
+  # Upstream's apps/desktop unit tests are not run; why is unrecorded
+  # (56e23658). installCheckPhase below gates the built bundle.
   doCheck = false;
 
   postInstall = ''
@@ -261,12 +266,13 @@ rustPlatform.buildRustPackage {
   passthru = {
     inherit onnxruntimeShared pnpmDeps;
 
-    macApp = {
-      bundleId = appId;
-      bundleName = appBundleName;
-      bundleRelPath = "Applications/${appBundleName}";
-      installMode = "copy";
-    };
+    inherit
+      (mkMacAppPassthru {
+        bundleName = appBundleName;
+        macApp.bundleId = appId;
+      })
+      macApp
+      ;
   };
 
   meta = {

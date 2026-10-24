@@ -357,3 +357,81 @@ def test_fetch_head_artifact_version_requires_cache_headers(
                 config=_vendor_config(),
             )
         )
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "expected"),
+    [
+        ("1.0", "1.0", 0),
+        ("1.1", "1.0", 1),
+        ("2", "10", -1),
+        ("1.0", "1.0.1", -1),
+        ("1.0b1", "1.0", -1),
+        ("1.0", "1.0b1", 1),
+        ("1.0a", "1.0b", -1),
+        ("1.0.1", "1.0a", 1),
+        ("1.a", "1.1", -1),
+        ("1..0", "1.0", 0),
+    ],
+)
+def test_sparkle_version_comparison_matches_sparkle(
+    left: str, right: str, expected: int
+) -> None:
+    """Numbers beat periods beat strings; a trailing string is a pre-release."""
+    assert vendor_feeds._compare_sparkle_versions(left, right) == expected
+
+
+def test_newest_sparkle_item_selects_the_greatest_build() -> None:
+    """Feeds may list oldest first; Sparkle installs the greatest build."""
+    items = tuple(
+        vendor_feeds.SparkleAppcastItem(version=version, short_version=short, url=None)
+        for version, short in (("18250", None), ("18384", None), (None, "1.0"))
+    )
+    assert vendor_feeds.newest_sparkle_item(items) == items[1]
+
+
+def test_parse_debian_packages_strips_epoch_from_file_names() -> None:
+    """Debian pool file names omit the version epoch."""
+    payload = (
+        b"Package: app\nVersion: 2:1.0-1\nArchitecture: arm64\n"
+        b"Filename: pool/main/a/app/app_1.0-1_arm64.deb\n"
+        b"SHA256: " + b"0" * 64 + b"\n\nPackage: app\nArchitecture: amd64\n"
+    )
+    [package] = vendor_feeds.parse_debian_packages(
+        payload, package="app", architecture="arm64", label="index"
+    )
+    assert package.version == "2:1.0-1"
+    assert package.sri_hash.startswith("sha256-")
+
+
+def test_debian_version_key_orders_like_dpkg() -> None:
+    """Tilde sorts before the release; epochs and revisions order last-resort."""
+    ordered = [
+        "1.0~rc1",
+        "1.0",
+        "1.0-1~bpo1",
+        "1.0-1",
+        "1.0a",
+        "1.0+b1",
+        "1.0.0",
+        "1:0.1",
+    ]
+    shuffled = [*ordered[1::2], *ordered[::2]]
+    assert sorted(shuffled, key=vendor_feeds.debian_version_key) == ordered
+
+
+def test_fetch_electron_builder_manifest_tolerates_missing_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Feeds pinned by ``path`` need not list ``files``."""
+    monkeypatch.setattr(
+        vendor_feeds,
+        "fetch_url",
+        lambda *_a, **_k: asyncio.sleep(0, result=b"version: 1.2.3\npath: App.zip\n"),
+    )
+    feed = asyncio.run(
+        vendor_feeds.fetch_electron_builder_manifest(
+            object(), "https://example.com/latest-mac.yml", config=_vendor_config()
+        )
+    )
+    assert feed == vendor_feeds.ElectronBuilderFeed("1.2.3", "App.zip", ())

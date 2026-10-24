@@ -179,8 +179,16 @@ def test_eval_root_closure_manifest_uses_owned_installable(
     monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
     def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        assert args[:4] == ["nix", "eval", "--json", "--no-write-lock-file"]
-        assert args[4].endswith("#lib.rootClosureManifest")
+        assert args[:7] == [
+            "nix",
+            "eval",
+            "--json",
+            "--no-write-lock-file",
+            "--option",
+            "allow-import-from-derivation",
+            "false",
+        ]
+        assert args[7].endswith("#lib.rootClosureManifest")
         return subprocess.CompletedProcess(
             args,
             0,

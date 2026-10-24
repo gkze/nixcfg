@@ -54,6 +54,12 @@
         google-chrome = withManagedMacApp (final.mkSourceOverride "google-chrome" prev.google-chrome) "Google Chrome.app";
         hoppscotch = withManagedMacApp prev.hoppscotch "Hoppscotch.app";
         iina = withManagedMacApp prev.iina "IINA.app";
+        # Restate upstream's buildInputs without its deprecated stdenv.isLinux
+        # and stdenv.isDarwin reads, which warn on every evaluation. Take them
+        # from the package set upstream builds with: the input follows the root
+        # nixpkgs, so this is the same unconfigured instance and the drvPath
+        # equals upstream's. Overlaid `prev` libraries would differ on Linux
+        # (libsecret) and mix into a toolchain from the unconfigured set.
         gws = inputs.googleworkspace-cli.packages.${system}.gws.overrideAttrs (
           _:
           let
@@ -100,9 +106,10 @@
         utm = withManagedMacApp prev.utm "UTM.app";
         zed-editor-nightly =
           if prev.stdenv.hostPlatform.isDarwin then
-            withManagedMacApp (final.callPackage ../packages/zed-editor-nightly {
+            final.callPackage ../packages/zed-editor-nightly {
               inherit inputs;
-            }) "Zed Nightly.app"
+              selfSource = sources.zed-editor-nightly;
+            }
           else
             inputs.zed.packages.${system}.default;
         jetbrains = prev.jetbrains // {

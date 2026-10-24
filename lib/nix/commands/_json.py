@@ -3,7 +3,7 @@
 import json
 from typing import Protocol
 
-from .base import _resolve_timeout_alias, run_nix
+from .base import run_nix
 
 
 class _ModelValidator[T](Protocol):
@@ -18,18 +18,10 @@ type JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
 async def run_nix_json(
     args: list[str],
     *,
-    command_timeout: float | None = None,
-    **kwargs: object,
+    command_timeout: float,
 ) -> JsonValue:
     """Run a Nix command and parse stdout as JSON."""
-    if command_timeout is None and "timeout" not in kwargs:
-        msg = "command_timeout is required"
-        raise TypeError(msg)
-    timeout_seconds = _resolve_timeout_alias(
-        command_timeout=command_timeout or 0.0,
-        kwargs=kwargs,
-    )
-    result = await run_nix(args, timeout=timeout_seconds)
+    result = await run_nix(args, command_timeout=command_timeout)
     return json.loads(result.stdout)
 
 

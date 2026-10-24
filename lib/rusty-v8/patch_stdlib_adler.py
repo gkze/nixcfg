@@ -20,7 +20,7 @@ _ADLER_LIBRARY = '"adler"'
 
 
 def _patch_text(text: str) -> str:
-    if _LEGACY_BLOCK in text:
+    if text.count(_LEGACY_BLOCK) == 1:
         return text.replace(_LEGACY_BLOCK, _REPLACEMENT, 1)
 
     if _ADLER2_LIBRARY in text and _ADLER_LIBRARY not in text:

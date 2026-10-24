@@ -383,6 +383,125 @@ def test_remove_and_verify_reports_removed_once_row_disappears(
     )
     assert isinstance(outcome, removal.Removed)
     assert outcome.name == "Screen Tool"
+    assert process.pressed == ["Remove"]
+
+
+@pytest.mark.parametrize(
+    "observed",
+    [pane_label(Pane.ACCESSIBILITY), ""],
+    ids=["pane-changed", "pane-lost"],
+)
+def test_remove_and_verify_never_verifies_removal_on_another_pane(
+    observed: str,
+) -> None:
+    class PaneChangingProcess(_FakeProcess):
+        def press(self, element: object) -> bool:
+            ok = super().press(element)
+            if ok:
+                self._rows = []
+                self.title_override = observed
+            return ok
+
+    process = PaneChangingProcess([_row("Screen Tool")])
+    outcome = removal.remove_and_verify(
+        process,
+        Pane.SCREEN_RECORDING,
+        "Screen Tool",
+        interval=0.01,
+    )
+
+    assert outcome == removal.Unverified(
+        pane=Pane.SCREEN_RECORDING,
+        name="Screen Tool",
+        observed=observed,
+        pressed=True,
+    )
+    assert process.pressed == ["Remove"]
+
+
+def test_remove_and_verify_rechecks_pane_after_rows_disappear() -> None:
+    class PaneLostDuringRows(_FakeProcess):
+        def rows(self) -> list[object]:
+            if self.pressed:
+                self._rows = []
+                self.title_override = ""
+            return super().rows()
+
+    process = PaneLostDuringRows([_row("Screen Tool")])
+    outcome = removal.remove_and_verify(
+        process,
+        Pane.SCREEN_RECORDING,
+        "Screen Tool",
+        interval=0.01,
+    )
+
+    assert outcome == removal.Unverified(
+        pane=Pane.SCREEN_RECORDING,
+        name="Screen Tool",
+        observed="",
+        pressed=True,
+    )
+
+
+def test_remove_revalidates_pane_immediately_before_pressing() -> None:
+    class PaneChangedDuringButtonLookup(_FakeProcess):
+        def button_named(self, name: str) -> object:
+            self.title_override = pane_label(Pane.ACCESSIBILITY)
+            return super().button_named(name)
+
+    process = PaneChangedDuringButtonLookup([_row("Screen Tool")])
+    outcome = removal.remove(process, Pane.SCREEN_RECORDING, "Screen Tool")
+
+    assert outcome == removal.Unverified(
+        pane=Pane.SCREEN_RECORDING,
+        name="Screen Tool",
+        observed=pane_label(Pane.ACCESSIBILITY),
+        pressed=False,
+    )
+    assert len(process.selected) == 1
+    assert process.pressed == []
+
+
+def test_remove_and_verify_preserves_press_failure_when_pane_is_lost() -> None:
+    class FailingPress(_FakeProcess):
+        def press(self, element: object) -> bool:
+            ok = super().press(element)
+            self.title_override = ""
+            return ok
+
+    process = FailingPress([_row("Screen Tool")], press_ok=False)
+    outcome = removal.remove_and_verify(
+        process,
+        Pane.SCREEN_RECORDING,
+        "Screen Tool",
+        timeout=0,
+    )
+
+    assert isinstance(outcome, PressFailed)
+    assert process.pressed == ["Remove"]
+
+
+def test_remove_and_verify_rechecks_pane_before_timeout_result() -> None:
+    class PaneLostAfterPress(_FakeProcess):
+        def press(self, element: object) -> bool:
+            ok = super().press(element)
+            self.title_override = ""
+            return ok
+
+    process = PaneLostAfterPress([_row("Screen Tool")])
+    outcome = removal.remove_and_verify(
+        process,
+        Pane.SCREEN_RECORDING,
+        "Screen Tool",
+        timeout=0,
+    )
+
+    assert outcome == removal.Unverified(
+        pane=Pane.SCREEN_RECORDING,
+        name="Screen Tool",
+        observed="",
+        pressed=True,
+    )
 
 
 def test_remove_and_verify_reports_still_present_on_timeout(
@@ -488,9 +607,12 @@ class _FakeProcess:
         self._press_ok = press_ok
         self.selected: list[object] = []
         self.pressed: list[object] = []
+        self.title_override: str | None = None
 
     def pane_title(self) -> str:
         """Report the requested pane unless a test says another one shows."""
+        if self.title_override is not None:
+            return self.title_override
         return pane_label(self._displays)
 
     def rows(self) -> list[object]:
@@ -551,6 +673,30 @@ def test_remove_dry_run_selects_without_pressing() -> None:
         process, Pane.SCREEN_RECORDING, "Screen Tool", dry_run=True
     )
     assert isinstance(outcome, Selection)
+    assert process.pressed == []
+
+
+def test_remove_dry_run_rechecks_pane_before_reporting_selection() -> None:
+    class PaneLostDuringSelection(_FakeProcess):
+        def select(self, row: object) -> bool:
+            selected = super().select(row)
+            self.title_override = ""
+            return selected
+
+    process = PaneLostDuringSelection([_row("Screen Tool")])
+    outcome = removal.remove(
+        process,
+        Pane.SCREEN_RECORDING,
+        "Screen Tool",
+        dry_run=True,
+    )
+
+    assert outcome == removal.Unverified(
+        pane=Pane.SCREEN_RECORDING,
+        name="Screen Tool",
+        observed="",
+        pressed=False,
+    )
     assert process.pressed == []
 
 
@@ -1477,7 +1623,7 @@ def test_registered_bundle_ids_matches_whole_identifiers(
 
     def run(argv: list[str], **_kwargs: object) -> SimpleNamespace:
         invoked.append(argv)
-        return SimpleNamespace(stdout=dump)
+        return SimpleNamespace(returncode=0, stdout=dump, stderr="")
 
     monkeypatch.setattr(cli.subprocess, "run", run)
     cli._registered_bundle_ids.cache_clear()
@@ -1488,6 +1634,73 @@ def test_registered_bundle_ids_matches_whole_identifiers(
         assert cli._registered("com.example.live.helper") is False
         assert cli._registered("com.example.live") is True
         assert invoked == [[cli._LSREGISTER, "-dump"]]
+    finally:
+        cli._registered_bundle_ids.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("failure_kind", "expected_error"),
+    [
+        ("exit", "exited 23: launch services unavailable"),
+        ("launch", "could not launch"),
+        ("empty", "returned no bundle identifiers"),
+    ],
+)
+def test_cli_retries_failed_registered_lookups_without_misclassifying_live_apps(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    failure_kind: str,
+    expected_error: str,
+) -> None:
+    index = make_index({}, tmp_path)
+    snapshot = TccSnapshot(
+        entries=[make_entry("com.example.live", kind=ClientKind.BUNDLE_ID)],
+        unrecognized=[],
+    )
+    monkeypatch.setattr(cli, "read_snapshot", lambda *args, **kwargs: snapshot)
+    monkeypatch.setattr(
+        cli.BundleIndex,
+        "scan",
+        classmethod(lambda cls, *args, **kwargs: index),
+    )
+    invoked: list[list[str]] = []
+
+    def run(argv: list[str], **_kwargs: object) -> SimpleNamespace:
+        invoked.append(argv)
+        if len(invoked) == 1:
+            if failure_kind == "launch":
+                raise OSError("simulated launch failure")
+            if failure_kind == "exit":
+                return SimpleNamespace(
+                    returncode=23,
+                    stdout="",
+                    stderr="launch services unavailable",
+                )
+            return SimpleNamespace(returncode=0, stdout="path: /tmp\n", stderr="")
+        return SimpleNamespace(
+            returncode=0,
+            stdout="identifier: com.example.live\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(cli.subprocess, "run", run)
+    cli._registered_bundle_ids.cache_clear()
+    runner = CliRunner()
+    try:
+        failed = runner.invoke(cli.app, ["audit", "--all", "--json"])
+        assert failed.exit_code == 2
+        assert expected_error in _combined(failed)
+        assert "Traceback" not in _combined(failed)
+
+        succeeded = runner.invoke(cli.app, ["audit", "--all", "--json"])
+        assert succeeded.exit_code == 0
+        payload = json.loads(succeeded.stdout)
+        assert payload["actionable"] == 0
+        assert [row["status"] for row in payload["rows"]] == ["live"]
+
+        cached = runner.invoke(cli.app, ["audit", "--all", "--json"])
+        assert cached.exit_code == 0
+        assert len(invoked) == 2
     finally:
         cli._registered_bundle_ids.cache_clear()
 
@@ -1739,6 +1952,57 @@ def test_cli_clean_reports_a_row_that_survived(
     assert "still listed" in _combined(result)
 
 
+@pytest.mark.parametrize(
+    ("pressed", "expected_message"),
+    [
+        (
+            False,
+            "'dead-tool' removal is unverified: System Settings stopped showing "
+            "Screen Recording (Privacy_ScreenCapture) and now shows '<untitled>' "
+            "before Remove was pressed.",
+        ),
+        (
+            True,
+            "'dead-tool' removal is unverified: System Settings stopped showing "
+            "Screen Recording (Privacy_ScreenCapture) and now shows '<untitled>' "
+            "after Remove was pressed.",
+        ),
+    ],
+    ids=["before-press", "after-press"],
+)
+def test_cli_clean_reports_an_unverified_pane_change(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_audit_env: BundleIndex,
+    pressed: bool,
+    expected_message: str,
+) -> None:
+    monkeypatch.setattr(
+        cli,
+        "SystemSettingsProcess",
+        SimpleNamespace(attach=lambda: object()),
+    )
+    monkeypatch.setattr(cli.settings_module, "ensure_running", lambda _pane: True)
+    monkeypatch.setattr(
+        cli.removal_module,
+        "remove_and_verify",
+        lambda *_args, **_kwargs: removal.Unverified(
+            pane=Pane.SCREEN_RECORDING,
+            name="dead-tool",
+            observed="",
+            pressed=pressed,
+        ),
+    )
+
+    result = CliRunner().invoke(cli.app, ["clean", "--json"])
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["results"][0]["outcome"] == "Unverified"
+    assert payload["results"][0]["handled"] is False
+    assert payload["failed"] == 1
+    assert expected_message in _combined(result)
+
+
 def test_cli_clean_prints_plain_results_and_counts_skips(
     monkeypatch: pytest.MonkeyPatch,
     cli_full_env: BundleIndex,
@@ -1794,6 +2058,30 @@ def test_cli_clean_prints_a_failure_summary_and_exits_nonzero(
     assert "1 of 1 row(s) did not complete" in output
 
 
+def test_cli_remove_dry_run_reports_verified_selection_without_removal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    row = _row("Screen Tool")
+    process = _FakeProcess([row])
+    monkeypatch.setattr(cli.settings_module, "ensure_running", lambda _pane: True)
+    monkeypatch.setattr(
+        cli,
+        "SystemSettingsProcess",
+        SimpleNamespace(attach=lambda: process),
+    )
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["remove", "Privacy_ScreenCapture", "Screen Tool", "--dry-run"],
+    )
+
+    assert result.exit_code == 0
+    assert "verified selection" in _combined(result)
+    assert "no removal performed" in _combined(result)
+    assert process.selected == [row]
+    assert process.pressed == []
+
+
 def test_cli_remove_requires_settings_to_start(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1835,6 +2123,16 @@ def test_cli_remove_requires_the_ax_tree(monkeypatch: pytest.MonkeyPatch) -> Non
             "still listed",
         ),
         (
+            removal.Unverified(
+                pane=Pane.SCREEN_RECORDING,
+                name="Screen Tool",
+                observed="",
+                pressed=True,
+            ),
+            1,
+            "Removal unverified",
+        ),
+        (
             removal.NotFound(pane=Pane.SCREEN_RECORDING, name="Screen Tool"),
             1,
             "No row named",
@@ -1868,6 +2166,7 @@ def test_cli_remove_requires_the_ax_tree(monkeypatch: pytest.MonkeyPatch) -> Non
     ids=[
         "removed",
         "still-present",
+        "unverified",
         "not-found",
         "wrong-pane",
         "refused",
@@ -1897,6 +2196,55 @@ def test_cli_remove_maps_each_outcome_to_an_exit_code(
     )
     assert result.exit_code == expected_code
     assert expected_text in _combined(result)
+
+
+@pytest.mark.parametrize(
+    ("pressed", "expected_message"),
+    [
+        (
+            False,
+            "Removal unverified for 'Screen Tool': expected the Screen Recording "
+            "pane (Privacy_ScreenCapture), but System Settings shows '<untitled>'. "
+            "Remove was not pressed; selection was not revalidated.",
+        ),
+        (
+            True,
+            "Removal unverified for 'Screen Tool': expected the Screen Recording "
+            "pane (Privacy_ScreenCapture), but System Settings shows '<untitled>'. "
+            "Remove was pressed; no removal is confirmed.",
+        ),
+    ],
+    ids=["before-press", "after-press"],
+)
+def test_cli_remove_reports_exact_unverified_press_state(
+    monkeypatch: pytest.MonkeyPatch,
+    pressed: bool,
+    expected_message: str,
+) -> None:
+    monkeypatch.setattr(cli.settings_module, "ensure_running", lambda _pane: True)
+    monkeypatch.setattr(
+        cli,
+        "SystemSettingsProcess",
+        SimpleNamespace(attach=lambda: object()),
+    )
+    monkeypatch.setattr(
+        cli.removal_module,
+        "remove_and_verify",
+        lambda *_args, **_kwargs: removal.Unverified(
+            pane=Pane.SCREEN_RECORDING,
+            name="Screen Tool",
+            observed="",
+            pressed=pressed,
+        ),
+    )
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["remove", "Privacy_ScreenCapture", "Screen Tool"],
+    )
+
+    assert result.exit_code == 1
+    assert expected_message in _combined(result)
 
 
 def test_cli_remove_names_the_requested_and_observed_panes(

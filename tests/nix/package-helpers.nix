@@ -36,6 +36,71 @@ let
         fileName = "sources.json";
       }).names;
 
+  packageCollision =
+    builtins.tryEval
+      (discovery.discoverDefaultNixEntries {
+        root = fixtures + "/collisions/packages";
+        excludeFiles = [
+          "default.nix"
+          "registry.nix"
+        ];
+      }).names;
+  overlayCollision =
+    builtins.tryEval
+      (discovery.discoverDefaultNixEntries {
+        root = fixtures + "/collisions/overlays";
+        excludeFiles = [ "default.nix" ];
+      }).fileNames;
+  currentOverlayEntries = discovery.discoverDefaultNixEntries {
+    root = src + "/overlays";
+    excludeFiles = [ "default.nix" ];
+  };
+
+  registry = import (src + "/packages/registry.nix") { inherit src; };
+  ordinaryEntries = discovery.discoverDefaultNixEntries {
+    root = fixtures + "/registry/ordinary";
+  };
+  companionEntries = discovery.discoverCompanionEntries {
+    root = fixtures + "/registry/ordinary";
+    directories = ordinaryEntries.dirNames;
+    fileName = "crate2nix-src.nix";
+  };
+  flatEntries = discovery.discoverDefaultNixEntries {
+    root = fixtures + "/registry/flat";
+  };
+  metadataForNames =
+    names:
+    builtins.listToAttrs (
+      builtins.map (name: {
+        inherit name;
+        value = { };
+      }) names
+    );
+  overridesForNames =
+    names:
+    builtins.listToAttrs (
+      builtins.map (name: {
+        inherit name;
+        value.constraint = "darwin";
+      }) names
+    );
+  mkOverrideCase =
+    names: staleName:
+    let
+      baseMetadata = metadataForNames names;
+      overrides = overridesForNames names;
+    in
+    {
+      inherit overrides;
+      known = registry.validatePackageMetadataOverrides baseMetadata overrides;
+      unknown = builtins.tryEval (
+        registry.validatePackageMetadataOverrides baseMetadata (overrides // { ${staleName} = { }; })
+      );
+    };
+  ordinaryOverrideCase = mkOverrideCase ordinaryEntries.names "stale-ordinary";
+  companionOverrideCase = mkOverrideCase companionEntries.names "stale-companion";
+  flatOverrideCase = mkOverrideCase flatEntries.names "stale-flat";
+
   pathBasenames = builtins.mapAttrs (_: path: builtins.baseNameOf (toString path));
 
   goCliPackage = mkGoCli {
@@ -97,6 +162,29 @@ let
     (assertEq "missing sidecar entries" { } missingSidecars.entries)
     (assertEq "duplicate sidecar discovery fails" false duplicateSidecars.success)
     (assertEq "duplicate sidecar discovery value" false duplicateSidecars.value)
+    (assertEq "package default.nix collision fails" false packageCollision.success)
+    (assertEq "package default.nix collision value" false packageCollision.value)
+    (assertEq "overlay default.nix collision fails" false overlayCollision.success)
+    (assertEq "overlay default.nix collision value" false overlayCollision.value)
+    (assertEq "current overlay discovery has no flat/directory collisions" true (
+      builtins.deepSeq currentOverlayEntries.names true
+    ))
+    (assertEq "current registry overrides all resolve" true (
+      builtins.deepSeq (builtins.attrNames registry.packagePaths) true
+    ))
+    (assertEq "ordinary registry fixture" [ "demo" ] ordinaryEntries.names)
+    (assertEq "companion registry fixture" [ "demo-crate2nix-src" ] companionEntries.names)
+    (assertEq "flat-file registry fixture" [ "demo" ] flatEntries.names)
+    (assertEq "known ordinary override is preserved" ordinaryOverrideCase.overrides
+      ordinaryOverrideCase.known
+    )
+    (assertEq "unknown ordinary override fails" false ordinaryOverrideCase.unknown.success)
+    (assertEq "known companion override is preserved" companionOverrideCase.overrides
+      companionOverrideCase.known
+    )
+    (assertEq "unknown companion override fails" false companionOverrideCase.unknown.success)
+    (assertEq "known flat-file override is preserved" flatOverrideCase.overrides flatOverrideCase.known)
+    (assertEq "unknown flat-file override fails" false flatOverrideCase.unknown.success)
     (assertEq "go cli defaults" {
       input = "demo-source";
       subPackages = [ "cmd/demo" ];

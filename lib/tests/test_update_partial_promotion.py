@@ -15,8 +15,6 @@ from lib.tests._update_workspace_helpers import init_update_workspace_repo
 from lib.update.cli import (
     OutputOptions,
     UpdateOptions,
-    UpdateSummary,
-    _emit_summary,
     _execute_run_plan_result,
     _failed_targets_touched_flake,
     _handle_status_request,
@@ -35,11 +33,13 @@ from lib.update.derivation_validation import (
     DerivationValidationFailure,
 )
 from lib.update.events import UpdateEvent
+from lib.update.lock_policy import RollbackUnavailable
 from lib.update.persistence import UpdateValidationSnapshot
 from lib.update.refs import FlakeInputRef
 from lib.update.run_monitor import RunMonitor
 from lib.update.run_store import DATABASE_FILE, RunStore
 from lib.update.source_runner import UpdatePhaseResult
+from lib.update.summary import UpdateSummary
 from lib.update.ui_render import ValidationDisplay
 from lib.update.updaters import Updater
 
@@ -75,7 +75,8 @@ _LOCK_TEMPLATE = {
 def _lock_json(*, tool_rev: str = "a" * 40) -> str:
     lock = json.loads(json.dumps(_LOCK_TEMPLATE))
     lock["nodes"]["tool"]["locked"]["rev"] = tool_rev
-    return json.dumps(lock, indent=2) + "\n"
+    # Nix writes flake.lock as sorted, two-space-indented JSON.
+    return json.dumps(lock, indent=2, sort_keys=True) + "\n"
 
 
 def _run(options: UpdateOptions) -> int:
@@ -657,6 +658,57 @@ def test_withhold_failed_clusters_notes_the_monitor(
     assert (live / "packages/good/sources.json").read_text("utf-8") == "good v1\n"
 
 
+def test_withhold_failed_clusters_notes_why_rollback_was_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """An unusable rollback is a distinct, observable note, not a silent no-op."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "flake.lock").write_text(_lock_json(tool_rev="c" * 40))
+
+    class _Tool(Updater):
+        input_name = "tool"
+
+    outcome = _RunOutcome()
+    outcome.summary.accumulate({"tool-src": "error"})
+    plan = make_run_plan(source_names=("tool-src",))
+
+    class _Workspace:
+        root = tmp_path
+
+        def baseline_content(self, _path: object) -> bytes | None:
+            return b"{"
+
+        def restore_baseline(self, paths: object) -> tuple[Path, ...]:
+            return tuple(Path(str(path)) for path in cast("list[object]", list(paths)))
+
+    notes: list[tuple[str, dict[str, object]]] = []
+
+    class _Monitor:
+        def note(self, message: str, **fields: object) -> None:
+            notes.append((message, fields))
+
+    monkeypatch.setattr(
+        "lib.update.cli._failed_targets_touched_flake", lambda *_: ("tool-src",)
+    )
+    monkeypatch.setattr("lib.update.persistence.planned_update_paths", _planned_paths)
+    monkeypatch.setattr("lib.update.flake.invalidate_flake_lock", lambda: None)
+
+    _withhold_failed_clusters(
+        cast("Any", _Workspace()),
+        plan,
+        outcome,
+        {"tool-src": _Tool},
+        OutputOptions(),
+        cast("Any", _Monitor()),
+    )
+
+    assert (
+        "rollback unavailable: flake.lock is unreadable: ValidationError",
+        {"failed": ["tool-src"]},
+    ) in notes
+
+
 def test_withhold_failed_clusters_runs_without_a_monitor(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1117,63 +1169,23 @@ def test_validation_display_only_for_the_live_panel(
     monitor.close()
 
 
-def test_emit_summary_reports_withheld_and_unpromoted_runs(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Text and JSON summaries name withheld candidates and empty promotions."""
-    summary = UpdateSummary(statuses={"bad": "error", "child": "dropped"})
-    exit_code = _emit_summary(
-        summary,
-        had_errors=True,
-        out=OutputOptions(),
-        dry_run=False,
-        dropped={"child": "coupled to failed target bad"},
-    )
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert "No updates promoted." in captured.out
-    assert (
-        "Withheld from promotion: child (coupled to failed target bad)" in captured.out
-    )
-    assert "Failed: bad" in captured.err
-
-    exit_code = _emit_summary(
-        summary,
-        had_errors=True,
-        out=OutputOptions(json_output=True),
-        dry_run=False,
-        dropped={"child": "coupled to failed target bad"},
-    )
-    assert exit_code == 1
-    assert json.loads(capsys.readouterr().out) == {
-        "updated": [],
-        "dropped": ["child"],
-        "errors": ["bad"],
-        "noChange": [],
-        "success": False,
-        "withheld": {"child": "coupled to failed target bad"},
-    }
-
-
 @pytest.mark.parametrize(
-    "case",
+    ("case", "reason"),
     [
-        "no-input",
-        "no-baseline",
-        "missing",
-        "invalid-json",
-        "bad-nodes",
-        "bad-root",
-        "bad-inputs",
-        "follow-edge",
-        "bad-node",
-        "unchanged",
+        ("no-input", "failed targets have no lock-only inputs"),
+        ("no-baseline", "no baseline flake.lock"),
+        ("missing", "flake.lock is unreadable: FileNotFoundError"),
+        ("invalid-json", "flake.lock is unreadable: ValidationError"),
+        ("bad-nodes", "flake.lock is unreadable: ValidationError"),
+        ("bad-root", "flake.lock is unreadable: ValidationError"),
+        ("follow-edge", "failed inputs already match the baseline lock"),
+        ("unchanged", "failed inputs already match the baseline lock"),
     ],
 )
-def test_failed_input_rollback_preserves_unusable_or_unchanged_locks(
-    tmp_path: Path, case: str
+def test_failed_input_rollback_reports_why_it_is_unavailable(
+    tmp_path: Path, case: str, reason: str
 ) -> None:
-    """Incomplete lock graphs must not cause a speculative partial rewrite."""
+    """An unusable or unchanged lock is reported, never partially rewritten."""
     from lib.update.cli import _rollback_failed_input_locks
 
     class Tool(Updater):
@@ -1185,12 +1197,8 @@ def test_failed_input_rollback_preserves_unusable_or_unchanged_locks(
         baseline["nodes"] = []
     elif case == "bad-root":
         current["root"] = None
-    elif case == "bad-inputs":
-        baseline["nodes"]["root"]["inputs"] = []
     elif case == "follow-edge":
         baseline["nodes"]["root"]["inputs"]["tool"] = ["other"]
-    elif case == "bad-node":
-        baseline["nodes"]["tool"] = "invalid"
     elif case == "unchanged":
         current = baseline
     encoded = json.dumps(baseline).encode()
@@ -1210,34 +1218,5 @@ def test_failed_input_rollback_preserves_unusable_or_unchanged_locks(
         ("tool",),
         {"tool": Updater if case == "no-input" else Tool},
     )
-    assert result == ()
+    assert result == RollbackUnavailable(reason)
     assert (path.read_bytes() if path.exists() else None) == before
-
-
-def test_prune_lock_graph_preserves_reachable_leaves_cycles_and_follows() -> None:
-    """Garbage collection terminates on cycles and removes only unreachable nodes."""
-    from lib.update.cli import _prune_unreachable_lock_nodes
-
-    for invalid in ({"nodes": []}, {"nodes": {}, "root": None}):
-        before = json.loads(json.dumps(invalid))
-        _prune_unreachable_lock_nodes(invalid)
-        assert invalid == before
-    lock = {
-        "root": "root",
-        "nodes": {
-            "root": {
-                "inputs": {
-                    "self": "root",
-                    "leaf": "leaf",
-                    "opaque": "opaque",
-                    "missing": "missing",
-                    "follows": ["leaf"],
-                }
-            },
-            "leaf": {},
-            "opaque": None,
-            "unreachable": {},
-        },
-    }
-    _prune_unreachable_lock_nodes(lock)
-    assert set(lock["nodes"]) == {"root", "leaf", "opaque"}

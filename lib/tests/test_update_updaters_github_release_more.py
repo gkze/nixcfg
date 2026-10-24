@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, ClassVar
 import pytest
 
 from lib.update.events import EventSink, UpdateEvent, ignore_event
+from lib.update.updaters import github_release
 from lib.update.updaters.core import UpdateContext
 from lib.update.updaters.github_release import (
     GitHubReleaseAssetURLsUpdater,
@@ -219,3 +220,42 @@ def test_github_release_asset_defaults() -> None:
         )
     }
     assert _DemoReleaseUpdater().build_result(VersionInfo("1.2.3"), []).commit is None
+
+
+def test_resolve_tag_commit_quotes_tag_and_names_the_repository(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Any owner/repo tag resolves through one quoted commits lookup."""
+    paths: list[str] = []
+
+    async def fetch(_session: object, path: str, **_kwargs: object) -> object:
+        paths.append(path)
+        return {"sha": "main"}
+
+    monkeypatch.setattr(
+        "lib.update.updaters.github_release.fetch_github_api",
+        fetch,
+    )
+    with pytest.raises(
+        RuntimeError,
+        match="Demo k2-fsa/sherpa-onnx tag v1/2 has no immutable source commit",
+    ):
+        asyncio.run(
+            github_release.resolve_tag_commit(
+                object(),
+                owner="k2-fsa",
+                repo="sherpa-onnx",
+                tag="v1/2",
+                config=_DemoCommitReleaseUpdater().config,
+                context="Demo",
+            )
+        )
+    assert paths == ["repos/k2-fsa/sherpa-onnx/commits/v1%2F2"]
+
+
+def test_require_immutable_commit_accepts_only_full_lowercase_sha() -> None:
+    """Pinned companion commits share the release commit contract."""
+    commit = "a" * 40
+    assert github_release.require_immutable_commit(commit, context="X") == commit
+    with pytest.raises(RuntimeError, match="X must be an immutable commit"):
+        github_release.require_immutable_commit("main", context="X")

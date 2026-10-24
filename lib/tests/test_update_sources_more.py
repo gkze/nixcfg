@@ -122,6 +122,9 @@ def test_run_nix_eval_uses_thread_pool_when_loop_is_running(
         "eval",
         "--impure",
         "--json",
+        "--option",
+        "allow-import-from-derivation",
+        "false",
         "--expr",
         "builtins.attrNames {}",
     ]

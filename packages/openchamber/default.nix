@@ -11,9 +11,11 @@
   lib,
   libiconv,
   makeWrapper,
+  mkMacAppPassthru,
   models-dev,
   nixcfgElectron,
   nodejs_24,
+  outputs,
   pkg-config,
   python3,
   ripgrep,
@@ -70,12 +72,9 @@ let
 
   hashEntryFor =
     hashType: url: platform:
-    lib.findFirst (
-      entry:
-      entry.hashType == hashType
-      && (entry.url or null) == url
-      && (platform == null || (entry.platform or null) == platform)
-    ) null selfSource.hashes;
+    outputs.lib.selectSourceHashEntry selfSource.hashes hashType (
+      { inherit url; } // lib.optionalAttrs (platform != null) { inherit platform; }
+    );
 
   openChamberSourceHash = hashEntryFor "srcHash" openChamberUrl null;
   openCodeSourceHash = hashEntryFor "srcHash" openCodeUrl null;
@@ -97,8 +96,7 @@ let
     "Contents/Frameworks/OpenChamber Helper (Renderer).app/Contents/MacOS/OpenChamber Helper (Renderer)"
     "Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework"
     "Contents/Frameworks/Electron Framework.framework/Versions/A/Helpers/chrome_crashpad_handler"
-    "Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libEGL.dylib"
-    "Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libGLESv2.dylib"
+    "Contents/Frameworks/Electron Framework.framework/Versions/A/Helpers/app_shim_loader"
     "Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libffmpeg.dylib"
     "Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libvk_swiftshader.dylib"
     "Contents/Frameworks/Mantle.framework/Versions/A/Mantle"
@@ -106,6 +104,7 @@ let
     "Contents/Frameworks/Squirrel.framework/Versions/A/Squirrel"
     "Contents/Frameworks/Squirrel.framework/Versions/A/Resources/ShipIt"
     "Contents/Resources/opencode-cli/opencode"
+    "Contents/Resources/ripgrep/rg"
     "Contents/Resources/app.asar.unpacked/node_modules/node-pty/build/Release/pty.node"
     "Contents/Resources/app.asar.unpacked/node_modules/node-pty/build/Release/spawn-helper"
     "Contents/Resources/app.asar.unpacked/node_modules/sherpa-onnx-darwin-arm64/sherpa-onnx.node"
@@ -140,12 +139,13 @@ let
 
   commonPassthru = {
     nodejsVersion = nodejs.version;
-    macApp = {
-      bundleId = appId;
-      bundleName = appBundleName;
-      bundleRelPath = "Applications/${appBundleName}";
-      installMode = "copy";
-    };
+    inherit
+      (mkMacAppPassthru {
+        bundleName = appBundleName;
+        macApp.bundleId = appId;
+      })
+      macApp
+      ;
     openchamberBuildGates = unresolvedBuildGates;
     openchamberNativeRuntimePaths = expectedNativeRelativePaths;
     sherpaRuntimeProvenance = {
@@ -300,13 +300,7 @@ let
 
     postPatch = ''
       PYTHONPATH=${
-        lib.fileset.toSource {
-          root = ../..;
-          fileset = lib.fileset.unions [
-            ../../lib/__init__.py
-            ../../lib/exact_text_patch.py
-          ];
-        }
+        import ../../lib/codemods-pythonpath.nix { inherit lib; }
       } ${lib.getExe python3} ${./patch_nix_managed.py} "$PWD" --component openchamber
     '';
 
@@ -341,7 +335,12 @@ let
       mkdir -p packages/electron/resources/opencode-cli
       cp -L ${openCode}/bin/opencode packages/electron/resources/opencode-cli/opencode
       chmod 0755 packages/electron/resources/opencode-cli/opencode
-      test "$(packages/electron/resources/opencode-cli/opencode --version)" = "${openCodeVersion}"
+      test "$(packages/electron/resources/opencode-cli/opencode --version)" = "opencode v${openCodeVersion}"
+
+      mkdir -p packages/electron/resources/ripgrep
+      cp -L node_modules/.bun/@vscode+ripgrep-darwin-arm64@*/node_modules/@vscode/ripgrep-darwin-arm64/bin/rg packages/electron/resources/ripgrep/rg
+      chmod 0755 packages/electron/resources/ripgrep/rg
+      packages/electron/resources/ripgrep/rg --version >/dev/null
 
       bun run --cwd packages/electron bundle:main
       node packages/electron/scripts/rebuild-native.mjs
@@ -442,6 +441,7 @@ let
               "$executable" \
               "$resources/app.asar" \
               "$resources/opencode-cli/opencode" \
+              "$resources/ripgrep/rg" \
               "$unpacked/node-pty/build/Release/pty.node" \
               "$unpacked/sherpa-onnx-darwin-arm64/sherpa-onnx.node" \
               "$out/bin/${pname}"
@@ -491,6 +491,7 @@ let
               "$app/Contents/Frameworks/Electron Framework.framework/Versions/A/Helpers" \
               "$app/Contents/Frameworks/Squirrel.framework/Versions/A/Resources" \
               "$resources/opencode-cli" \
+              "$resources/ripgrep" \
               "$unpacked/node-pty/build/Release" \
               > "$executableDirectories"
 
@@ -729,7 +730,8 @@ let
                   done
             done < "$nativeInventory"
 
-            test "$($resources/opencode-cli/opencode --version)" = "${openCodeVersion}"
+            test "$($resources/opencode-cli/opencode --version)" = "opencode v${openCodeVersion}"
+            $resources/ripgrep/rg --version >/dev/null
             test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")" = "${appId}"
             test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")" = "${version}"
             test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$plist")" = "${appExecutableName}"

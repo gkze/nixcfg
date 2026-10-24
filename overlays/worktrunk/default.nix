@@ -57,6 +57,8 @@ in
     // {
       inherit cargoArtifacts;
 
+      # filterCargoSources drops tests/snapshots, so upstream's insta snapshot
+      # tests cannot pass against filteredSrc.
       doCheck = false;
 
       meta = {

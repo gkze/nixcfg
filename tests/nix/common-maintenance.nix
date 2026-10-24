@@ -81,7 +81,6 @@ let
             Hour = 9;
             Minute = 30;
           };
-          options = "--delete-older-than 3d";
         };
         optimise = {
           automatic = true;
@@ -102,7 +101,6 @@ let
         gc = {
           automatic = true;
           dates = "09:30";
-          options = "--delete-older-than 3d";
         };
         optimise = {
           automatic = true;
@@ -139,7 +137,7 @@ let
       }
       (maintenanceFor {
         system = "aarch64-darwin";
-        extraModules = [ (src + "/modules/darwin/george/caches.nix") ];
+        extraModules = [ (src + "/darwin/george/caches.nix") ];
       })
     )
     (assertEq "store headroom thresholds must be configured together" false partialHeadroom.success)

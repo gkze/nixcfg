@@ -28,6 +28,7 @@ from lib.update.updaters.vendor_feeds import (
     fetch_electron_builder_asset_urls,
     fetch_head_artifact_version,
     fetch_sparkle_appcast_items,
+    newest_sparkle_item,
     require_url,
     require_version,
 )
@@ -161,12 +162,13 @@ class SparkleAppcastUpdater(DownloadHashUpdater):
     ) -> VersionInfo:
         """Fetch the appcast and resolve version details from its newest item."""
         _ = context
-        items = await fetch_sparkle_appcast_items(
-            session,
-            self.APPCAST_URL,
-            config=self.config,
+        item = newest_sparkle_item(
+            await fetch_sparkle_appcast_items(
+                session,
+                self.APPCAST_URL,
+                config=self.config,
+            )
         )
-        item = items[0]
         version = require_version(self.item_version(item), context=self.APPCAST_URL)
         return VersionInfo(version=version, metadata=self.item_metadata(item))
 

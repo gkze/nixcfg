@@ -66,14 +66,6 @@ class GitHubRawFileMetadata(MappingMetadata):
 
 
 @dataclass(frozen=True, slots=True)
-class GranolaFeedMetadata(MappingMetadata):
-    """Metadata for Granola's Electron updater feed."""
-
-    path: str
-    sha512: str
-
-
-@dataclass(frozen=True, slots=True)
 class AssetURLsMetadata(MappingMetadata):
     """Metadata carrying resolved per-platform asset URLs."""
 
@@ -207,7 +199,6 @@ type VersionMetadata = (
     AssetURLsMetadata
     | DownloadUrlMetadata
     | FlakeInputMetadata
-    | GranolaFeedMetadata
     | GitHubRawFileMetadata
     | GitHubReleaseMetadata
     | NoMetadata
@@ -290,7 +281,6 @@ __all__ = [
     "FlakeInputMetadata",
     "GitHubRawFileMetadata",
     "GitHubReleaseMetadata",
-    "GranolaFeedMetadata",
     "NoMetadata",
     "PlatformAPIMetadata",
     "ReleasePayloadMetadata",

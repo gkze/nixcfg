@@ -526,7 +526,7 @@ def test_buzz_package_exposes_signed_candidate_only_as_an_audit_leaf() -> None:
           null
         else
           import ./native/desktop-candidate.nix {
-            inherit cctools lib nativeLock python3 stdenv version;
+            inherit cctools lib mkMacAppPassthru nativeLock python3 stdenv version;
             desktopUnsigned = desktopUnsignedNative;
             meshRuntimeBundle = meshRuntimeBundleNative;
             patchedBuzzSource = buzzRuntimePolicySource;
@@ -555,12 +555,10 @@ def test_buzz_candidate_identity_is_derived_and_validation_is_executable() -> No
     assert_nix_ast_equal(
         expect_binding(scope, "expectedMacApp").value,
         """
-        {
-          bundleId = "xyz.block.buzz.app";
+        (mkMacAppPassthru {
           bundleName = "Buzz.app";
-          bundleRelPath = "Applications/Buzz.app";
-          installMode = "copy";
-        }
+          macApp.bundleId = "xyz.block.buzz.app";
+        }).macApp
         """,
     )
     assert_nix_ast_equal(

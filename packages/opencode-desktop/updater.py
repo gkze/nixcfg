@@ -1,6 +1,5 @@
 """Updater for opencode-desktop's Bun node_modules hash."""
 
-import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -11,7 +10,10 @@ from lib.update.electron_manifest import (
     ElectronManifestMetadata,
 )
 from lib.update.locked_source import locked_github_source, resolve_locked_source
-from lib.update.npm_semver import require_npm_version_matches_spec
+from lib.update.npm_semver import (
+    require_exact_semantic_version,
+    require_npm_version_matches_spec,
+)
 from lib.update.updaters import (
     FlakeInputHashUpdater,
     UpdateContext,
@@ -30,9 +32,6 @@ _MAX_LOCK_BYTES = 32 * 1024 * 1024
 _MAX_MANIFEST_BYTES = 1024 * 1024
 _DESKTOP_PACKAGE_NAMES = ("@opencode-ai/desktop", "@opencode/desktop")
 _DESKTOP_WORKSPACE_PIN = "desktopWorkspace"
-_EXACT_VERSION_PATTERN = re.compile(
-    r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,12 +137,11 @@ def _lock_contract(payload: bytes) -> _ElectronLockContract:
         )
         raise RuntimeError(msg)
     electron_version = resolution.removeprefix(prefix)
-    if _EXACT_VERSION_PATTERN.fullmatch(electron_version) is None:
-        msg = (
-            "OpenCode Desktop bun.lock Electron resolution must be an exact "
-            f"semantic version, got {electron_version!r}"
-        )
-        raise RuntimeError(msg)
+    require_exact_semantic_version(
+        electron_version,
+        context="OpenCode Desktop bun.lock Electron resolution",
+        release_only=True,
+    )
     return _ElectronLockContract(
         manifest_path=f"{workspace_path}/package.json",
         package_name=name,

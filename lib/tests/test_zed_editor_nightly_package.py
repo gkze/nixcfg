@@ -54,42 +54,8 @@ def test_zed_nightly_build_rust_crate_is_overridable_functor() -> None:
     )
 
 
-def test_zed_nightly_preserves_darwin_rlib_metadata() -> None:
-    """Darwin keeps rlib metadata; Linux rust_zed unsplits out+lib (nixpkgs#218712)."""
-    assert_nix_ast_equal(
-        nix_file_binding_expr(
-            "packages/zed-editor-nightly/build-rust-crate.nix",
-            "wrapBuildRustCrate",
-        ),
-        """
-        builder: isDarwin:
-        let
-          applyDarwinRlibMetadata =
-            drv:
-            drv.overrideAttrs (
-              _old:
-              lib.optionalAttrs isDarwin {
-                dontStrip = true;
-                stripExclude = [ "*.rlib" ];
-              }
-            );
-          linuxZedUnsplit =
-            args:
-            args
-            // lib.optionalAttrs (!isDarwin && (args.crateName or "") == "zed") {
-              outputs = [ "out" ];
-              outputDev = [ "out" ];
-            };
-          wrap = inner: {
-            __functor =
-              _self: args:
-              applyDarwinRlibMetadata (inner (linuxZedUnsplit args));
-            override = f: wrap (inner.override f);
-          };
-        in
-        wrap builder
-        """,
-    )
+# Darwin rlib-metadata behavior (nixpkgs#218712) is proven by evaluation in
+# tests/nix/zed-build-rust-crate-functor.nix, including after `.override`.
 
 
 def test_zed_nightly_does_not_import_deleted_livekit_libwebrtc_path() -> None:

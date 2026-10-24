@@ -50,6 +50,8 @@ class GrokBotUpdater(DownloadingPlatformAPIUpdater):
         "aarch64-darwin": "darwin-arm64",
         "x86_64-darwin": "darwin-x64",
     }
+    # Rehash because the vendor may replace a versioned artifact in place.
+    always_rehash = True
 
     def _api_url(self, _api_platform: str) -> str:
         return (
@@ -168,15 +170,6 @@ class GrokBotUpdater(DownloadingPlatformAPIUpdater):
                 equality_fields={},
             ),
         )
-
-    async def _is_latest(
-        self,
-        context: UpdateContext,
-        info: VersionInfo,
-    ) -> bool:
-        """Rehash because the vendor may replace a versioned artifact in place."""
-        _ = (context, info)
-        return False
 
     def _download_url(self, _api_platform: str, info: VersionInfo) -> str:
         nix_platform = self._nix_platform(_api_platform)

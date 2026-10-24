@@ -108,8 +108,18 @@ class Pressed:
 
 
 @dataclass(frozen=True, slots=True)
+class Unverified:
+    """The expected pane was lost after selection, so removal is unverified."""
+
+    pane: Pane
+    name: str
+    observed: str
+    pressed: bool
+
+
+@dataclass(frozen=True, slots=True)
 class Removed:
-    """The row disappeared from the pane after the Remove press."""
+    """The row disappeared while the expected pane remained visible."""
 
     pane: Pane
     name: str
@@ -135,6 +145,7 @@ RemovalOutcome = (
     | RemoveButtonMissing
     | PressFailed
     | Pressed
+    | Unverified
     | Removed
     | StillPresent
 )
@@ -166,6 +177,20 @@ def select(
     return Selection(row=row)
 
 
+def _post_selection_pane_problem(
+    process: PaneProcess,
+    pane: Pane,
+    name: str,
+    *,
+    pressed: bool,
+) -> Unverified | None:
+    """Return an unverified outcome when the selected pane is no longer visible."""
+    observed = process.pane_title()
+    if observed == pane_label(pane):
+        return None
+    return Unverified(pane=pane, name=name, observed=observed, pressed=pressed)
+
+
 def remove(
     process: PaneProcess,
     pane: Pane,
@@ -175,19 +200,26 @@ def remove(
 ) -> RemovalOutcome:
     """Select the row and press Remove (unless dry-run).
 
-    The pane is confirmed by ``select`` before any row is touched, so a
-    ``WrongPane`` return means nothing was selected or pressed. Pressing
-    Remove raises macOS's Touch ID/password prompt; the caller should
-    authenticate and then re-query the TCC database to confirm.
+    ``WrongPane`` comes from ``select`` before any row is touched. An
+    ``Unverified`` result means the row was selected but the expected pane was
+    lost before the dry-run selection could be confirmed or Remove could be
+    pressed. Pressing Remove raises macOS's Touch ID/password prompt.
     """
     selection = select(process, pane, name)
     if not isinstance(selection, Selection):
         return selection
     if dry_run:
+        problem = _post_selection_pane_problem(process, pane, name, pressed=False)
+        if problem is not None:
+            return problem
         return selection
+
     button = process.button_named("Remove")
     if button is None:
         return RemoveButtonMissing(pane=pane, name=name)
+    problem = _post_selection_pane_problem(process, pane, name, pressed=False)
+    if problem is not None:
+        return problem
     if not process.press(button):
         return PressFailed(pane=pane, name=name)
     return Pressed(pane=pane, name=name)
@@ -206,8 +238,9 @@ def remove_and_verify(
 
     The poll window covers the Touch ID/password prompt: the row stays
     listed until the user completes authentication, and remains if the
-    prompt is cancelled. The pane check inherited from ``remove`` runs
-    before anything is selected or pressed.
+    prompt is cancelled. Every poll revalidates the pane before reading rows,
+    and a disappearance counts only after a second pane check. A changed or
+    lost pane therefore produces ``Unverified``, never a false ``Removed``.
     """
     outcome = remove(process, pane, name, dry_run=dry_run)
     if not isinstance(outcome, Pressed):
@@ -215,6 +248,16 @@ def remove_and_verify(
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         time.sleep(interval)
+        problem = _post_selection_pane_problem(process, pane, name, pressed=True)
+        if problem is not None:
+            return problem
         if not any(row.name == name for row in process.rows()):
+            problem = _post_selection_pane_problem(process, pane, name, pressed=True)
+            if problem is not None:
+                return problem
             return Removed(pane=pane, name=name)
+
+    problem = _post_selection_pane_problem(process, pane, name, pressed=True)
+    if problem is not None:
+        return problem
     return StillPresent(pane=pane, name=name)

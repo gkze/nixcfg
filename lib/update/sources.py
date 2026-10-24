@@ -13,13 +13,13 @@ from filelock import FileLock
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.let import LetExpression
-from nix_manipulator.expressions.primitive import StringPrimitive
 
 from lib.nix.commands.base import CommandResult, run_nix
 from lib.nix.models.sources import SourceEntry, SourcesFile
 from lib.update.artifacts import artifact_lock_path
 from lib.update.io import atomic_write_json
-from lib.update.nix_expr import identifier_attr_path
+from lib.update.nix_expr import identifier_attr_path, nix_str
+from lib.update.nix_policy import NO_IMPORT_FROM_DERIVATION_ARGS
 from lib.update.paths import (
     REPO_ROOT,
     local_flake_url,
@@ -33,7 +33,15 @@ from lib.update.surfaces import validate_repo_update_surface_coverage
 
 
 def _run_nix_eval(expr: str) -> tuple[int, str, str]:
-    command = ["nix", "eval", "--impure", "--json", "--expr", expr]
+    command = [
+        "nix",
+        "eval",
+        "--impure",
+        "--json",
+        *NO_IMPORT_FROM_DERIVATION_ARGS,
+        "--expr",
+        expr,
+    ]
 
     def _invoke() -> CommandResult:
         return asyncio.run(run_nix(command, check=False))
@@ -106,7 +114,7 @@ def nix_source_names() -> set[str]:
                 name="flake",
                 value=FunctionCall(
                     name=identifier_attr_path("builtins", "getFlake"),
-                    argument=StringPrimitive(value=flake_url),
+                    argument=nix_str(flake_url),
                 ),
             ),
         ],

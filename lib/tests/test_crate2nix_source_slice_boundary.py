@@ -262,7 +262,16 @@ def test_production_root_rejects_an_empty_evaluator_path(
     ):
         crate2nix._resolve_production_root(_target())
 
-    assert commands[0][:-1] == ["nix", "eval", "--impure", "--raw", "--expr"]
+    assert commands[0][:-1] == [
+        "nix",
+        "eval",
+        "--impure",
+        "--raw",
+        "--option",
+        "allow-import-from-derivation",
+        "false",
+        "--expr",
+    ]
     assert_nix_ast_equal(
         commands[0][-1],
         f"""let flake = builtins.getFlake {json.dumps(crate2nix.local_flake_url())};
@@ -306,7 +315,16 @@ def test_production_root_uses_the_locked_input_identity(
     )
 
     assert resolved == (expected_root, "sha256-locked-input=")
-    assert commands[0][:-1] == ["nix", "eval", "--impure", "--raw", "--expr"]
+    assert commands[0][:-1] == [
+        "nix",
+        "eval",
+        "--impure",
+        "--raw",
+        "--option",
+        "allow-import-from-derivation",
+        "false",
+        "--expr",
+    ]
     assert_nix_ast_equal(
         commands[0][-1],
         f"""let flake = builtins.getFlake {json.dumps(crate2nix.local_flake_url())};
@@ -438,7 +456,16 @@ def test_source_materialization_rejects_invalid_eval_metadata(
         )
 
     assert len(commands) == 1
-    assert commands[0][:-1] == ["nix", "eval", "--impure", "--json", "--expr"]
+    assert commands[0][:-1] == [
+        "nix",
+        "eval",
+        "--impure",
+        "--json",
+        "--option",
+        "allow-import-from-derivation",
+        "false",
+        "--expr",
+    ]
 
 
 def test_source_materialization_rejects_non_object_path_metadata(

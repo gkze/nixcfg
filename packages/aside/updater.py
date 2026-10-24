@@ -5,9 +5,7 @@ import re
 from typing import TYPE_CHECKING, ClassVar
 from urllib.parse import urlencode, urlsplit
 
-import aiohttp
-
-from lib.http_utils import HTTP_BAD_REQUEST
+from lib.update.net import fetch_redirect_location
 from lib.update.updaters import (
     AssetURLsMetadataUpdater,
     VersionInfo,
@@ -18,9 +16,10 @@ from lib.update.updaters.metadata import AssetURLsMetadata
 from lib.update.updaters.strategies import ResolvedArtifact
 
 if TYPE_CHECKING:
+    import aiohttp
+
     from lib.update.updaters.core import UpdateContext
 
-_HTTP_REDIRECT_MIN = 300
 _DOWNLOAD_URL = "https://aside.com/api/download/macos"
 _ARTIFACT_HOST = "releases.aside.com"
 _VERSION_PATTERN = r"[0-9]+(?:\.[0-9]+)+"
@@ -72,23 +71,9 @@ class AsideUpdater(AssetURLsMetadataUpdater):
         session: aiohttp.ClientSession,
         platform: str,
     ) -> ResolvedArtifact:
-        download_url = self._download_url(platform)
-        timeout = aiohttp.ClientTimeout(total=self.config.default_timeout)
-        async with session.head(
-            download_url,
-            allow_redirects=False,
-            timeout=timeout,
-        ) as response:
-            if not _HTTP_REDIRECT_MIN <= response.status < HTTP_BAD_REQUEST:
-                msg = (
-                    f"Expected Aside download redirect from {download_url}, "
-                    f"got HTTP {response.status} {response.reason}"
-                )
-                raise RuntimeError(msg)
-            location = response.headers.get("Location")
-            if not location:
-                msg = f"Aside download redirect from {download_url} omitted Location"
-                raise RuntimeError(msg)
+        location = await fetch_redirect_location(
+            session, self._download_url(platform), config=self.config
+        )
         return self._parse_artifact_url(platform, location)
 
     async def fetch_latest(

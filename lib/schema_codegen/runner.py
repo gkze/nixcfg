@@ -15,6 +15,7 @@ from lib.schema_codegen.config import (
     SchemaCodegenConfig,
     URLSource,
 )
+from lib.update import io as update_io
 from lib.update.paths import get_repo_root
 
 from . import _prepare, _render
@@ -70,15 +71,10 @@ def _read_url_source(source: URLSource) -> str:
 
 
 def _resolve_config_paths(config: SchemaCodegenConfig, *, base_dir: Path) -> None:
-    """Resolve repo-relative paths in-place against the config file directory."""
+    """Resolve repo-relative source paths against the config file directory."""
     for source in config.sources.values():
         if isinstance(source, DirectorySource) and not source.path.is_absolute():
             source.path = (base_dir / source.path).resolve()
-
-    for target in config.targets.values():
-        output = target.generator.output
-        if output is not None and not output.is_absolute():
-            target.generator.output = (base_dir / output).resolve()
 
 
 def load_schema_codegen_config(
@@ -104,12 +100,17 @@ def list_schema_codegen_targets(
     """Return configured targets sorted by name."""
     loaded = load_schema_codegen_config(config_path=config_path)
     summaries: list[SchemaTargetSummary] = []
-    for name, target in sorted(loaded.config.targets.items()):
-        output = target.generator.output
-        if output is None:
-            msg = f"Target {name!r} is missing a generator output path"
-            raise RuntimeError(msg)
-        summaries.append(SchemaTargetSummary(name=name, output=output))
+    for name in sorted(loaded.config.targets):
+        try:
+            resolved = _resolve_target(loaded, target_name=name)
+        except TypeError as exc:
+            raise RuntimeError(str(exc)) from exc
+        summaries.append(
+            SchemaTargetSummary(
+                name=name,
+                output=cast("Path", resolved.generator_options["output"]),
+            )
+        )
     return tuple(summaries)
 
 
@@ -144,6 +145,9 @@ def _resolve_target(
     if not isinstance(output, Path):
         msg = f"Target {target_name!r} is missing a generator output path"
         raise TypeError(msg)
+    if not output.is_absolute():
+        output = (loaded.path.parent / output).resolve()
+        generator_options["output"] = output
 
     return _ResolvedTarget(
         generator_options=generator_options,
@@ -242,8 +246,7 @@ def generate_schema_codegen_target(
         resolved_target=resolved_target,
     )
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(rendered, encoding="utf-8")
+    update_io.atomic_write_text(output_path, rendered, mkdir=True)
     _emit_progress(progress, f"Wrote generated models to {output_path}.")
     return output_path
 

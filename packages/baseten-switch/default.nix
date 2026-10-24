@@ -2,6 +2,7 @@
   buildGo127Module,
   fetchFromGitHub,
   lib,
+  mkMacAppPassthru,
   outputs,
   runCommand,
   selfSource,
@@ -92,14 +93,6 @@ let
       runHook postBuild
     '';
 
-    # The historical exception's Swift XCTest
-    # testUnsupportedStatusFallsBackWithoutRepeatedProbe SIGTRAPs (signal 5)
-    # on hosted macos-15 after the rest of the suite passes. The derivation
-    # built; skip checkPhase for that updater-owned version only. Keep this
-    # on the inner drv so passthru.cliPackage does not rebuild the checked
-    # original.
-    doCheck = version != selfSource.pins.checkSkipVersion;
-
     # buildGo127Module's default check phase calls a helper from its default build
     # phase. Define the source project's release-gate test explicitly because
     # the universal CLI/app build above replaces that phase.
@@ -188,11 +181,7 @@ let
         ln -s "${package}/Applications/Baseten Switch.app/Contents/Resources/baseten-switch" "$out/bin/baseten-switch"
       '';
 
-      macApp = {
-        bundleName = "Baseten Switch.app";
-        bundleRelPath = "Applications/Baseten Switch.app";
-        installMode = "copy";
-      };
+      inherit (mkMacAppPassthru { bundleName = "Baseten Switch.app"; }) macApp;
     };
   };
 in

@@ -1,5 +1,6 @@
 """HTTP helpers for update data sources and GitHub APIs."""
 
+import asyncio
 import json
 import logging
 import urllib.parse
@@ -20,12 +21,12 @@ from tenacity import (
 from tenacity.wait import wait_exponential
 
 from lib import http_utils, json_utils
+from lib.update import failures
 from lib.update.config import UpdateConfig, resolve_active_config
-from lib.update.constants import resolve_timeout_alias
 from lib.update.runtime import active_runtime, current_source, resource_slot
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from tenacity import RetryCallState
 
@@ -47,17 +48,15 @@ def _expect_json_list(payload: JSONValue, *, context: str) -> JSONList:
 # Retry-After header into a retry. Every other status policy lives in
 # lib/http_utils.py.
 _HTTP_FORBIDDEN = 403
+_HTTP_REDIRECT_MIN = 300
 # Version discovery already exhausts ``fetch_json`` retries. These leftovers
 # are runner/CDN resolver flakes, not a missing current pin or a bad payload.
+# Discovery runs in-process over aiohttp, so it matches Python resolver and
+# aiohttp spellings rather than curl transfer faults.
 _DISCOVERY_TRANSIENT_MARKERS = (
-    "cannot connect to host",
-    "clientconnectorerror",
-    "could not resolve host",
-    "getaddrinfo failed",
-    "name or service not known",
-    "no address associated with hostname",
-    "nodename nor servname provided, or not known",
-    "temporary failure in name resolution",
+    *failures.DNS_RESOLUTION_MARKERS,
+    *failures.PYTHON_RESOLVER_MARKERS,
+    *failures.AIOHTTP_CONNECT_MARKERS,
 )
 
 
@@ -78,8 +77,10 @@ def is_transient_discovery_failure(error: BaseException) -> bool:
         isinstance(exc, TimeoutError | aiohttp.ClientConnectorError) for exc in seen
     ):
         return True
-    folded = " ".join(f"{type(exc).__name__} {exc}" for exc in seen).casefold()
-    return any(marker in folded for marker in _DISCOVERY_TRANSIENT_MARKERS)
+    return failures.contains_marker(
+        " ".join(f"{type(exc).__name__} {exc}" for exc in seen),
+        _DISCOVERY_TRANSIENT_MARKERS,
+    )
 
 
 # Bound server-directed sleeps so an untrusted response cannot stall an update forever.
@@ -91,24 +92,17 @@ def _get_github_token() -> str | None:
     return http_utils.resolve_github_token(allow_netrc=True, logger=logger)
 
 
-def _check_github_rate_limit(headers: dict[str, str], url: str) -> None:
-    remaining = headers.get("X-RateLimit-Remaining")
-    if remaining is None:
-        return
-    try:
-        remaining_value = int(remaining)
-    except ValueError:
-        return
-    if remaining_value > 0:
-        return
+def _github_rate_limit_detail(headers: Mapping[str, str], url: str) -> str | None:
+    """Describe an exhausted GitHub API quota on an error response."""
+    if not url.startswith("https://api.github.com/"):
+        return None
+    if headers.get("X-RateLimit-Remaining", "").strip() != "0":
+        return None
     reset = headers.get("X-RateLimit-Reset")
     reset_time = "unknown"
     if reset and reset.isdigit():
         reset_time = datetime.fromtimestamp(int(reset), tz=UTC).isoformat()
-    msg = f"GitHub API rate limit exceeded for {url}. Resets at {reset_time}."
-    raise RuntimeError(
-        msg,
-    )
+    return f"GitHub API rate limit exceeded for {url}. Resets at {reset_time}."
 
 
 def _build_request_headers(url: str, user_agent: str | None) -> dict[str, str]:
@@ -205,146 +199,256 @@ def _retry_wait(backoff: float) -> Callable[[RetryCallState], float]:
     return _wait
 
 
-def _resolve_timeout_alias(
-    *,
-    request_timeout: float | None,
-    kwargs: dict[str, object],
-) -> float | None:
-    return resolve_timeout_alias(
-        named_timeout=request_timeout,
-        named_timeout_label="request_timeout",
-        kwargs=kwargs,
-    )
+@dataclass(frozen=True, slots=True)
+class HTTPResponse:
+    """One completed HTTP exchange: status, final URL, headers, and body."""
 
-
-def _pop_optional_str(kwargs: dict[str, object], key: str) -> str | None:
-    value = kwargs.pop(key, None)
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value
-    msg = f"{key} must be a string"
-    raise TypeError(msg)
-
-
-def _pop_optional_numeric(kwargs: dict[str, object], key: str) -> float | None:
-    value = kwargs.pop(key, None)
-    if value is None:
-        return None
-    if isinstance(value, int | float):
-        return float(value)
-    msg = f"{key} must be numeric"
-    raise TypeError(msg)
-
-
-def _pop_optional_int(kwargs: dict[str, object], key: str) -> int | None:
-    value = kwargs.pop(key, None)
-    if value is None:
-        return None
-    if isinstance(value, int):
-        return value
-    msg = f"{key} must be an integer"
-    raise TypeError(msg)
-
-
-def _pop_optional_config(kwargs: dict[str, object]) -> UpdateConfig | None:
-    value = kwargs.pop("config", None)
-    if value is None:
-        return None
-    if isinstance(value, UpdateConfig):
-        return value
-    msg = "config must be an UpdateConfig"
-    raise TypeError(msg)
+    status: int
+    url: str
+    headers: Mapping[str, str]
+    body: bytes
 
 
 @dataclass(frozen=True)
 class _RequestOptions:
-    method: str
     user_agent: str | None
     request_timeout: float
     attempts: int
     backoff: float
 
 
-def _parse_request_options(kwargs: dict[str, object]) -> _RequestOptions:
-    user_agent = _pop_optional_str(kwargs, "user_agent")
-    request_timeout = _pop_optional_numeric(kwargs, "request_timeout")
-    method = kwargs.pop("method", "GET")
-    if not isinstance(method, str):
-        msg = "method must be a string"
-        raise TypeError(msg)
-    retries = _pop_optional_int(kwargs, "retries")
-    backoff = _pop_optional_numeric(kwargs, "backoff")
-    config = resolve_active_config(_pop_optional_config(kwargs))
-
-    if kwargs:
-        unknown = ", ".join(sorted(kwargs))
-        msg = f"Unexpected keyword argument(s): {unknown}"
-        raise TypeError(msg)
-
-    timeout = request_timeout or config.default_timeout
-    attempts = max(1, retries if retries is not None else config.default_retries)
-    resolved_backoff = (
-        max(0.0, backoff)
-        if backoff is not None
-        else max(0.0, config.default_retry_backoff)
-    )
+def _resolve_request_options(
+    *,
+    user_agent: str | None,
+    request_timeout: float | None,
+    retries: int | None,
+    backoff: float | None,
+    config: UpdateConfig | None,
+) -> _RequestOptions:
+    """Fill unset request knobs from the active update config."""
+    resolved_config = resolve_active_config(config)
     return _RequestOptions(
-        method=method,
         user_agent=user_agent,
-        request_timeout=timeout,
-        attempts=attempts,
-        backoff=resolved_backoff,
+        request_timeout=request_timeout or resolved_config.default_timeout,
+        attempts=max(
+            1, retries if retries is not None else resolved_config.default_retries
+        ),
+        backoff=max(
+            0.0,
+            backoff if backoff is not None else resolved_config.default_retry_backoff,
+        ),
     )
 
 
-async def _request(
+_HTTPS_ONLY = frozenset({"https"})
+_HTTP_MOVED_PERMANENTLY = 301
+_HTTP_FOUND = 302
+_HTTP_SEE_OTHER = 303
+_REDIRECT_STATUSES = frozenset({
+    _HTTP_MOVED_PERMANENTLY,
+    _HTTP_FOUND,
+    _HTTP_SEE_OTHER,
+    307,
+    308,
+})
+_MAX_REDIRECTS = 10
+_SENSITIVE_REDIRECT_HEADERS = frozenset({
+    "authorization",
+    "cookie",
+    "proxy-authorization",
+})
+
+
+def _validated_redirect_location(url: str, location: str) -> str:
+    """Join and validate a redirect target before it can be requested."""
+    target = urllib.parse.urljoin(url, location)
+    http_utils.validate_request_target(target, allowed_schemes=_HTTPS_ONLY, attempts=1)
+    return target
+
+
+def _validate_response_chain(
+    response: aiohttp.ClientResponse, *, attempts: int
+) -> None:
+    """Validate every URL exposed by a response, including redirect history."""
+    for hop in (*getattr(response, "history", ()), response):
+        http_utils.validate_request_target(
+            str(hop.url), allowed_schemes=_HTTPS_ONLY, attempts=attempts
+        )
+
+
+def _same_origin(first: str, second: str) -> bool:
+    """Compare URL origins using their default ports when omitted."""
+    first_parts = urllib.parse.urlsplit(first)
+    second_parts = urllib.parse.urlsplit(second)
+    first_port = first_parts.port or (443 if first_parts.scheme == "https" else 80)
+    second_port = second_parts.port or (443 if second_parts.scheme == "https" else 80)
+    return (
+        first_parts.scheme == second_parts.scheme
+        and first_parts.hostname == second_parts.hostname
+        and first_port == second_port
+    )
+
+
+def _redirect_headers(
+    headers: Mapping[str, str], *, current_url: str, next_url: str
+) -> dict[str, str]:
+    """Apply aiohttp's cross-origin credential stripping policy."""
+    redirected = dict(headers)
+    if not _same_origin(current_url, next_url):
+        for name in tuple(redirected):
+            if name.lower() in _SENSITIVE_REDIRECT_HEADERS:
+                del redirected[name]
+    return redirected
+
+
+def _response_result(
+    response: aiohttp.ClientResponse,
+    payload: bytes,
+    *,
+    request_url: str,
+    response_url: str,
+) -> HTTPResponse:
+    """Return a successful response or classify its status for the retryer."""
+    if response.status < http_utils.HTTP_BAD_REQUEST:
+        return HTTPResponse(
+            status=response.status,
+            url=response_url,
+            headers=response.headers,
+            body=payload,
+        )
+    detail = http_utils.format_http_error(
+        response.status,
+        # aiohttp types reason as str | None; str() keeps the existing
+        # diagnostic text for the unset case.
+        str(response.reason),
+        payload,
+    )
+    retry_after = _parse_retry_after(
+        response.headers.get("Retry-After"),
+        now=datetime.now(tz=UTC),
+    )
+    rate_limit = _github_rate_limit_detail(response.headers, request_url)
+    if rate_limit is not None and retry_after is None:
+        # An exhausted primary quota only recovers at its reset time.
+        raise http_utils.NonRetryableStatusError(
+            response.status, f"{detail}; {rate_limit}"
+        )
+    if http_utils.is_retryable_status(response.status) or (
+        response.status == _HTTP_FORBIDDEN and retry_after is not None
+    ):
+        raise http_utils.RetryableStatusError(
+            response.status,
+            detail,
+            retry_after=retry_after,
+        )
+    raise http_utils.NonRetryableStatusError(response.status, detail)
+
+
+async def request(
     session: aiohttp.ClientSession,
     url: str,
-    **kwargs: object,
-) -> tuple[bytes, dict[str, str]]:
-    options = _parse_request_options(kwargs)
+    *,
+    method: str = "GET",
+    headers: Mapping[str, str] | None = None,
+    json_body: object = None,
+    allow_redirects: bool = True,
+    user_agent: str | None = None,
+    request_timeout: float | None = None,
+    retries: int | None = None,
+    backoff: float | None = None,
+    config: UpdateConfig | None = None,
+) -> HTTPResponse:
+    """Send one HTTPS request with retries, Retry-After, and download admission.
+
+    Responses below 400 are returned, including unfollowed 3xx redirects when
+    ``allow_redirects`` is false. Redirects must stay on HTTPS.
+    """
+    options = _resolve_request_options(
+        user_agent=user_agent,
+        request_timeout=request_timeout,
+        retries=retries,
+        backoff=backoff,
+        config=config,
+    )
     http_utils.validate_request_target(
         url,
-        allowed_schemes=frozenset({"https"}),
+        allowed_schemes=_HTTPS_ONLY,
         attempts=options.attempts,
     )
-    headers = _build_request_headers(url, options.user_agent)
+    request_headers = {
+        **_build_request_headers(url, options.user_agent),
+        **(headers or {}),
+    }
     timeout_config = aiohttp.ClientTimeout(
         total=options.request_timeout,
     )
 
-    async def _perform_request_once() -> tuple[bytes, dict[str, str]]:
-        async with session.request(
-            options.method,
-            url,
-            headers=headers,
-            timeout=timeout_config,
-            allow_redirects=True,
-        ) as response:
-            payload = await response.read()
-            if response.status < http_utils.HTTP_BAD_REQUEST:
-                return payload, dict(response.headers)
-            detail = http_utils.format_http_error(
-                response.status,
-                # aiohttp types reason as str | None; str() keeps the existing
-                # diagnostic text for the unset case.
-                str(response.reason),
-                payload,
-            )
-            retry_after = _parse_retry_after(
-                response.headers.get("Retry-After"),
-                now=datetime.now(tz=UTC),
-            )
-            if http_utils.is_retryable_status(response.status) or (
-                response.status == _HTTP_FORBIDDEN and retry_after is not None
-            ):
-                raise http_utils.RetryableStatusError(
-                    response.status,
-                    detail,
-                    retry_after=retry_after,
+    async def _perform_request_once() -> HTTPResponse:
+        current_url = url
+        current_method = method.upper()
+        current_headers = dict(request_headers)
+        current_json = json_body
+        redirect_count = 0
+        history: list[aiohttp.ClientResponse] = []
+
+        while True:
+            async with session.request(
+                current_method,
+                current_url,
+                headers=current_headers,
+                json=current_json,
+                timeout=timeout_config,
+                allow_redirects=False,
+            ) as response:
+                _validate_response_chain(response, attempts=options.attempts)
+                location = response.headers.get("Location")
+                follow_location = location or response.headers.get("URI")
+                if (
+                    allow_redirects
+                    and response.status in _REDIRECT_STATUSES
+                    and follow_location
+                ):
+                    next_url = _validated_redirect_location(
+                        current_url, follow_location
+                    )
+                    redirect_count += 1
+                    if redirect_count >= _MAX_REDIRECTS:
+                        raise aiohttp.TooManyRedirects(
+                            response.request_info,
+                            tuple(history),
+                        )
+                    next_method, next_json = current_method, current_json
+                    if (
+                        response.status == _HTTP_SEE_OTHER and current_method != "HEAD"
+                    ) or (
+                        response.status in {_HTTP_MOVED_PERMANENTLY, _HTTP_FOUND}
+                        and current_method == "POST"
+                    ):
+                        next_method = "GET"
+                        next_json = None
+                        current_headers = {
+                            name: value
+                            for name, value in current_headers.items()
+                            if name.lower() != "content-length"
+                        }
+                    next_headers = _redirect_headers(
+                        current_headers,
+                        current_url=current_url,
+                        next_url=next_url,
+                    )
+                    history.append(response)
+                    current_url = next_url
+                    current_method = next_method
+                    current_headers = next_headers
+                    current_json = next_json
+                    continue
+
+                return _response_result(
+                    response,
+                    await response.read(),
+                    request_url=url,
+                    response_url=str(response.url),
                 )
-            raise http_utils.NonRetryableStatusError(response.status, detail)
 
     retryer = AsyncRetrying(
         stop=stop_after_attempt(options.attempts),
@@ -369,8 +473,10 @@ async def _request(
                 async with resource_slot(
                     "download", source=current_source(), config=config
                 ) as timing:
-                    response = await _perform_request_once()
-                    timing.input_bytes += len(response[0])
+                    response = await asyncio.wait_for(
+                        _perform_request_once(), timeout=options.request_timeout
+                    )
+                    timing.input_bytes += len(response.body)
                     return response
     except (
         http_utils.NonRetryableStatusError,
@@ -384,6 +490,27 @@ async def _request(
     raise RuntimeError(msg)
 
 
+async def fetch_redirect_location(
+    session: aiohttp.ClientSession,
+    url: str,
+    *,
+    method: str = "HEAD",
+    config: UpdateConfig | None = None,
+) -> str:
+    """Return the absolute ``Location`` of the redirect ``url`` answers with."""
+    response = await request(
+        session, url, method=method, allow_redirects=False, config=config
+    )
+    location = response.headers.get("Location")
+    if not _HTTP_REDIRECT_MIN <= response.status < http_utils.HTTP_BAD_REQUEST:
+        msg = f"Expected a redirect from {url}, got HTTP {response.status}"
+        raise RuntimeError(msg)
+    if not location:
+        msg = f"Redirect from {url} did not include Location"
+        raise RuntimeError(msg)
+    return _validated_redirect_location(url, location)
+
+
 async def fetch_url(
     session: aiohttp.ClientSession,
     url: str,
@@ -391,22 +518,16 @@ async def fetch_url(
     user_agent: str | None = None,
     request_timeout: float | None = None,
     config: UpdateConfig | None = None,
-    **kwargs: object,
 ) -> bytes:
     """Fetch raw bytes from ``url`` with retry and timeout config."""
-    request_timeout = _resolve_timeout_alias(
-        request_timeout=request_timeout,
-        kwargs=kwargs,
-    )
-    config = resolve_active_config(config)
-    payload, _ = await _request(
+    response = await request(
         session,
         url,
         user_agent=user_agent,
         request_timeout=request_timeout,
         config=config,
     )
-    return payload
+    return response.body
 
 
 async def fetch_headers(
@@ -415,17 +536,25 @@ async def fetch_headers(
     *,
     request_timeout: float | None = None,
     config: UpdateConfig | None = None,
-) -> dict[str, str]:
-    """Send a HEAD request and return the response headers."""
-    config = resolve_active_config(config)
-    _, headers = await _request(
+) -> Mapping[str, str]:
+    """Send a HEAD request and return the case-insensitive response headers."""
+    response = await request(
         session,
         url,
         method="HEAD",
         request_timeout=request_timeout,
         config=config,
     )
-    return headers
+    return response.headers
+
+
+def decode_json(payload: bytes, *, context: str) -> JSONValue:
+    """Decode a JSON document, naming ``context`` on failure."""
+    try:
+        return json.loads(payload.decode())
+    except (UnicodeDecodeError, json.JSONDecodeError) as err:
+        msg = f"Invalid JSON response from {context}: {err}"
+        raise RuntimeError(msg) from err
 
 
 async def fetch_json(
@@ -435,36 +564,16 @@ async def fetch_json(
     user_agent: str | None = None,
     request_timeout: float | None = None,
     config: UpdateConfig | None = None,
-    **kwargs: object,
 ) -> JSONValue:
     """Fetch and decode JSON data from ``url``."""
-    request_timeout = _resolve_timeout_alias(
+    payload = await fetch_url(
+        session,
+        url,
+        user_agent=user_agent,
         request_timeout=request_timeout,
-        kwargs=kwargs,
+        config=config,
     )
-    config = resolve_active_config(config)
-    if url.startswith("https://api.github.com/"):
-        payload, headers = await _request(
-            session,
-            url,
-            user_agent=user_agent,
-            request_timeout=request_timeout,
-            config=config,
-        )
-        _check_github_rate_limit(headers, url)
-    else:
-        payload = await fetch_url(
-            session,
-            url,
-            user_agent=user_agent,
-            request_timeout=request_timeout,
-            config=config,
-        )
-    try:
-        return json.loads(payload.decode())
-    except json.JSONDecodeError as err:
-        msg = f"Invalid JSON response from {url}: {err}"
-        raise RuntimeError(msg) from err
+    return decode_json(payload, context=url)
 
 
 def github_raw_url(owner: str, repo: str, rev: str, path: str) -> str:
@@ -600,18 +709,21 @@ async def fetch_github_latest_commit(
 
 
 __all__ = [
+    "HTTPResponse",
     "JSONDict",
     "JSONList",
     "JSONScalar",
     "JSONValue",
-    "_request",
+    "decode_json",
     "fetch_github_api",
     "fetch_github_api_paginated",
     "fetch_github_default_branch",
     "fetch_github_latest_commit",
     "fetch_json",
+    "fetch_redirect_location",
     "fetch_url",
     "github_api_url",
     "github_raw_url",
     "is_transient_discovery_failure",
+    "request",
 ]

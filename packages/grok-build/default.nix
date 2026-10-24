@@ -4,6 +4,7 @@
   mkZipApp,
   python3,
   selfSource,
+  signAndVerifyBundle,
   ...
 }:
 mkSimpleDarwinApp {
@@ -15,6 +16,7 @@ mkSimpleDarwinApp {
   sourceAppPath = "Grok.app";
   info = selfSource;
   dontFixup = true;
+  verifyAppSignature = true;
   postInstallApp = ''
     app_bundle="$out/Applications/Grok Build.app"
     chmod -R u+w "$app_bundle"
@@ -29,13 +31,16 @@ mkSimpleDarwinApp {
     } ${lib.getExe python3} ${./patch_renderer_ota.py} \
       "$app_bundle/Contents/Resources/app.asar" \
       "$app_bundle/Contents/Info.plist"
-    /usr/bin/codesign \
-      --force \
-      --deep \
-      --sign - \
-      --preserve-metadata=identifier,flags,runtime \
-      --entitlements ${./Entitlements.plist} \
-      "$app_bundle"
+    ${signAndVerifyBundle {
+      bundle = ''"$app_bundle"'';
+      preserveMetadata = [
+        "identifier"
+        "flags"
+        "runtime"
+      ];
+      entitlements = ./Entitlements.plist;
+      verify = true;
+    }}
   '';
   description = "xAI desktop workspace for building software with Grok";
   homepage = "https://grok.com/";

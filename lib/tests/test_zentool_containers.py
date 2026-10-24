@@ -487,16 +487,6 @@ def test_container_file_helpers_cover_paths_and_io_errors(
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["identities"][0]["name"] == "Town"
 
-    def raise_oserror(self: Path, text: str, *, encoding: str) -> int:
-        _ = (self, text, encoding)
-        raise OSError("permission denied")
-
-    monkeypatch.setattr(type(output_path), "write_text", raise_oserror)
-    with pytest.raises(
-        zentool.ZenFoldersError, match="Unable to write containers file"
-    ):
-        zentool.write_containers(output_path, zentool.ContainerState())
-
 
 def test_session_check_reports_unknown_workspace_and_tab_containers(
     zentool: ModuleType,
@@ -545,15 +535,11 @@ def test_apply_state_plan_writes_containers_and_prunes_removed_cookie_contexts_w
     container_writes: list[tuple[Path, object]] = []
     session_writes: list[tuple[Path, object]] = []
     monkeypatch.setattr(zentool, "_stdout", stdout.append)
-    monkeypatch.setattr(
-        zentool,
-        "backup_session",
-        lambda path: path.with_name(f"{path.name}.bak"),
-    )
+    monkeypatch.setattr(zentool, "require_zen_closed", lambda _profile: None)
     monkeypatch.setattr(
         zentool,
         "backup_file",
-        lambda path: path.with_name(f"{path.name}.bak"),
+        lambda path, **_kw: path.with_name(f"{path.name}.bak"),
     )
     monkeypatch.setattr(zentool, "cookies_file", lambda _profile: cookies_path)
     monkeypatch.setattr(
@@ -616,13 +602,9 @@ def test_apply_state_plan_skips_missing_cookie_backup_and_zero_prune_message(
     stdout: list[str] = []
     backups: list[Path] = []
     monkeypatch.setattr(zentool, "_stdout", stdout.append)
-    monkeypatch.setattr(
-        zentool,
-        "backup_session",
-        lambda path: path.with_name(f"{path.name}.bak"),
-    )
+    monkeypatch.setattr(zentool, "require_zen_closed", lambda _profile: None)
 
-    def fake_backup_file(path: Path) -> Path:
+    def fake_backup_file(path: Path, **_kw: object) -> Path:
         backups.append(path)
         return path.with_name(f"{path.name}.bak")
 
@@ -644,7 +626,7 @@ def test_apply_state_plan_skips_missing_cookie_backup_and_zero_prune_message(
         SimpleNamespace(profile="Default", prune_cookies=True), plan
     )
 
-    assert backups == [containers_path]
+    assert backups == [session_path, containers_path]
     assert stdout == [
         f"Backup: {session_path.name}.bak",
         f"Backup: {containers_path.name}.bak",
@@ -660,7 +642,7 @@ def test_apply_state_plan_skips_missing_cookie_backup_and_zero_prune_message(
         SimpleNamespace(profile="Default", prune_cookies=True), plan
     )
 
-    assert backups == [containers_path, cookies_path]
+    assert backups == [session_path, containers_path, cookies_path]
     assert "Pruned" not in "\n".join(stdout)
 
 
@@ -687,13 +669,9 @@ def test_apply_state_plan_preserves_removed_container_cookies_by_default(
     stdout: list[str] = []
     backups: list[Path] = []
     monkeypatch.setattr(zentool, "_stdout", stdout.append)
-    monkeypatch.setattr(
-        zentool,
-        "backup_session",
-        lambda path: path.with_name(f"{path.name}.bak"),
-    )
+    monkeypatch.setattr(zentool, "require_zen_closed", lambda _profile: None)
 
-    def fake_backup_file(path: Path) -> Path:
+    def fake_backup_file(path: Path, **_kw: object) -> Path:
         backups.append(path)
         return path.with_name(f"{path.name}.bak")
 
@@ -713,7 +691,7 @@ def test_apply_state_plan_preserves_removed_container_cookies_by_default(
 
     zentool.apply_state_plan(SimpleNamespace(profile="Default"), plan)
 
-    assert backups == [containers_path]
+    assert backups == [session_path, containers_path]
     assert stdout == [
         f"Backup: {session_path.name}.bak",
         f"Backup: {containers_path.name}.bak",
@@ -791,3 +769,74 @@ def test_build_state_apply_plan_reports_container_only_diffs(
     assert plan.removed_context_ids == {8}
     assert plan.diff_text is not None
     assert "identities" in plan.diff_text
+
+
+def _plan(zentool: ModuleType, tmp_path: Path) -> object:
+    session_path = tmp_path / zentool.SESSION_FILENAME
+    containers_path = tmp_path / zentool.CONTAINERS_FILENAME
+    session_path.write_bytes(b"session")
+    containers_path.write_text("{}\n", encoding="utf-8")
+    return zentool.StateApplyPlan(
+        session_path=session_path,
+        containers_path=containers_path,
+        desired_state=zentool.SessionState(),
+        desired_containers=zentool.ContainerState(),
+        diff_text="state diff",
+        containers_changed=True,
+        removed_context_ids=set(),
+    )
+
+
+def test_apply_state_plan_rechecks_zen_before_any_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    zentool: ModuleType,
+) -> None:
+    """Zen opened during favicon resolution or the prompt aborts before backups."""
+    plan = _plan(zentool, tmp_path)
+    before = sorted(tmp_path.iterdir())
+
+    def zen_running(_profile: str | None) -> None:
+        msg = "Zen is running. Quit it first."
+        raise zentool.ZenFoldersError(msg)
+
+    monkeypatch.setattr(zentool, "require_zen_closed", zen_running)
+    with pytest.raises(zentool.ZenFoldersError, match="Zen is running"):
+        zentool.apply_state_plan(SimpleNamespace(profile="Default"), plan)
+    assert sorted(tmp_path.iterdir()) == before
+
+
+def test_apply_state_plan_failure_reports_completed_steps_and_backups(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    zentool: ModuleType,
+) -> None:
+    """A late failure names what already changed and where the backups are."""
+    plan = _plan(zentool, tmp_path)
+    monkeypatch.setattr(zentool, "require_zen_closed", lambda _profile: None)
+    monkeypatch.setattr(zentool, "_stdout", lambda _message: None)
+
+    def fail_session_write(_path: Path, _state: object) -> None:
+        msg = "Unable to write session file: disk full"
+        raise zentool.ZenFoldersError(msg)
+
+    monkeypatch.setattr(zentool, "write_session", fail_session_write)
+    with pytest.raises(zentool.ZenFoldersError) as excinfo:
+        zentool.apply_state_plan(SimpleNamespace(profile="Default"), plan)
+
+    message = str(excinfo.value)
+    assert message.startswith("Unable to write session file: disk full")
+    backups = sorted(tmp_path.glob("*.bak"))
+    assert len(backups) == 2
+    for backup in backups:
+        assert str(backup) in message
+    assert f"wrote {plan.containers_path.name}" in message
+    assert zentool.read_containers(plan.containers_path) == zentool.ContainerState()
+
+    def fail_backup(_path: Path, **_kw: object) -> Path:
+        msg = "Failed to create backup"
+        raise zentool.ZenFoldersError(msg)
+
+    monkeypatch.setattr(zentool, "backup_file", fail_backup)
+    with pytest.raises(zentool.ZenFoldersError, match="^Failed to create backup$"):
+        zentool.apply_state_plan(SimpleNamespace(profile="Default"), plan)

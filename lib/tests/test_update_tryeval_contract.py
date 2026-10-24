@@ -17,51 +17,43 @@ make that transition announce itself instead of silently changing how much
 isolation work a failing validation group costs.
 """
 
-import shutil
 import subprocess
 
 import pytest
 
-_EVAL_TIMEOUT = 60
+from lib.tests._nix_ast import parse_nix_expr
+from lib.tests._nix_eval import nix_eval_result
 
 
-def _eval(nix: str, expr: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # noqa: S603 -- argv from shutil.which, no shell
-        [nix, "eval", "--impure", "--raw", "--expr", expr],
-        capture_output=True,
-        text=True,
-        timeout=_EVAL_TIMEOUT,
-        check=False,
-    )
-
-
-@pytest.mark.skipif(shutil.which("nix") is None, reason="nix is not available")
+@pytest.mark.nix_eval(reason="Only the evaluator can pin tryEval catchability.")
 def test_try_eval_catches_thrown_errors() -> None:
     """Thrown errors stay catchable, so probe-style tryEval use keeps working."""
-    nix = shutil.which("nix")
-    assert nix is not None
-    result = _eval(
-        nix,
-        'let v = builtins.tryEval (throw "boom");'
-        ' in if v.success then v.value else "caught"',
+    result = nix_eval_result(
+        parse_nix_expr(
+            'let v = builtins.tryEval (throw "boom");'
+            ' in if v.success then v.value else "caught"'
+        ),
+        raw=True,
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout == "caught"
 
 
-@pytest.mark.skipif(shutil.which("nix") is None, reason="nix is not available")
+@pytest.mark.nix_eval(
+    reason="Only the evaluator can pin missing-attribute attribution."
+)
 def test_missing_attribute_errors_escape_try_eval() -> None:
     """Missing attributes abort the whole eval.
 
     Batch attribution therefore cannot be delegated to the evaluator, and
     batch subdivision remains required.
     """
-    nix = shutil.which("nix")
-    assert nix is not None
-    result = _eval(
-        nix,
-        'let v = builtins.tryEval ({ a = "1"; }.b);'
-        ' in if v.success then v.value else "caught"',
-    )
-    assert result.returncode != 0
-    assert "attribute 'b' missing" in result.stderr
+    with pytest.raises(subprocess.CalledProcessError) as exc_info:
+        nix_eval_result(
+            parse_nix_expr(
+                'let v = builtins.tryEval ({ a = "1"; }.b);'
+                ' in if v.success then v.value else "caught"'
+            ),
+            raw=True,
+        )
+    assert "attribute 'b' missing" in exc_info.value.stderr

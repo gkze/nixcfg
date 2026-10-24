@@ -29,6 +29,7 @@ from lib.update.ci.shard_plan import (
     plan_darwin_closure_shards,
 )
 from lib.update.derivation_validation import (
+    NO_IMPORT_FROM_DERIVATION_ARGS,
     RootClosureManifest,
     root_closure_check_attr,
     root_closure_installable,
@@ -651,6 +652,7 @@ def eval_check_out_path(
             "eval",
             "--raw",
             "--no-write-lock-file",
+            *NO_IMPORT_FROM_DERIVATION_ARGS,
             f"path:{flake_root}#checks.{system}.{attr}.outPath",
         ],
         check=False,

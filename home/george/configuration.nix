@@ -187,7 +187,13 @@
           package = pkgs.code-cursor;
           preventDowngrade = true;
         };
-        codex.package = pkgs.chatgpt;
+        codex = {
+          package = pkgs.chatgpt;
+          cli = {
+            codex.path = "Contents/Resources/codex-cli/bin/codex";
+            codex-code-mode-host.path = "Contents/Resources/codex-cli/bin/codex-code-mode-host";
+          };
+        };
         cogito.package = pkgs.cogito;
         comet.package = pkgs.comet;
         commander.package = pkgs.commander;
@@ -210,7 +216,10 @@
         "google-chrome".package = pkgs.google-chrome;
         "google-drive".package = pkgs.google-drive;
         goose.package = pkgs.goose-desktop;
-        granola.package = pkgs.granola;
+        granola = {
+          package = pkgs.granola;
+          cli.granola.path = "Contents/MacOS/Granola";
+        };
         hoppscotch.package = pkgs.hoppscotch;
         iina.package = pkgs.iina;
         jacq.package = pkgs.jacq;
@@ -254,12 +263,21 @@
         t3code.package = pkgs.t3code-desktop;
         todoist.package = pkgs.todoist-desktop;
         tolaria.package = pkgs.tolaria;
-        utm.package = pkgs.utm;
-        "vscode-insiders".package = pkgs.vscode-insiders;
+        utm = {
+          package = pkgs.utm;
+          cli.utmctl.path = "Contents/MacOS/utmctl";
+        };
+        "vscode-insiders" = {
+          package = pkgs.vscode-insiders;
+          cli.code-insiders.path = "Contents/Resources/app/bin/code";
+        };
         wave.package = pkgs.wave;
         "wispr-flow".package = pkgs.wispr-flow;
         yaak.package = pkgs.yaak-beta;
-        zed.package = pkgs.zed-editor-nightly;
+        zed = {
+          package = pkgs.zed-editor-nightly;
+          cli.zed.path = "Contents/MacOS/cli";
+        };
         zen-twilight = {
           package = config.nixcfg.zen.finalPackage;
           scope = "system";
@@ -271,9 +289,7 @@
     {
       zen =
         let
-          capitalize =
-            s:
-            (lib.toUpper (builtins.substring 0 1 s)) + (builtins.substring 1 (builtins.stringLength s - 1) s);
+          inherit (config.theme) capitalize;
           themeDir =
             inputs.catppuccin-zen-browser
             + "/themes/${capitalize config.theme.variant}/${capitalize config.theme.accentColor}";
@@ -421,6 +437,10 @@
     };
   };
 
+  # Use the system Nix from modules/common.nix in standalone Home Manager too.
+  # mkForce: inside nix-darwin, Home Manager defines the same option.
+  nix.package = lib.mkForce pkgs.nixVersions.git;
+
   programs = {
     # Programs with configuration (alphabetical)
     alacritty = {
@@ -500,6 +520,7 @@
         window-width = 220;
       };
     };
+    git.settings.url."ssh://gitlab.gnome.org".insteadOf = "https://gitlab.gnome.org";
     gitui = {
       enable = true;
       keyConfig = "${inputs.gitui-key-config}/vim_style_key_config.ron";

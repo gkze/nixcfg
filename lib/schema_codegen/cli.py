@@ -8,6 +8,7 @@ import httpx
 import typer
 
 from lib.cli import HELP_CONTEXT_SETTINGS
+from lib.diagnostics import redact_urls
 from lib.nix.schemas import check as schema_check
 from lib.nix.schemas import codegen_main
 from lib.nix.schemas import fetch as fetch_schemas
@@ -30,10 +31,23 @@ app = typer.Typer(
     context_settings=dict(HELP_CONTEXT_SETTINGS),
 )
 
+_SCHEMA_COMMAND_ERRORS = (
+    FileNotFoundError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    httpx.HTTPError,
+)
+
 
 def _schema_progress(message: str) -> None:
-    """Render schema command progress updates to stderr."""
-    typer.echo(message, err=True)
+    """Render schema command progress updates without exposing URL secrets."""
+    typer.echo(redact_urls(message), err=True)
+
+
+def _schema_error(prefix: str, error: BaseException) -> None:
+    """Render an expected schema command failure through the redaction boundary."""
+    typer.echo(f"{prefix}: {redact_urls(str(error))}", err=True)
 
 
 def _display_schema_path(path: pathlib.Path) -> str:
@@ -69,8 +83,8 @@ def schema_targets(
     try:
         for target in list_schema_codegen_targets(config_path=resolved_config):
             typer.echo(f"{target.name}\t{_display_schema_path(target.output)}")
-    except (FileNotFoundError, RuntimeError, TypeError, ValueError) as exc:
-        typer.echo(f"Schema target listing failed: {exc}", err=True)
+    except _SCHEMA_COMMAND_ERRORS as exc:
+        _schema_error("Schema target listing failed", exc)
         raise typer.Exit(code=1) from exc
 
 
@@ -101,8 +115,8 @@ def schema_generate(
             progress=_schema_progress,
             target_name=target,
         )
-    except (FileNotFoundError, RuntimeError, TypeError, ValueError) as exc:
-        typer.echo(f"Schema generation failed: {exc}", err=True)
+    except _SCHEMA_COMMAND_ERRORS as exc:
+        _schema_error("Schema generation failed", exc)
         raise typer.Exit(code=1) from exc
     typer.echo(f"Generated {_display_schema_path(output_path)}")
 
@@ -142,14 +156,8 @@ def schema_lock(
             include_metadata=include_metadata,
             progress=_schema_progress,
         )
-    except (
-        FileNotFoundError,
-        RuntimeError,
-        TypeError,
-        ValueError,
-        httpx.HTTPError,
-    ) as exc:
-        typer.echo(f"Schema lockfile generation failed: {exc}", err=True)
+    except _SCHEMA_COMMAND_ERRORS as exc:
+        _schema_error("Schema lockfile generation failed", exc)
         raise typer.Exit(code=1) from exc
     typer.echo(f"Generated {_display_schema_path(output_path)}")
 
@@ -160,7 +168,11 @@ def schema_lock(
 )
 def schema_codegen() -> None:
     """Run the Pydantic model code generator."""
-    codegen_main(progress=_schema_progress)
+    try:
+        codegen_main(progress=_schema_progress)
+    except _SCHEMA_COMMAND_ERRORS as exc:
+        _schema_error("Schema codegen failed", exc)
+        raise typer.Exit(code=1) from exc
 
 
 @app.command(
@@ -181,8 +193,8 @@ def schema_verify() -> None:
                 )
                 and all_fresh
             )
-    except (FileNotFoundError, RuntimeError, TypeError, ValueError) as exc:
-        typer.echo(f"Generated schema verification failed: {exc}", err=True)
+    except _SCHEMA_COMMAND_ERRORS as exc:
+        _schema_error("Generated schema verification failed", exc)
         raise typer.Exit(code=1) from exc
 
     if not all_fresh:
@@ -202,7 +214,7 @@ def schema_fetch(
         typer.Option(
             "-c",
             "--check",
-            help="Verify vendored schemas match the pinned commit.",
+            help="Verify vendored schemas against their recorded checksums.",
         ),
     ] = False,
 ) -> None:
@@ -213,8 +225,8 @@ def schema_fetch(
 
     try:
         fetch_schemas(progress=_schema_progress)
-    except RuntimeError as exc:
-        typer.echo(f"Schema fetch failed: {exc}", err=True)
+    except _SCHEMA_COMMAND_ERRORS as exc:
+        _schema_error("Schema fetch failed", exc)
         raise typer.Exit(code=1) from exc
 
 

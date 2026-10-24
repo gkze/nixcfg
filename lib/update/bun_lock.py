@@ -3,7 +3,6 @@
 import io
 import json
 import os
-import re
 import subprocess
 import tarfile
 import tempfile
@@ -13,6 +12,7 @@ from functools import cache
 from typing import TYPE_CHECKING
 
 from lib import http_utils, json_utils
+from lib.update.npm_semver import is_exact_semantic_version, same_semantic_version
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -23,7 +23,6 @@ _as_object_dict = json_utils.as_object_dict
 _as_object_list = json_utils.as_object_list
 _get_required_str = json_utils.get_required_str
 
-_EXACT_VERSION = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+_-]*$")
 _GITHUB_RELEASE_ASSET_PARTS = 6
 _FETCH_RETRIES = 3
 _FETCH_TIMEOUT_SECONDS = 30.0
@@ -220,29 +219,6 @@ def _is_source_url(value: str) -> bool:
     return value.startswith(("https://", "http://", "github:", "git+https://"))
 
 
-def _is_exact_version_spec(spec: str) -> bool:
-    """Return whether *spec* is an exact pinned version string."""
-    if spec in {"", "*", "latest"}:
-        return False
-    if spec.startswith((
-        "workspace:",
-        "file:",
-        "link:",
-        "npm:",
-        "git+",
-        "github:",
-        "http://",
-        "https://",
-        "^",
-        "~",
-        ">",
-        "<",
-        "=",
-    )):
-        return False
-    return _EXACT_VERSION.fullmatch(spec) is not None
-
-
 def _fetch_url_bytes(url: str) -> bytes:
     """Fetch *url* and return the response body."""
     parsed = urllib.parse.urlsplit(url)
@@ -393,7 +369,7 @@ def _collect_source_package_mismatches(
             for dep_name, dep_spec_raw in sorted(deps.items()):
                 if not isinstance(dep_spec_raw, str):
                     continue
-                if not _is_exact_version_spec(dep_spec_raw):
+                if not is_exact_semantic_version(dep_spec_raw):
                     continue
 
                 override_url = source_overrides.get(dep_name)
@@ -401,7 +377,7 @@ def _collect_source_package_mismatches(
                     continue
 
                 manifest = manifest_cache[dep_name]
-                if manifest.version != dep_spec_raw:
+                if not same_semantic_version(manifest.version, dep_spec_raw):
                     mismatches.append(
                         SourcePackageExactVersionMismatch(
                             package_name=package_name,

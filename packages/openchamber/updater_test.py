@@ -1,6 +1,7 @@
 """Focused contracts for the exact-source OpenChamber foundation."""
 
 import asyncio
+import re
 import shlex
 import shutil
 import subprocess
@@ -22,6 +23,9 @@ from nix_manipulator.expressions.path import NixPath
 from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib import json_utils
+from lib.codemods.errors import CodemodError
+from lib.codemods.source_patch import SourceAnchor, SourcePatch
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
@@ -238,15 +242,32 @@ def _load_patcher_module() -> ModuleType:
     )
 
 
+def _pinned_surfaces(
+    module: ModuleType,
+) -> list[tuple[str, str, str, SourcePatch | SourceAnchor]]:
+    """Return ``(surface, kind, component, item)`` for the pinned (1.x) layout."""
+    tables = (
+        ("patch", "openchamber", module._OPENCHAMBER_PATCHES),
+        ("anchor", "openchamber", module._OPENCHAMBER_ANCHORS),
+        ("patch", "opencode", module._OPENCODE_PATCHES),
+        ("anchor", "opencode", module._OPENCODE_ANCHORS),
+    )
+    return [
+        (surface, kind, component, item)
+        for kind, component, table in tables
+        for surface, item in table.items()
+    ]
+
+
 def _write_patcher_fixture(module: ModuleType, root: Path) -> dict[str, Path]:
     roots = {
         "openchamber": root / "openchamber",
         "opencode": root / "opencode",
     }
     fragments: dict[Path, list[str]] = {}
-    for item in (*module._ANCHORS, *module._PATCHES):
-        path = roots[item.component] / item.relative_path
-        fragment = item.old if hasattr(item, "old") else item.text
+    for _surface, _kind, component, item in _pinned_surfaces(module):
+        path = roots[component] / item.relative_path
+        fragment = item.old if isinstance(item, SourcePatch) else item.text
         fragments.setdefault(path, []).extend([fragment] * item.expected_count)
     for path, values in fragments.items():
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -442,7 +463,7 @@ def _locked_version_from_text(
         lock_text,
         context="OpenChamber bun.lock",
     )
-    packages = module._require_object(
+    packages = json_utils.as_object_dict(
         lock.get("packages"),
         context="bun.lock packages",
     )
@@ -538,11 +559,20 @@ def test_openchamber_resolves_one_exact_release_and_companion_graph(
         fetched_urls.append(url)
         return _lock_text().encode()
 
+    async def github_payload(
+        session: object,
+        path: str,
+        *,
+        config: object,
+    ) -> dict[str, str]:
+        if "/commits/" in path:
+            return await commit_payload(session, path, config=config)
+        return await release_payload(session, path, config=config)
+
     monkeypatch.setattr(
         "lib.update.updaters.github_release.fetch_github_api",
-        release_payload,
+        github_payload,
     )
-    monkeypatch.setattr(module, "fetch_github_api", commit_payload)
     monkeypatch.setattr(module, "fetch_json", json_payload)
     monkeypatch.setattr(module, "fetch_url", bytes_payload)
     node_resolution_calls: list[tuple[str, str, float, str]] = []
@@ -912,25 +942,6 @@ def test_openchamber_build_result_accepts_coincident_bun_urls() -> None:
         updater.build_result(coincident, missing_bun_role)
 
 
-@pytest.mark.parametrize(
-    ("helper", "args", "message"),
-    [
-        ("_require_object", ([],), "is not a JSON object"),
-        ("_require_string", ({}, "version"), "is missing version"),
-    ],
-)
-def test_openchamber_json_helpers_fail_closed(
-    helper: str,
-    args: tuple[object, ...],
-    message: str,
-) -> None:
-    """Malformed upstream JSON must fail at the typed validation boundary."""
-    module = _load_updater_module()
-    kwargs = {"context": "release metadata"}
-    with pytest.raises(TypeError, match=message):
-        getattr(module, helper)(*args, **kwargs)
-
-
 def test_openchamber_version_prefixes_fail_closed() -> None:
     """Tool and dependency versions must retain their expected source syntax."""
     module = _load_updater_module()
@@ -946,19 +957,9 @@ def test_openchamber_required_suppression_surface_manifest_is_complete() -> None
     """A test-owned manifest must independently pin every mutation surface."""
     module = _load_patcher_module()
     records = [
-        (
-            item.surface,
-            ("patch", item.component, item.relative_path, item.expected_count),
-        )
-        for item in module._PATCHES
+        (surface, (kind, component, item.relative_path, item.expected_count))
+        for surface, kind, component, item in _pinned_surfaces(module)
     ]
-    records.extend(
-        (
-            item.surface,
-            ("anchor", item.component, item.relative_path, item.expected_count),
-        )
-        for item in module._ANCHORS
-    )
 
     assert len(records) == len({surface for surface, _record in records})
     assert dict(records) == _REQUIRED_SUPPRESSION_SURFACES
@@ -971,13 +972,16 @@ def test_openchamber_patcher_is_transactional_and_component_scoped(
     """The policy patch must dry-run, apply atomically, and reject anchor drift."""
     module = _load_patcher_module()
     drifted = _write_patcher_fixture(module, tmp_path / "drifted")
-    anchor = module._ANCHORS[0]
-    anchor_path = drifted[anchor.component] / anchor.relative_path
+    anchor = module._OPENCHAMBER_ANCHORS["root-postinstall-download"]
+    anchor_path = drifted["openchamber"] / anchor.relative_path
     anchor_path.write_text(
         anchor_path.read_text(encoding="utf-8").replace(anchor.text, "", 1),
         encoding="utf-8",
     )
-    with pytest.raises(RuntimeError, match="managed-source anchor"):
+    with pytest.raises(
+        CodemodError,
+        match=rf"^expected 1 match for anchor in {re.escape(str(anchor_path))}, found 0$",
+    ):
         module.patch_trees(drifted["openchamber"], drifted["opencode"], check=True)
 
     roots = _write_patcher_fixture(module, tmp_path / "complete")
@@ -992,13 +996,21 @@ def test_openchamber_patcher_is_transactional_and_component_scoped(
     assert {path: path.read_text(encoding="utf-8") for path in before} == before
 
     module.patch_trees(roots["openchamber"], roots["opencode"])
-    for item in module._PATCHES:
-        path = roots[item.component] / item.relative_path
+    for _surface, kind, component, item in _pinned_surfaces(module):
+        if not isinstance(item, SourcePatch):
+            assert kind == "anchor"
+            continue
+        path = roots[component] / item.relative_path
         source = path.read_text(encoding="utf-8")
         assert source.count(item.new) == item.expected_count
         assert source.count(item.old) == item.new.count(item.old) * item.expected_count
 
-    with pytest.raises(RuntimeError, match="managed-source patch anchor"):
+    # A second run sees the patched tree as drift: anchors still match, but the
+    # first patch target no longer occurs exactly as audited.
+    with pytest.raises(
+        CodemodError,
+        match=r"^expected \d+ match(es)? for (?!anchor in ).*, found \d+$",
+    ):
         module.patch_trees(roots["openchamber"], roots["opencode"], check=True)
 
     scoped = _write_patcher_fixture(module, tmp_path / "scoped")
@@ -1094,9 +1106,7 @@ def test_openchamber_cli_package_without_v2_updater_keeps_v1_upgrade(
     patched = (tmp_path / "packages/opencode/src/cli/cmd/upgrade.ts").read_text(
         encoding="utf-8"
     )
-    v1_upgrade = next(
-        patch for patch in module._PATCHES if patch.surface == "opencode-cli-upgrade"
-    )
+    v1_upgrade = module._OPENCODE_PATCHES["opencode-cli-upgrade"]
     assert v1_upgrade.new in patched
     assert not (tmp_path / "packages/cli/src/services/updater.ts").exists()
 
@@ -1137,7 +1147,13 @@ def test_openchamber_v2_upgrade_policy_is_fail_closed(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(source, encoding="utf-8")
     if service_copies != 1:
-        with pytest.raises(RuntimeError, match="managed-source patch anchor"):
+        with pytest.raises(
+            CodemodError,
+            match=(
+                r"^expected 1 match for .*/packages/cli/src/services/updater\.ts, "
+                rf"found {service_copies}$"
+            ),
+        ):
             module.patch_component("opencode", tmp_path)
         assert {
             name: (tmp_path / name).read_text(encoding="utf-8") for name in sources
@@ -1610,7 +1626,7 @@ def test_openchamber_opencode_resigns_its_final_bun_executable() -> None:
     assert command_texts(install_check_commands, "test") == [
         'test -x "$wrappedExecutable"',
         'test "$(/usr/bin/lipo -archs "$wrappedExecutable")" = arm64',
-        'test "$(HOME="$TMPDIR" "$out/bin/opencode" --version)" = "__NIX_INTERP__"',
+        'test "$(HOME="$TMPDIR" "$out/bin/opencode" --version)" = "opencode v__NIX_INTERP__"',
     ]
 
 
@@ -1758,15 +1774,7 @@ def test_openchamber_install_check_is_parseable_shell() -> None:
 
 def test_openchamber_revalidates_even_current_metadata() -> None:
     """A current version must still refresh all exact-source evidence."""
-    module = _load_updater_module()
-    assert (
-        run_async(
-            module.OpenChamberUpdater()._is_latest(
-                UpdateContext(current=None), _version_info()
-            )
-        )
-        is False
-    )
+    assert _load_updater_module().OpenChamberUpdater.always_rehash
 
 
 def test_openchamber_rejects_non_exact_release_metadata() -> None:
@@ -1783,27 +1791,6 @@ def test_openchamber_rejects_non_exact_release_metadata() -> None:
             run_async(
                 module.OpenChamberUpdater().fetch_latest(
                     object(), context=UpdateContext(current=None)
-                )
-            )
-
-
-def test_openchamber_commit_metadata_must_be_immutable() -> None:
-    """Mutable companion tag responses cannot enter the source graph."""
-    module = _load_updater_module()
-
-    async def commit(*_args: object, **_kwargs: object) -> dict[str, str]:
-        return {"sha": "main"}
-
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr(module, "fetch_github_api", commit)
-        with pytest.raises(RuntimeError, match="is not an immutable commit"):
-            run_async(
-                module.OpenChamberUpdater()._resolve_tag_commit(
-                    object(),
-                    owner="anomalyco",
-                    repo="opencode",
-                    tag=f"v{_OPENCODE_VERSION}",
-                    config=module.OpenChamberUpdater().config,
                 )
             )
 

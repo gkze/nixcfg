@@ -5,6 +5,8 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import cast
 
+import pytest
+
 from lib.update.paths import package_file_map
 from lib.update.updaters import (
     _DISCOVERY_STATE,
@@ -46,15 +48,19 @@ def test_discover_updaters_handles_existing_and_invalid_specs(
     executed_modules: list[object] = []
 
     class _Loader:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
         def exec_module(self, mod: object) -> None:
             executed_modules.append(mod)
+            monkeypatch.setitem(UPDATERS, self.name, type(self.name, (), {}))
 
     def _spec_from_file_location(name: str, _path: Path) -> object | None:
         if name.endswith("spec-none"):
             return None
         if name.endswith("loader-none"):
             return SimpleNamespace(loader=None)
-        return SimpleNamespace(loader=_Loader())
+        return SimpleNamespace(loader=_Loader(name.removeprefix("_updater_pkg.")))
 
     def _module_from_spec(_spec: object) -> object:
         module = object()
@@ -99,7 +105,10 @@ def test_discover_updaters_prefers_repo_helper_modules(
     updater_dir.mkdir(parents=True)
     updater_file = updater_dir / "updater.py"
     updater_file.write_text(
-        "from lib.update.updaters.local_helper import VALUE\nloaded_value = VALUE\n",
+        "from lib.update.updaters import UPDATERS\n"
+        "from lib.update.updaters.local_helper import VALUE\n"
+        "loaded_value = VALUE\n"
+        "UPDATERS['demo'] = VALUE\n",
         encoding="utf-8",
     )
     package_paths = {
@@ -112,6 +121,7 @@ def test_discover_updaters_prefers_repo_helper_modules(
         lambda: {"demo": updater_file},
     )
 
+    monkeypatch.delitem(UPDATERS, "demo", raising=False)
     try:
         sys.modules.pop("_updater_pkg.demo", None)
         sys.modules.pop("lib.update.updaters.local_helper", None)
@@ -123,6 +133,7 @@ def test_discover_updaters_prefers_repo_helper_modules(
             str(helper_dir)
         ]
     finally:
+        UPDATERS.pop("demo", None)
         sys.modules.pop("_updater_pkg.demo", None)
         sys.modules.pop("lib.update.updaters.local_helper", None)
         for name, entries in package_paths.items():
@@ -296,3 +307,51 @@ def test_resolve_registry_alias_uses_loader_only_for_shared_empty_registry(
     finally:
         UPDATERS.clear()
         UPDATERS.update(original)
+
+
+@pytest.mark.parametrize(
+    ("source", "registered"),
+    [
+        ("", "nothing"),
+        ("UPDATERS['other'] = object\n", "other"),
+        ("UPDATERS['demo'] = object\nUPDATERS['extra'] = int\n", "demo, extra"),
+    ],
+)
+def test_discovery_requires_updater_name_to_match_its_directory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    source: str,
+    registered: str,
+) -> None:
+    """The package directory is the updater identity; ``name`` must not drift."""
+    updater_file = tmp_path / "packages" / "demo" / "updater.py"
+    updater_file.parent.mkdir(parents=True)
+    updater_file.write_text(
+        f"from lib.update.updaters import UPDATERS\n{source}", encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters._updater_module_paths",
+        lambda: {"demo": updater_file},
+    )
+    for key in ("demo", "other", "extra"):
+        monkeypatch.delitem(UPDATERS, key, raising=False)
+    monkeypatch.delitem(sys.modules, "_updater_pkg.demo", raising=False)
+
+    try:
+        with pytest.raises(
+            RuntimeError,
+            match=rf"named 'demo' \(its package directory\); it registered {registered}$",
+        ):
+            _discover_updaters()
+    finally:
+        for key in ("demo", "other", "extra"):
+            UPDATERS.pop(key, None)
+        sys.modules.pop("_updater_pkg.demo", None)
+
+
+def test_discovery_registers_every_repo_updater_under_its_directory() -> None:
+    """Every discovered updater module owns exactly its directory's registry key."""
+    updaters = ensure_updaters_loaded()
+
+    assert set(updaters) == set(_updater_module_paths())
+    assert all(cls.name == name for name, cls in updaters.items())

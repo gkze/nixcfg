@@ -3,8 +3,6 @@
 module-path = "lib/nix/commands"
 # Keep mutation runs bounded; surviving mutants can be rerun manually.
 timeout = 30.0
-# Generated models add high-volume low-value mutants.
-excluded-modules = ["lib.nix.models._generated"]
 # Reuse the strict test suite used by coverage checks.
 test-command = "uv run pytest -q lib/tests"
 

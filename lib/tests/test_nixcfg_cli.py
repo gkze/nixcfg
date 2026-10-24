@@ -6,6 +6,7 @@ implementation (which is covered elsewhere).
 
 import os
 import runpy
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
@@ -594,6 +595,165 @@ def test_nixcfg_schema_fetch_reports_runtime_errors_cleanly(
 
     assert result.exit_code == 1
     assert "Schema fetch failed: fetch failed" in result.output
+
+
+_SCHEMA_TEST_URL = (
+    "https://user:SCHEMA_SECRET@example.test/schema.json"
+    "?token=QUERY_SECRET#FRAGMENT_SECRET"
+)
+_SAFE_SCHEMA_TEST_URL = "https://REDACTED@example.test/schema.json?REDACTED#REDACTED"
+
+
+def _assert_schema_output_is_redacted(output: str) -> None:
+    assert _SAFE_SCHEMA_TEST_URL in output
+    assert "SCHEMA_SECRET" not in output
+    assert "QUERY_SECRET" not in output
+    assert "FRAGMENT_SECRET" not in output
+
+
+@pytest.mark.parametrize(
+    ("arguments", "dependency", "prefix"),
+    [
+        (
+            ["schema", "targets"],
+            "list_schema_codegen_targets",
+            "Schema target listing failed",
+        ),
+        (
+            ["schema", "lock", "manifest.yaml"],
+            "write_codegen_lockfile",
+            "Schema lockfile generation failed",
+        ),
+        (["schema", "codegen"], "codegen_main", "Schema codegen failed"),
+        (["schema", "fetch"], "fetch_schemas", "Schema fetch failed"),
+    ],
+)
+def test_nixcfg_schema_errors_redact_urls_at_real_cli_boundary(
+    monkeypatch: _MonkeyPatchLike,
+    arguments: list[str],
+    dependency: str,
+    prefix: str,
+) -> None:
+    """Expected runner, lockfile, codegen, and fetch errors cannot leak secrets."""
+    monkeypatch.setattr(
+        f"lib.schema_codegen.cli.{dependency}",
+        lambda **_kwargs: (_ for _ in ()).throw(ValueError(_SCHEMA_TEST_URL)),
+    )
+
+    result = CliRunner().invoke(nixcfg.app, arguments)
+
+    assert result.exit_code == 1
+    assert prefix in result.output
+    _assert_schema_output_is_redacted(result.output)
+
+
+def test_nixcfg_schema_generate_redacts_progress_and_errors(
+    monkeypatch: _MonkeyPatchLike,
+) -> None:
+    """A runner cannot bypass redaction through progress or its final failure."""
+
+    def _generate(*, progress: Callable[[str], None], **_kwargs: object) -> Path:
+        progress(f"Fetching {_SCHEMA_TEST_URL}")
+        raise RuntimeError(_SCHEMA_TEST_URL)
+
+    monkeypatch.setattr(
+        "lib.schema_codegen.cli.generate_schema_codegen_target", _generate
+    )
+    result = CliRunner().invoke(nixcfg.app, ["schema", "generate", "demo"])
+
+    assert result.exit_code == 1
+    assert "Schema generation failed" in result.output
+    assert result.output.count(_SAFE_SCHEMA_TEST_URL) == 2
+    _assert_schema_output_is_redacted(result.output)
+
+
+def test_nixcfg_schema_verify_redacts_validation_errors(
+    monkeypatch: _MonkeyPatchLike,
+) -> None:
+    """Verification errors use the same redaction boundary as generation."""
+    monkeypatch.setattr(
+        "lib.schema_codegen.cli.list_schema_codegen_targets",
+        lambda **_kwargs: (SchemaTargetSummary("demo", Path("models.py")),),
+    )
+    monkeypatch.setattr(
+        "lib.schema_codegen.cli.verify_schema_codegen_target",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError(_SCHEMA_TEST_URL)),
+    )
+
+    result = CliRunner().invoke(nixcfg.app, ["schema", "verify"])
+
+    assert result.exit_code == 1
+    assert "Generated schema verification failed" in result.output
+    _assert_schema_output_is_redacted(result.output)
+
+
+@pytest.mark.parametrize(
+    ("arguments", "dependency", "prefix"),
+    [
+        (
+            ["schema", "generate", "demo"],
+            "generate_schema_codegen_target",
+            "Schema generation failed",
+        ),
+        (
+            ["schema", "verify"],
+            "verify_schema_codegen_target",
+            "Generated schema verification failed",
+        ),
+        (
+            ["schema", "lock", "manifest.yaml"],
+            "write_codegen_lockfile",
+            "Schema lockfile generation failed",
+        ),
+        (["schema", "codegen"], "codegen_main", "Schema codegen failed"),
+        (["schema", "fetch"], "fetch_schemas", "Schema fetch failed"),
+    ],
+)
+def test_nixcfg_schema_http_errors_are_controlled_and_redacted(
+    monkeypatch: _MonkeyPatchLike,
+    arguments: list[str],
+    dependency: str,
+    prefix: str,
+) -> None:
+    """Every network-capable schema path handles HTTP failures at one boundary."""
+    monkeypatch.setattr(
+        "lib.schema_codegen.cli.list_schema_codegen_targets",
+        lambda **_kwargs: (SchemaTargetSummary("demo", Path("models.py")),),
+    )
+    error = httpx.TooManyRedirects(
+        f"Too many redirects for {_SCHEMA_TEST_URL}",
+        request=httpx.Request("GET", _SCHEMA_TEST_URL),
+    )
+    monkeypatch.setattr(
+        f"lib.schema_codegen.cli.{dependency}",
+        lambda **_kwargs: (_ for _ in ()).throw(error),
+    )
+
+    result = CliRunner().invoke(nixcfg.app, arguments)
+
+    assert result.exit_code == 1
+    assert prefix in result.output
+    assert "Traceback" not in result.output
+    _assert_schema_output_is_redacted(result.output)
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["schema", "generate"],
+        ["schema", "lock"],
+        ["schema", "generate", "demo", "--config"],
+    ],
+)
+def test_nixcfg_schema_usage_errors_keep_typer_exit_semantics(
+    arguments: list[str],
+) -> None:
+    """The controlled runtime-error boundary does not intercept CLI usage errors."""
+    result = CliRunner().invoke(nixcfg.app, arguments)
+
+    assert result.exit_code == 2
+    assert result.output
+    assert "Traceback" not in result.output
 
 
 def test_nixcfg_all_commands_support_short_help_alias() -> None:

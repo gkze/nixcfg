@@ -3,6 +3,7 @@
   fetchFromGitHub,
   fetchPnpmDeps ? null,
   lib,
+  mkMacAppPassthru,
   nodejs_24,
   outputs,
   pkg-config,
@@ -85,6 +86,8 @@ let
     # Tauri's macOS hook produces Writer.app directly. The policy patch makes
     # Nix the sole updater and removes the app-owned /usr/local CLI mutation.
     tauriBuildFlags = [ "--no-sign" ];
+    # Upstream's src-tauri unit tests are not run; why is unrecorded (56e23658).
+    # installCheckPhase below gates the built bundle.
     doCheck = false;
 
     postInstall = ''
@@ -158,11 +161,7 @@ let
           "$out/bin/writer"
       '';
 
-      macApp = {
-        bundleName = appBundleName;
-        bundleRelPath = "Applications/${appBundleName}";
-        installMode = "copy";
-      };
+      inherit (mkMacAppPassthru { bundleName = appBundleName; }) macApp;
     };
 
     meta = with lib; {

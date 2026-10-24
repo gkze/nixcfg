@@ -6,6 +6,8 @@ exclude:
   - .direnv/**
   - .pre-commit-config.yaml
   - .venv/**
+  # Vendored upstream bytes, verified against lib/nix/schemas/_version.json.
+  - lib/nix/schemas
   - node_modules/**
   - result*/**
 formatter:

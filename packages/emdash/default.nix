@@ -11,6 +11,7 @@
   libiconv,
   libsecret,
   libutempter,
+  mkMacAppPassthru,
   openssl,
   outputs,
   patchelf,
@@ -564,11 +565,7 @@ stdenv.mkDerivation {
       ;
     nodejsVersion = nodejs.version;
     pnpmVersion = pnpmPackage.version;
-    macApp = {
-      bundleName = "Emdash.app";
-      bundleRelPath = "Applications/Emdash.app";
-      installMode = "copy";
-    };
+    inherit (mkMacAppPassthru { bundleName = "Emdash.app"; }) macApp;
   };
 
   meta = with lib; {

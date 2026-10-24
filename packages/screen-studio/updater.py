@@ -1,15 +1,12 @@
 """Updater for Screen Studio macOS releases."""
 
 import asyncio
-import json
 import re
 from typing import TYPE_CHECKING, ClassVar
 from urllib.parse import urlsplit
 
-import aiohttp
-
 from lib import json_utils
-from lib.http_utils import HTTP_BAD_REQUEST
+from lib.update.net import decode_json, request
 from lib.update.updaters import (
     AssetURLsMetadataUpdater,
     VersionInfo,
@@ -20,6 +17,8 @@ from lib.update.updaters.metadata import AssetURLsMetadata
 from lib.update.updaters.strategies import ResolvedArtifact
 
 if TYPE_CHECKING:
+    import aiohttp
+
     from lib.update.updaters.core import UpdateContext
 
 _FEED_VERSION = "0.0.0"
@@ -79,41 +78,15 @@ class ScreenStudioUpdater(AssetURLsMetadataUpdater):
             "x-screen-studio-updates-channel": "stable",
             "x-screen-studio-machine-id": _FEED_MACHINE_ID,
         }
-        timeout = aiohttp.ClientTimeout(total=self.config.default_timeout)
-        async with session.request(
-            "GET",
-            self.FEED_URL,
-            headers=headers,
-            allow_redirects=True,
-            timeout=timeout,
-        ) as response:
-            payload_bytes = await response.read()
-            if response.status >= HTTP_BAD_REQUEST:
-                msg = (
-                    f"Screen Studio update feed request for {platform} failed with "
-                    f"HTTP {response.status} {response.reason}"
-                )
-                raise RuntimeError(msg)
-
-        try:
-            payload_value = json.loads(payload_bytes)
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            msg = f"Screen Studio update feed returned invalid JSON for {platform}"
-            raise RuntimeError(msg) from exc
+        response = await request(
+            session, self.FEED_URL, headers=headers, config=self.config
+        )
+        context = f"Screen Studio update feed for {platform}"
         payload = json_utils.as_object_dict(
-            payload_value,
-            context=f"Screen Studio update feed for {platform}",
+            decode_json(response.body, context=context), context=context
         )
-        url = json_utils.get_required_str(
-            payload,
-            "url",
-            context=f"Screen Studio update feed for {platform}",
-        )
-        feed_version = json_utils.get_required_str(
-            payload,
-            "name",
-            context=f"Screen Studio update feed for {platform}",
-        )
+        url = json_utils.get_required_str(payload, "url", context=context)
+        feed_version = json_utils.get_required_str(payload, "name", context=context)
         artifact = self._parse_artifact_url(platform, url)
         if artifact.version != feed_version:
             msg = (

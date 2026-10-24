@@ -4,9 +4,7 @@ import re
 from typing import TYPE_CHECKING, ClassVar
 from urllib.parse import urlparse
 
-import aiohttp
-
-from lib.http_utils import HTTP_BAD_REQUEST
+from lib.update.net import request
 from lib.update.updaters import (
     DownloadUrlMetadataUpdater,
     VersionInfo,
@@ -15,6 +13,8 @@ from lib.update.updaters import (
 from lib.update.updaters.metadata import DownloadUrlMetadata
 
 if TYPE_CHECKING:
+    import aiohttp
+
     from lib.update.updaters.core import UpdateContext
 
 _LATEST_URL = "https://downloads.jacquard.dev/latest/mac-arm64.dmg"
@@ -36,28 +36,12 @@ class JacqUpdater(DownloadUrlMetadataUpdater):
     ) -> VersionInfo:
         """Resolve the current version from Jacq's official latest redirect."""
         _ = context
-        timeout = aiohttp.ClientTimeout(total=self.config.default_timeout)
-        async with session.request(
-            "HEAD",
-            _LATEST_URL,
-            allow_redirects=True,
-            timeout=timeout,
-        ) as response:
-            if response.status >= HTTP_BAD_REQUEST:
-                msg = (
-                    f"Failed to resolve Jacq latest URL {_LATEST_URL}: "
-                    f"HTTP {response.status} {response.reason}"
-                )
-                raise RuntimeError(msg)
-            resolved_url = str(response.url)
-
+        resolved_url = (
+            await request(session, _LATEST_URL, method="HEAD", config=self.config)
+        ).url
         parsed_url = urlparse(resolved_url)
         match = _VERSION_PATTERN.fullmatch(parsed_url.path)
-        if (
-            parsed_url.scheme != "https"
-            or parsed_url.netloc != "downloads.jacquard.dev"
-            or match is None
-        ):
+        if parsed_url.netloc != "downloads.jacquard.dev" or match is None:
             msg = f"Could not extract Jacq version from resolved URL: {resolved_url}"
             raise RuntimeError(msg)
         return VersionInfo(

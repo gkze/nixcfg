@@ -1,6 +1,8 @@
 """Focused pure-Python tests for zentool I/O and asset helpers."""
 
+import contextlib
 import json
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -104,6 +106,8 @@ def test_link_managed_file_handles_remove_replace_and_invalid_destination(
 
     destination.write_text("plain\n", encoding="utf-8")
     zentool.link_managed_file(source, destination, manifest_path=manifest)
+    [backup] = tmp_path.glob("user.js.*.bak")
+    assert backup.read_text(encoding="utf-8") == "plain\n"
     assert destination.is_symlink()
     assert destination.resolve() == source.resolve()
     assert manifest.read_text(encoding="utf-8") == f"{source}\n"
@@ -163,6 +167,14 @@ def test_iter_source_files_and_sync_chrome_tree(
     assert (profile_chrome_dir / "b" / "theme.css").is_symlink()
     assert manifest.read_text(encoding="utf-8") == "a/userChrome.css\nb/theme.css\n"
 
+    unmanaged = profile_chrome_dir / "a" / "userChrome.css"
+    unmanaged.unlink()
+    unmanaged.write_text("local\n", encoding="utf-8")
+    zentool.sync_chrome_tree(source_dir, profile_chrome_dir, manifest)
+    assert unmanaged.resolve() == file_a.resolve()
+    [backup] = unmanaged.parent.glob("userChrome.css.*.bak")
+    assert backup.read_text(encoding="utf-8") == "local\n"
+
     (source_dir / "conflict").mkdir(exist_ok=True)
     (source_dir / "conflict" / "x.css").write_text("x\n", encoding="utf-8")
     (profile_chrome_dir / "conflict" / "x.css").mkdir(parents=True)
@@ -198,7 +210,7 @@ def test_load_asset_sources_prefers_explicit_and_env_overrides(
     assert user_js_source == explicit_user_js.resolve()
 
 
-def test_read_write_load_and_backup_session_cover_error_paths(
+def test_read_write_load_and_backup_file_cover_error_paths(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     zentool: ModuleType,
@@ -209,7 +221,7 @@ def test_read_write_load_and_backup_session_cover_error_paths(
     zentool.write_session(session_path, session)
     assert zentool.read_session(session_path) == session
 
-    backup = zentool.backup_session(session_path)
+    backup = zentool.backup_file(session_path)
     assert backup.exists()
     assert backup.read_bytes() == session_path.read_bytes()
 
@@ -262,29 +274,62 @@ def test_read_write_load_and_backup_session_cover_error_paths(
 
     monkeypatch.setattr(zentool.shutil, "copy2", _bad_copy2)
     with pytest.raises(zentool.ZenFoldersError, match="Failed to create backup"):
-        zentool.backup_session(session_path)
+        zentool.backup_file(session_path)
 
 
-def test_write_session_reports_write_failures(
+def test_profile_writes_are_atomic_and_report_write_failures(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     zentool: ModuleType,
 ) -> None:
-    """Writing the session should translate filesystem errors into ZentoolError."""
+    """A failed session/containers write leaves the old file and no temp file."""
     session = _minimal_session(zentool)
     target = tmp_path / zentool.SESSION_FILENAME
+    target.write_bytes(b"old session")
+    target.chmod(0o640)
+    zentool.write_session(target, session)
+    assert zentool.read_session(target) == session
+    assert target.stat().st_mode & 0o777 == 0o640
+    containers_path = tmp_path / zentool.CONTAINERS_FILENAME
+    containers_path.write_text("{}\n", encoding="utf-8")
+    before = {path: path.read_bytes() for path in tmp_path.iterdir()}
 
-    def _bad_write_bytes(_data: bytes) -> int:
-        msg = "write failed"
+    def fail_fsync(_fd: int) -> None:
+        msg = "disk full"
         raise OSError(msg)
 
-    original_write_bytes = Path.write_bytes
-
-    def _patched_write_bytes(self: Path, data: bytes) -> int:
-        if self == target:
-            return _bad_write_bytes(data)
-        return original_write_bytes(self, data)
-
-    monkeypatch.setattr(Path, "write_bytes", _patched_write_bytes)
+    monkeypatch.setattr(zentool.os, "fsync", fail_fsync)
     with pytest.raises(zentool.ZenFoldersError, match="Unable to write session file"):
-        zentool.write_session(target, session)
+        zentool.write_session(target, _minimal_session(zentool))
+    with pytest.raises(
+        zentool.ZenFoldersError, match="Unable to write containers file"
+    ):
+        zentool.write_containers(containers_path, zentool.ContainerState())
+    assert {path: path.read_bytes() for path in tmp_path.iterdir()} == before
+
+
+def test_backup_file_sqlite_includes_committed_wal_rows(
+    tmp_path: Path, zentool: ModuleType
+) -> None:
+    """Cookie backups must carry rows still in the -wal sidecar, not a torn copy."""
+    database = tmp_path / "cookies.sqlite"
+    writer = sqlite3.connect(database)
+    try:
+        writer.execute("PRAGMA journal_mode=WAL")
+        writer.execute("PRAGMA wal_autocheckpoint=0")
+        writer.execute("CREATE TABLE moz_cookies (id INTEGER PRIMARY KEY)")
+        writer.executemany("INSERT INTO moz_cookies VALUES (?)", [(1,), (2,)])
+        writer.commit()
+        assert database.with_name("cookies.sqlite-wal").stat().st_size > 0
+
+        backup = zentool.backup_file(database, sqlite=True)
+    finally:
+        writer.close()
+    with contextlib.closing(sqlite3.connect(backup)) as connection:
+        rows = connection.execute("SELECT id FROM moz_cookies ORDER BY id").fetchall()
+    assert rows == [(1,), (2,)]
+
+    not_a_database = tmp_path / "broken.sqlite"
+    not_a_database.write_bytes(b"not sqlite" * 100)
+    with pytest.raises(zentool.ZenFoldersError, match="Failed to create backup"):
+        zentool.backup_file(not_a_database, sqlite=True)

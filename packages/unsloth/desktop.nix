@@ -5,6 +5,7 @@
   diffutils,
   frontend,
   lib,
+  mkMacAppPassthru,
   pkg-config,
   python3,
   runCommand,
@@ -102,6 +103,8 @@ rustPlatform.buildRustPackage {
     "--no-sign"
     "--verbose"
   ];
+  # Upstream's Rust tests are not run; why is unrecorded (56e23658).
+  # installCheckPhase below gates the built bundle.
   doCheck = false;
 
   # cargo-tauri propagates the Cargo used to build its CLI. Keep the
@@ -177,11 +180,9 @@ rustPlatform.buildRustPackage {
     runHook postInstallCheck
   '';
 
-  passthru.macApp = {
-    bundleId = "ai.unsloth.studio";
+  passthru = mkMacAppPassthru {
     bundleName = "Unsloth.app";
-    bundleRelPath = "Applications/Unsloth.app";
-    installMode = "copy";
+    macApp.bundleId = "ai.unsloth.studio";
   };
 
   meta = {

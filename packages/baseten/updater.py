@@ -2,7 +2,6 @@
 
 from lib.system_policy import supported_systems
 from lib.update.derivation_validation import DerivationValidation
-from lib.update.nix import _build_fetch_from_github_expr
 from lib.update.updaters import (
     GitHubReleaseUpdater,
     SourceThenOverlayHashMixin,
@@ -25,12 +24,3 @@ class BasetenUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
             mode="build",
         ),
     )
-
-    @staticmethod
-    def _src_expr(commit: str) -> str:
-        return _build_fetch_from_github_expr(
-            "basetenlabs",
-            "baseten-cli",
-            rev=commit,
-            fetch_submodules=False,
-        )

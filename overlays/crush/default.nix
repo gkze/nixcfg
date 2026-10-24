@@ -34,6 +34,8 @@ in
   crush = crushBase.overrideAttrs (_: {
     inherit version src;
     vendorHash = slib.sourceHash "crush" "vendorHash";
+    # Upstream tests are not run; why is unrecorded (fe6126c0). nixpkgs'
+    # versionCheckHook install check still runs.
     doCheck = false;
     ldflags = [
       "-s"

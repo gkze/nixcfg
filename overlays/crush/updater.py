@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 from lib.nix.commands.base import run_nix
 from lib.update.net import fetch_github_api_paginated, fetch_url, github_raw_url
 from lib.update.nix import (
-    _build_fetch_from_github_expr,
     _build_flake_attr_expr,
     get_current_nix_platform,
 )
@@ -161,12 +160,4 @@ class CrushUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
         return VersionInfo(
             version=current_version,
             metadata={"commit": current_commit, "tag": current_tag},
-        )
-
-    @staticmethod
-    def _src_expr(commit: str) -> str:
-        return _build_fetch_from_github_expr(
-            "charmbracelet",
-            "crush",
-            rev=commit,
         )

@@ -51,6 +51,7 @@ from lib.update.ci.shard_plan import (
     darwin_roots,
 )
 from lib.update.derivation_validation import (
+    NO_IMPORT_FROM_DERIVATION_ARGS,
     DerivationValidationFailure,
     DerivationValidationRequest,
     RootClosureManifest,
@@ -58,8 +59,9 @@ from lib.update.derivation_validation import (
     root_closure_installable,
     validate_derivation_requests,
 )
+from lib.update.failures import is_retryable_nix_network_failure
 from lib.update.io import atomic_write_text
-from lib.update.nix import get_current_nix_platform, is_retryable_nix_network_failure
+from lib.update.nix import get_current_nix_platform
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
@@ -410,6 +412,9 @@ class WarmupPlan(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     schema_version: int = Field(alias="schemaVersion")
+    # Empty is inspection-only compatibility for in-memory helpers. Realization
+    # requires an exact expected tree; restored artifacts must always carry it.
+    tree: str = ""
     system: str
     substituters: tuple[str, ...]
     warmup_outputs: tuple[str, ...] = Field(alias="warmupOutputs")
@@ -566,9 +571,7 @@ def eval_darwin_installable_graph(
             "show",
             "--recursive",
             "--no-update-lock-file",
-            "--option",
-            "allow-import-from-derivation",
-            "false",
+            *NO_IMPORT_FROM_DERIVATION_ARGS,
             installable,
         ],
         check=False,
@@ -1408,6 +1411,7 @@ def gitbutler_family_package_outputs(
 def plan_darwin_warmup(
     flake_root: Path,
     *,
+    tree: str,
     manifest: RootClosureManifest,
     shards: tuple[ClosureShard, ...],
     run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
@@ -1416,6 +1420,9 @@ def plan_darwin_warmup(
     package_graphs: Mapping[str, Mapping[str, object]] | None = None,
 ) -> WarmupPlan:
     """Plan the missing shared Darwin outputs and fail closed on huge remainders."""
+    if not tree:
+        msg = "warmup plan source tree is required"
+        raise WarmupError(msg)
     graphs, per_root = _eval_root_darwin_graphs(
         flake_root, darwin_roots(manifest), run=run
     )
@@ -1518,6 +1525,7 @@ def plan_darwin_warmup(
     ordered_cascade = tuple(sorted(cascade))
     return WarmupPlan(
         schemaVersion=1,
+        tree=tree,
         system=_DARWIN_SYSTEM,
         substituters=(_NIXOS_CACHE, _GKZE_CACHE),
         warmupOutputs=ordered,
@@ -1562,13 +1570,23 @@ def write_warmup_plan(path: Path, plan: WarmupPlan) -> None:
     )
 
 
-def load_warmup_plan(path: Path) -> WarmupPlan:
-    """Load a warmup plan or fail closed."""
+def load_warmup_plan(path: Path, *, expected_tree: str) -> WarmupPlan:
+    """Load a plan only when its source tree matches the caller's exact tree."""
     try:
-        return WarmupPlan.model_validate_json(path.read_bytes())
+        plan = WarmupPlan.model_validate_json(path.read_bytes())
     except (OSError, ValueError) as error:
         msg = f"invalid warmup plan: {path}"
         raise WarmupError(msg) from error
+    if not expected_tree:
+        msg = "expected warmup plan source tree must not be empty"
+        raise WarmupError(msg)
+    if plan.tree != expected_tree:
+        msg = (
+            "warmup plan source tree mismatch: "
+            f"plan={plan.tree or '<missing>'} expected={expected_tree}"
+        )
+        raise WarmupError(msg)
+    return plan
 
 
 def _store_output_rest(path: str) -> str:

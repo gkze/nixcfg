@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from multidict import CIMultiDict
 
 from lib.tests._updater_helpers import run_async
 from lib.update.candidate import ResolvedVersion
@@ -15,6 +16,8 @@ from lib.update.updaters import UpdateContext
 from packages.reason import updater, validate_artifact
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from lib.update.config import UpdateConfig
 
 
@@ -22,10 +25,18 @@ if TYPE_CHECKING:
 class _FakeResponse:
     status: int = 307
     reason: str = "Temporary Redirect"
-    headers: dict[str, str] = field(default_factory=dict)
+    headers: Mapping[str, str] = field(default_factory=dict)
+    url: str = "https://reasonmachines.com/api/desktop-download?arch=aarch64"
+
+    def __post_init__(self) -> None:
+        # aiohttp exposes case-insensitive headers; HTTP/2 sends them lowercased.
+        self.headers = CIMultiDict(self.headers)
 
     async def __aenter__(self) -> _FakeResponse:
         return self
+
+    async def read(self) -> bytes:
+        return b""
 
     async def __aexit__(self, *_args: object) -> None:
         return None
@@ -36,8 +47,8 @@ class _FakeSession:
         self.response = response
         self.calls: list[tuple[str, dict[str, object]]] = []
 
-    def head(self, url: str, **kwargs: object) -> _FakeResponse:
-        self.calls.append((url, kwargs))
+    def request(self, method: str, url: str, **kwargs: object) -> _FakeResponse:
+        self.calls.append((url, {"method": method, **kwargs}))
         return self.response
 
 
@@ -81,6 +92,7 @@ def test_reason_feed_does_not_persist_signed_urls(
     assert len(session.calls) == 1
     url, kwargs = session.calls[0]
     assert url == instance.PLATFORMS["aarch64-darwin"]
+    assert kwargs["method"] == "HEAD"
     assert kwargs["allow_redirects"] is False
     assert kwargs["timeout"].total == instance.config.default_timeout
 
@@ -242,7 +254,7 @@ def test_reason_rejects_missing_versioned_location(
 ) -> None:
     """A version header without the Tigris object path is not an immutable pin."""
     _feed(monkeypatch, {"name": "0.1.73"})
-    with pytest.raises(RuntimeError, match="not a versioned object"):
+    with pytest.raises(RuntimeError, match="did not include Location"):
         run_async(
             updater.ReasonUpdater().fetch_latest(
                 _FakeSession(
@@ -304,14 +316,14 @@ def test_reason_validates_aarch64_darwin_package() -> None:
     assert validations[0].installable == "path:.#pkgs.{system}.{name}"
 
 
-@pytest.mark.parametrize("status", [403, 500])
+@pytest.mark.parametrize("status", [403, 404])
 def test_reason_download_discovery_does_not_hide_http_errors(
     monkeypatch: pytest.MonkeyPatch,
     status: int,
 ) -> None:
     """A failed public endpoint must not fall back to the feed version."""
     _feed(monkeypatch, {"name": "0.1.64"})
-    with pytest.raises(RuntimeError, match=f"discovery failed with HTTP {status}"):
+    with pytest.raises(RuntimeError, match=f"HTTP {status}"):
         run_async(
             updater.ReasonUpdater().fetch_latest(
                 _FakeSession(_FakeResponse(status=status, reason="Unavailable")),

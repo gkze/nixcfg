@@ -259,7 +259,10 @@ def _replace_packed_file(
         else:
             integrity["hash"] = new_digest
             integrity["blocks"] = new_blocks
-            updated_header = json.dumps(header, separators=(",", ":")).encode()
+            # Electron serializes the header as raw UTF-8, not ASCII escapes.
+            updated_header = json.dumps(
+                header, separators=(",", ":"), ensure_ascii=False
+            ).encode()
         if len(updated_header) != len(header_bytes):
             msg = "ASAR integrity rewrite changed the archive header size"
             raise AsarIntegrityError(msg)

@@ -11,6 +11,7 @@
   makeWrapper,
   installShellFiles,
   runCommand,
+  stdenv,
   ...
 }:
 let
@@ -113,6 +114,9 @@ runCommand "nixcfg"
           nixfmt
         ]
       }
+
+    # tcctool audits macOS TCC privacy lists (home/george/skills/audit-tcc).
+    ${lib.optionalString stdenv.hostPlatform.isDarwin "ln -s ${venv}/bin/tcctool $out/bin/tcctool"}
 
     for shell in zsh bash fish; do
       ${venv}/bin/python \

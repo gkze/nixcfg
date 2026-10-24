@@ -38,13 +38,7 @@ stdenvNoCC.mkDerivation {
 
   postPatch = ''
     PYTHONPATH=${
-      lib.fileset.toSource {
-        root = ../..;
-        fileset = lib.fileset.unions [
-          ../../lib/__init__.py
-          ../../lib/exact_text_patch.py
-        ];
-      }
+      import ../../lib/codemods-pythonpath.nix { inherit lib; }
     } ${lib.getExe python3} ${./patch_nix_managed.py} "$PWD" --component opencode
   '';
 
@@ -101,7 +95,8 @@ stdenvNoCC.mkDerivation {
     test -x "$wrappedExecutable"
     /usr/bin/codesign --verify --strict --verbose=2 "$wrappedExecutable"
     test "$(/usr/bin/lipo -archs "$wrappedExecutable")" = arm64
-    test "$(HOME="$TMPDIR" "$out/bin/opencode" --version)" = "${version}"
+    HOME="$TMPDIR" "$out/bin/opencode" --version
+    test "$(HOME="$TMPDIR" "$out/bin/opencode" --version)" = "opencode v${version}"
 
     runHook postInstallCheck
   '';

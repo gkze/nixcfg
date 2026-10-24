@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, cast
 
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
-from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
@@ -13,10 +12,9 @@ from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import EventSink, ignore_event
 from lib.update.net import fetch_json, github_raw_url
 from lib.update.nix import (
-    _build_fetch_from_github_expr,
     _build_repo_package_attr_expr,
 )
-from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
+from lib.update.nix_expr import compact_nix_expr, identifier_attr_path, nix_str
 from lib.update.updaters import (
     FixedOutputHashStep,
     GitHubReleaseUpdater,
@@ -53,6 +51,8 @@ class ReflectOpenUpdater(GitHubReleaseUpdater):
             mode="build",
         ),
     )
+    # Recompute both dependency closures before accepting release metadata.
+    always_rehash = True
 
     @staticmethod
     def _manifest_pnpm_version(payload: object) -> str:
@@ -107,24 +107,6 @@ class ReflectOpenUpdater(GitHubReleaseUpdater):
             },
         )
 
-    async def _is_latest(
-        self,
-        context: UpdateContext,
-        info: VersionInfo,
-    ) -> bool:
-        """Recompute both dependency closures before accepting release metadata."""
-        _ = (context, info)
-        return False
-
-    @classmethod
-    def _src_expr(cls, commit: str) -> str:
-        return _build_fetch_from_github_expr(
-            cls.GITHUB_OWNER,
-            cls.GITHUB_REPO,
-            rev=commit,
-            fetch_submodules=False,
-        )
-
     def _source_override(
         self,
         info: VersionInfo,
@@ -161,7 +143,7 @@ class ReflectOpenUpdater(GitHubReleaseUpdater):
                 values=[
                     Binding(
                         name="url",
-                        value=StringPrimitive(value=cls._pnpm_url(pnpm_version)),
+                        value=nix_str(cls._pnpm_url(pnpm_version)),
                     ),
                     Binding(
                         name="hash",

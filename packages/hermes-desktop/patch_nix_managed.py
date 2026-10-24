@@ -1,13 +1,11 @@
 """Make the Hermes Desktop source obey Nix runtime and update ownership."""
 
-import argparse
 import json
 import os
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lib.exact_text_patch import ExactTextPatch, plan_exact_text_patches
+from lib.codemods.source_patch import SourcePatch, apply_patches, source_tree_parser
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -15,25 +13,25 @@ if TYPE_CHECKING:
 
 _MANAGED_MESSAGE = "Updates are managed by Nix."
 _NIX_STORE_ROOT = Path("/nix/store")
+_IS_PACKAGED_DECLARATION = (
+    "const IS_PACKAGED = app.isPackaged || "
+    "Boolean(process.env.HERMES_DESKTOP_IS_PACKAGED)\n"
+)
 
 
-@dataclass(frozen=True, slots=True)
-class _SourcePatch:
-    relative_path: str
-    old: str
-    new: str
+def _runtime_identity_patch(executable: Path, version: str) -> SourcePatch:
+    """Compile the validated Nix-store Hermes executable and version into main."""
+    return SourcePatch(
+        "apps/desktop/electron/main.ts",
+        _IS_PACKAGED_DECLARATION,
+        f"{_IS_PACKAGED_DECLARATION}"
+        f"const NIX_MANAGED_HERMES = '{executable}'\n"
+        f"const NIX_MANAGED_HERMES_VERSION = {json.dumps(version)}\n",
+    )
 
 
 _PATCHES = (
-    _SourcePatch(
-        "apps/desktop/electron/main.ts",
-        "const IS_PACKAGED = app.isPackaged || Boolean(process.env.HERMES_DESKTOP_IS_PACKAGED)\n",
-        """const IS_PACKAGED = app.isPackaged || Boolean(process.env.HERMES_DESKTOP_IS_PACKAGED)
-const NIX_MANAGED_HERMES = '@HERMES_EXECUTABLE@'
-const NIX_MANAGED_HERMES_VERSION = @HERMES_VERSION@
-""",
-    ),
-    _SourcePatch(
+    SourcePatch(
         "apps/desktop/electron/main.ts",
         (
             "function resolveUpdateRoot() {\n"
@@ -55,7 +53,7 @@ const NIX_MANAGED_HERMES_VERSION = @HERMES_VERSION@
 }
 """,
     ),
-    _SourcePatch(
+    SourcePatch(
         "apps/desktop/electron/main.ts",
         "function resolveHermesVersion() {\n",
         """function resolveHermesVersion() {
@@ -65,7 +63,7 @@ const NIX_MANAGED_HERMES_VERSION = @HERMES_VERSION@
 
 """,
     ),
-    _SourcePatch(
+    SourcePatch(
         "apps/desktop/electron/main.ts",
         "function resolveHermesBackend(backendArgs) {\n",
         """function resolveHermesBackend(backendArgs) {
@@ -87,7 +85,7 @@ const NIX_MANAGED_HERMES_VERSION = @HERMES_VERSION@
 
 """,
     ),
-    _SourcePatch(
+    SourcePatch(
         "apps/desktop/electron/main.ts",
         "async function checkUpdates({ force = false }: { force?: boolean } = {}) {\n",
         f"""async function checkUpdates({{ force = false }}: {{ force?: boolean }} = {{}}) {{
@@ -102,7 +100,7 @@ const NIX_MANAGED_HERMES_VERSION = @HERMES_VERSION@
 
 """,
     ),
-    _SourcePatch(
+    SourcePatch(
         "apps/desktop/electron/main.ts",
         "async function applyUpdates(opts: { stopSafeBlockers?: boolean } = {}) {\n",
         f"""async function applyUpdates(opts: {{ stopSafeBlockers?: boolean }} = {{}}) {{
@@ -112,7 +110,7 @@ const NIX_MANAGED_HERMES_VERSION = @HERMES_VERSION@
 
 """,
     ),
-    _SourcePatch(
+    SourcePatch(
         "apps/desktop/electron/main.ts",
         """ipcMain.handle('hermes:updates:branch:set', async (_event, name) => {
   const branch = typeof name === 'string' && name.trim() ? name.trim() : DEFAULT_UPDATE_BRANCH
@@ -126,7 +124,7 @@ const NIX_MANAGED_HERMES_VERSION = @HERMES_VERSION@
 })
 """,
     ),
-    _SourcePatch(
+    SourcePatch(
         "apps/desktop/electron/main.ts",
         """  const checkForUpdatesItem = {
     label: 'Check for Updates…',
@@ -140,12 +138,12 @@ const NIX_MANAGED_HERMES_VERSION = @HERMES_VERSION@
   }
 """,
     ),
-    _SourcePatch(
+    SourcePatch(
         "apps/desktop/package.json",
         '    "afterSign": "scripts/notarize.mjs",\n',
         "",
     ),
-    _SourcePatch(
+    SourcePatch(
         "apps/desktop/src/store/updates.ts",
         """export interface UpdateApplyState {
 """,
@@ -154,7 +152,7 @@ const NIX_MANAGED_HERMES_VERSION = @HERMES_VERSION@
 export interface UpdateApplyState {
 """,
     ),
-    _SourcePatch(
+    SourcePatch(
         "apps/desktop/src/store/updates.ts",
         """    const status = await bridge.check({ force })
     $updateStatus.set(status)
@@ -181,7 +179,7 @@ export interface UpdateApplyState {
     return effectiveStatus
 """,
     ),
-    _SourcePatch(
+    SourcePatch(
         "apps/desktop/src/store/updates.ts",
         (
             "export async function applyUpdates(opts: DesktopUpdateApplyOptions = "
@@ -195,7 +193,7 @@ export interface UpdateApplyState {
             "  }\n\n"
         ),
     ),
-    _SourcePatch(
+    SourcePatch(
         "apps/desktop/src/app/settings/about-settings.tsx",
         (
             "        <ListRow\n"
@@ -207,7 +205,7 @@ export interface UpdateApplyState {
           description={a.automaticUpdatesDesc}
 """,
     ),
-    _SourcePatch(
+    SourcePatch(
         "apps/desktop/src/app/settings/about-settings.tsx",
         (
             "          title={a.automaticUpdates}\n"
@@ -222,7 +220,7 @@ export interface UpdateApplyState {
         )}
 """,
     ),
-    _SourcePatch(
+    SourcePatch(
         "apps/desktop/src/app/shell/hooks/use-statusbar-items.tsx",
         """      onSelect: () => openUpdateOverlayFor('client'),
       title: status.tooltip,
@@ -260,40 +258,15 @@ def patch_tree(
         msg = "Hermes version must be a non-empty normalized string"
         raise ValueError(msg)
 
-    exact_patches: list[ExactTextPatch] = []
-    for patch in _PATCHES:
-        replacement = patch.new.replace(
-            "@HERMES_EXECUTABLE@",
-            str(normalized_executable),
-        ).replace(
-            "@HERMES_VERSION@",
-            json.dumps(hermes_version),
-        )
-        exact_patches.append(
-            ExactTextPatch(Path(patch.relative_path), patch.old, replacement)
-        )
-
-    sources = {
-        path: (source_root / path).read_text(encoding="utf-8")
-        for path in dict.fromkeys(patch.path for patch in exact_patches)
-    }
-    pending = plan_exact_text_patches(
-        sources,
-        exact_patches,
-        mismatch_message=lambda patch, count: (
-            f"expected one Hermes source match in {source_root / patch.path}, "
-            f"found {count}"
-        ),
+    apply_patches(
+        source_root,
+        (_runtime_identity_patch(normalized_executable, hermes_version), *_PATCHES),
     )
-
-    for path, source in pending.items():
-        (source_root / path).write_text(source, encoding="utf-8")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Patch an unpacked source tree from the package build."""
-    parser = argparse.ArgumentParser()
-    parser.add_argument("source_root", type=Path)
+    parser = source_tree_parser(__doc__)
     parser.add_argument("hermes_executable")
     parser.add_argument("hermes_version")
     args = parser.parse_args(argv)

@@ -1,6 +1,7 @@
 """Tests for nix-manipulator-backed Nix expression builders."""
 
 import json
+from typing import TYPE_CHECKING
 
 import pytest
 from nix_manipulator.expressions.binary import BinaryExpression
@@ -17,14 +18,14 @@ from nix_manipulator.expressions.path import NixPath
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
+from nix_manipulator.parser import parse_to_ast
 
 from lib.nix.models.flake_lock import FlakeLockNode, LockedRef
 from lib.nix.models.sources import HashEntry, SourceEntry
-from lib.tests._assertions import expect_instance
+from lib.tests._assertions import expect_instance, expect_not_none
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
 from lib.tests._nix_source import nix_file_binding_expr, nix_source_fragment_expr
 from lib.update.flake import (
-    flake_fetch_expr,
     flake_fetch_expression,
     flake_source_path_expr,
     flake_source_path_expression,
@@ -34,7 +35,6 @@ from lib.update.flake import (
 from lib.update.nix import (
     _build_fetch_from_github_call,
     _build_fetch_from_github_expr,
-    _build_fetch_pnpm_deps_expr,
     _build_fetchgit_call,
     _build_fetchgit_expr,
     _build_flake_attr_expr,
@@ -46,9 +46,79 @@ from lib.update.nix import (
     _build_repo_package_attr_expr,
     _contextual_overlay_bindings,
 )
-from lib.update.nix_expr import identifier_attr_path
+from lib.update.nix_expr import identifier_attr_path, nix_str
 from lib.update.paths import REPO_ROOT
 from lib.update.sources import nix_source_names
+
+if TYPE_CHECKING:
+    from nix_manipulator.expressions.expression import NixExpression
+
+
+_NIX_STRING_ESCAPES = {"n": "\n", "r": "\r", "t": "\t"}
+
+
+def _nix_string_value(expression: NixExpression) -> str:
+    """Decode a rendered double-quoted Nix string, rejecting interpolation."""
+    string = parse_to_ast(expression.rebuild().encode()).named_children[0]
+    assert string.type == "string_expression"
+    decoded = []
+    for child in string.named_children:
+        text = expect_not_none(child.text, "expected string syntax text").decode()
+        assert child.type != "interpolation", f"string evaluates {text}"
+        if child.type == "escape_sequence":
+            decoded.append(_NIX_STRING_ESCAPES.get(text[1], text[1]))
+        elif child.type == "string_fragment":
+            decoded.append(text)
+    return "".join(decoded)
+
+
+def test_nix_str_keeps_upstream_interpolation_literal() -> None:
+    """``${`` in upstream data must stay text, never evaluate as Nix."""
+    hostile = 'v${builtins.currentSystem}$${x}"\\\n\t'
+    assert _nix_string_value(nix_str(hostile)) == hostile
+    with pytest.raises(AssertionError, match="string evaluates"):
+        _nix_string_value(StringPrimitive(value=hostile))
+
+    bindings = _contextual_overlay_bindings(
+        system="x86_64-${builtins.currentSystem}",
+        repo_root=str(REPO_ROOT),
+        source_overrides={"demo": SourceEntry(version=hostile, hashes=[])},
+    )
+    system = expect_binding(bindings, "system").value
+    assert _nix_string_value(system) == "x86_64-${builtins.currentSystem}"
+    flake = expect_instance(expect_binding(bindings, "flake").value, FunctionCall)
+    context = expect_binding(
+        expect_instance(flake.argument, AttributeSet).values, "evaluationContext"
+    ).value
+    overrides = expect_binding(
+        expect_instance(context, AttributeSet).values, "sourceOverrides"
+    ).value
+    payload = expect_instance(overrides, FunctionCall).argument
+    assert json.loads(_nix_string_value(payload))["demo"]["version"] == hostile
+    fetchgit = _build_fetchgit_call("u${x}", "v${y}", hash_value="sha256-${z}")
+    assert {
+        binding.name: _nix_string_value(binding.value)
+        for binding in expect_instance(fetchgit.argument, AttributeSet).values
+        if isinstance(binding, Binding) and binding.name != "fetchSubmodules"
+    } == {"url": "u${x}", "rev": "v${y}", "hash": "sha256-${z}"}
+
+    assert_nix_ast_equal(
+        _build_flake_attr_expr("path:/r${x}", "a", "b${y}", quoted_indices=(1,)),
+        LetExpression(
+            local_variables=[
+                Binding(
+                    name="flake",
+                    value=FunctionCall(
+                        name=identifier_attr_path("builtins", "getFlake"),
+                        argument=StringPrimitive(
+                            value=r"path:/r\${x}", raw_string=True
+                        ),
+                    ),
+                )
+            ],
+            value=identifier_attr_path("flake", "a", r'"b\${y}"'),
+        ),
+    )
 
 
 @pytest.mark.parametrize(
@@ -90,8 +160,8 @@ def test_simple_derivation_locks_come_from_updater_metadata(
     assert_nix_ast_equal(expect_binding(package.output.scope, binding).value, expected)
 
 
-def test_flake_fetch_expr_builds_parseable_fetch_tree() -> None:
-    """flake_fetch_expr should emit valid fetchTree Nix."""
+def test_flake_fetch_expression_builds_github_fetch_tree() -> None:
+    """Hosted forge inputs pin owner, repo, rev, and narHash in fetchTree."""
     node = FlakeLockNode(
         locked=LockedRef(
             type="github",
@@ -102,9 +172,24 @@ def test_flake_fetch_expr_builds_parseable_fetch_tree() -> None:
         ),
     )
 
-    expr = flake_fetch_expr(node)
-
-    assert_nix_ast_equal(expr, flake_fetch_expression(node))
+    assert_nix_ast_equal(
+        flake_fetch_expression(node),
+        FunctionCall(
+            name=identifier_attr_path("builtins", "fetchTree"),
+            argument=AttributeSet(
+                values=[
+                    Binding(name="type", value="github"),
+                    Binding(name="owner", value="NixOS"),
+                    Binding(name="repo", value="nixpkgs"),
+                    Binding(name="rev", value="abc123"),
+                    Binding(
+                        name="narHash",
+                        value="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                    ),
+                ]
+            ),
+        ),
+    )
 
 
 def test_flake_source_path_expr_normalizes_fetch_tree_results() -> None:
@@ -142,7 +227,7 @@ def test_flake_source_path_expr_normalizes_fetch_tree_results() -> None:
     )
 
 
-def test_flake_fetch_expr_builds_git_fetch_tree_with_submodules() -> None:
+def test_flake_fetch_expression_builds_git_fetch_tree_with_submodules() -> None:
     """Generic git flake inputs should retain submodule fetch metadata."""
     node = FlakeLockNode(
         locked=LockedRef.model_validate({
@@ -155,7 +240,7 @@ def test_flake_fetch_expr_builds_git_fetch_tree_with_submodules() -> None:
     )
 
     assert_nix_ast_equal(
-        flake_fetch_expr(node),
+        flake_fetch_expression(node),
         FunctionCall(
             name=identifier_attr_path("builtins", "fetchTree"),
             argument=AttributeSet(
@@ -174,7 +259,7 @@ def test_flake_fetch_expr_builds_git_fetch_tree_with_submodules() -> None:
     )
 
 
-def test_flake_fetch_expr_builds_git_fetch_tree_without_submodules() -> None:
+def test_flake_fetch_expression_builds_git_fetch_tree_without_submodules() -> None:
     """Generic git flake inputs should not invent submodule metadata."""
     node = FlakeLockNode(
         locked=LockedRef.model_validate({
@@ -186,7 +271,7 @@ def test_flake_fetch_expr_builds_git_fetch_tree_without_submodules() -> None:
     )
 
     assert_nix_ast_equal(
-        flake_fetch_expr(node),
+        flake_fetch_expression(node),
         FunctionCall(
             name=identifier_attr_path("builtins", "fetchTree"),
             argument=AttributeSet(
@@ -204,10 +289,10 @@ def test_flake_fetch_expr_builds_git_fetch_tree_without_submodules() -> None:
     )
 
 
-def test_flake_fetch_expr_rejects_incomplete_git_locked_ref() -> None:
+def test_flake_fetch_expression_rejects_incomplete_git_locked_ref() -> None:
     """Generic git fetchTree expressions need both a repository URL and revision."""
     with pytest.raises(ValueError, match="missing url/rev"):
-        flake_fetch_expr(
+        flake_fetch_expression(
             FlakeLockNode(
                 locked=LockedRef.model_validate({
                     "type": "git",
@@ -420,9 +505,9 @@ def test_build_overlay_expr_imports_contextual_library_explicitly() -> None:
     )
     overrides = expect_binding(evaluation_context.values, "sourceOverrides").value
     assert isinstance(overrides, FunctionCall)
-    payload = overrides.argument
-    assert isinstance(payload, StringPrimitive)
-    assert json.loads(payload.value) == {"demo": override.to_dict()}
+    assert json.loads(_nix_string_value(overrides.argument)) == {
+        "demo": override.to_dict()
+    }
 
     candidate_fake_hash_expression = _build_overlay_expression(
         "demo",
@@ -487,7 +572,7 @@ def test_build_fetch_from_github_expr_is_parseable() -> None:
     )
 
 
-def test_build_fetch_from_github_expr_supports_tag_post_fetch_and_expr_hash() -> None:
+def test_build_fetch_from_github_expr_supports_tag_and_expr_hash() -> None:
     """FetchFromGitHub helper should handle non-default optional fields."""
     expr = _build_fetch_from_github_expr(
         "getsentry",
@@ -496,7 +581,6 @@ def test_build_fetch_from_github_expr_supports_tag_post_fetch_and_expr_hash() ->
         hash_value=StringPrimitive(
             value="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
         ),
-        post_fetch="rm -rf $out/*.xcarchive",
     )
 
     assert_nix_ast_equal(
@@ -508,7 +592,6 @@ def test_build_fetch_from_github_expr_supports_tag_post_fetch_and_expr_hash() ->
             hash_value=StringPrimitive(
                 value="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
             ),
-            post_fetch="rm -rf $out/*.xcarchive",
         ),
     )
 
@@ -584,106 +667,6 @@ def test_build_flake_attr_expr_quotes_dynamic_segments() -> None:
                 '"x86_64-linux"',
                 "deno",
                 "version",
-            ),
-        ),
-    )
-
-
-def test_build_fetch_pnpm_deps_expr_is_parseable() -> None:
-    """FetchPnpmDeps helper should build the dependency derivation via the Nix AST."""
-    src_call = _build_fetch_from_github_call(
-        "element-hq",
-        "element-web",
-        tag="v1.12.14",
-        hash_value="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-    )
-    expr = _build_fetch_pnpm_deps_expr(
-        src_call,
-        pname="element",
-        version="1.12.14",
-        fetcher_version=3,
-    )
-
-    assert_nix_ast_equal(
-        expr,
-        LetExpression(
-            local_variables=[
-                Binding(
-                    name="src",
-                    value=src_call,
-                ),
-            ],
-            value=FunctionCall(
-                name=identifier_attr_path("pkgs", "fetchPnpmDeps"),
-                argument=AttributeSet(
-                    values=[
-                        Binding(name="pname", value=StringPrimitive(value="element")),
-                        Binding(name="version", value=StringPrimitive(value="1.12.14")),
-                        Inherit(names=[Identifier(name="src")]),
-                        Binding(name="fetcherVersion", value=Primitive(value=3)),
-                        Binding(
-                            name="hash",
-                            value=identifier_attr_path("pkgs", "lib", "fakeHash"),
-                        ),
-                    ],
-                ),
-            ),
-        ),
-    )
-
-
-def test_build_fetch_pnpm_deps_expr_accepts_explicit_pnpm_toolchain() -> None:
-    """FetchPnpmDeps helper should pin pnpm when callers need lockfile stability."""
-    src_call = _build_fetch_from_github_call(
-        "element-hq",
-        "element-web",
-        tag="v1.12.14",
-        hash_value="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-    )
-    pnpm_expr = FunctionCall(
-        name=identifier_attr_path("pkgs", "pnpm_10", "override"),
-        argument=AttributeSet(
-            values=[
-                Binding(
-                    name="nodejs-slim",
-                    value=identifier_attr_path("pkgs", "nodejs_22"),
-                ),
-            ]
-        ),
-    )
-
-    expr = _build_fetch_pnpm_deps_expr(
-        src_call,
-        pname="element",
-        version="1.12.14",
-        fetcher_version=3,
-        pnpm=pnpm_expr,
-    )
-
-    assert_nix_ast_equal(
-        expr,
-        LetExpression(
-            local_variables=[
-                Binding(
-                    name="src",
-                    value=src_call,
-                ),
-            ],
-            value=FunctionCall(
-                name=identifier_attr_path("pkgs", "fetchPnpmDeps"),
-                argument=AttributeSet(
-                    values=[
-                        Binding(name="pname", value=StringPrimitive(value="element")),
-                        Binding(name="version", value=StringPrimitive(value="1.12.14")),
-                        Inherit(names=[Identifier(name="src")]),
-                        Binding(name="pnpm", value=pnpm_expr),
-                        Binding(name="fetcherVersion", value=Primitive(value=3)),
-                        Binding(
-                            name="hash",
-                            value=identifier_attr_path("pkgs", "lib", "fakeHash"),
-                        ),
-                    ],
-                ),
             ),
         ),
     )
@@ -1074,20 +1057,19 @@ def test_contextual_package_scope_uses_the_host_overlay_inventory() -> None:
     )
 
 
-def test_zed_overlay_forwards_flake_inputs_to_its_package() -> None:
-    """The overlay-owned Zed package must receive its declared flake inputs."""
-    package_args = expect_instance(
-        nix_source_fragment_expr(
-            "overlays/default.nix",
-            "final.callPackage ../packages/zed-editor-nightly ",
-            ') "Zed Nightly.app"',
-        ),
-        AttributeSet,
-    )
-
+def test_zed_overlay_forwards_flake_inputs_and_self_source_to_its_package() -> None:
+    """Update probes apply the bare overlay, so it must pass Zed's selfSource."""
     assert_nix_ast_equal(
-        package_args,
-        AttributeSet(values=[Inherit(names=[Identifier(name="inputs")])]),
+        nix_file_binding_expr("overlays/default.nix", "zed-editor-nightly"),
+        """
+        if prev.stdenv.hostPlatform.isDarwin then
+          final.callPackage ../packages/zed-editor-nightly {
+            inherit inputs;
+            selfSource = sources.zed-editor-nightly;
+          }
+        else
+          inputs.zed.packages.${system}.default
+        """,
     )
 
 

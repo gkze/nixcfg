@@ -9,10 +9,16 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 
-def emit_error(*, json_output: bool, message: str) -> int:
+def emit_error(
+    *,
+    json_output: bool,
+    message: str,
+    details: Mapping[str, object] | None = None,
+) -> int:
     """Render a recover-command error and return its exit code."""
     if json_output:
-        typer.echo(json.dumps({"success": False, "error": message}))
+        payload = {"success": False, "error": message, **(details or {})}
+        typer.echo(json.dumps(payload))
     else:
         typer.echo(f"Error: {message}", err=True)
     return 1

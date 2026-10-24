@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
+from jsonschema import Draft202012Validator
 
 from lib import http_utils
 from lib.schema_codegen import _prepare
@@ -353,21 +354,21 @@ def test_build_registry_detects_alias_collisions(
         )
 
 
-def test_merge_allof_helpers_normalize_existing_containers() -> None:
-    """Property and required merges tolerate malformed existing containers."""
+def test_merge_allof_helpers_handle_existing_containers() -> None:
+    """Unsafe property containers stay intact while required names still union."""
     result: dict[str, object] = {"properties": [], "required": ["keep", 1]}
 
-    _prepare._merge_allof_properties(result, {})
-    _prepare._merge_allof_properties(result, {"added": {"type": "string"}})
+    assert _prepare._merge_allof_properties(result, {})
+    assert not _prepare._merge_allof_properties(result, {"added": {"type": "string"}})
     _prepare._merge_allof_required(result, [])
     _prepare._merge_allof_required(result, ["keep", "next"])
 
-    assert result["properties"] == {"added": {"type": "string"}}
+    assert result["properties"] == []
     assert result["required"] == ["keep", "next"]
 
 
 def test_merge_allof_branches_and_transforms_cover_merge_paths() -> None:
-    """Mergeable allOf branches inline fields while preserving non-object branches."""
+    """Safe branches inline while an unsupported intersection stays as allOf."""
     schema = {
         "type": "object",
         "description": "drop me",
@@ -400,9 +401,11 @@ def test_merge_allof_branches_and_transforms_cover_merge_paths() -> None:
         {
             "allOf": [
                 {
+                    "type": "object",
                     "properties": {"id": {"type": "integer"}},
                     "required": ["id"],
-                }
+                },
+                {"properties": {"id": {}}},
             ]
         },
         transforms=(SchemaTransform.INLINE_MERGEABLE_ALLOF,),
@@ -414,19 +417,169 @@ def test_merge_allof_branches_and_transforms_cover_merge_paths() -> None:
 
     assert transformed == {
         "type": "null",
-        "allOf": [7, {"type": "string"}],
-        "properties": {
-            "name": {"type": "string"},
-            "nickname": {"type": "string"},
-        },
-        "required": ["name"],
-        "additionalProperties": False,
+        "allOf": [
+            7,
+            {"type": "string"},
+            {
+                "properties": {"name": {"type": "string"}},
+                "required": ["name", 1],
+                "additionalProperties": False,
+                "title": "ignored title",
+            },
+            {"properties": {"nickname": {"type": "string"}}},
+        ],
     }
     assert fully_merged == {
+        "type": "object",
         "properties": {"id": {"type": "integer"}},
         "required": ["id"],
     }
     assert transformed_list == [{}, 3]
+
+
+def _validate_json_schema_subset(instance: object, schema: object) -> bool:
+    """Validate conformance fixtures with the maintained Draft 2020-12 engine."""
+    return Draft202012Validator(schema).is_valid(instance)
+
+
+@pytest.mark.parametrize(
+    ("parent", "branch", "accepted", "rejected"),
+    [
+        (
+            {"type": "string", "minLength": 5},
+            {"type": "string", "minLength": 3},
+            "abcde",
+            "abcd",
+        ),
+        (
+            {"type": "string", "maxLength": 5},
+            {"type": "string", "maxLength": 8},
+            "abcde",
+            "abcdef",
+        ),
+        ({"type": "string"}, {"type": "integer"}, None, 5),
+    ],
+)
+def test_inline_allof_preserves_overlapping_property_validation(
+    parent: _prepare.JsonObject,
+    branch: _prepare.JsonObject,
+    accepted: object,
+    rejected: object,
+) -> None:
+    """A shallow property merge must not weaken any intersected constraint."""
+    schema = {
+        "type": "object",
+        "properties": {"value": parent},
+        "allOf": [{"properties": {"value": branch}}],
+    }
+    transformed = _prepare._apply_schema_transforms(
+        schema,
+        transforms=(SchemaTransform.INLINE_MERGEABLE_ALLOF,),
+    )
+
+    assert transformed == schema
+    assert not _validate_json_schema_subset({"value": rejected}, transformed)
+    if accepted is not None:
+        assert _validate_json_schema_subset({"value": accepted}, transformed)
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"required": "bad", "allOf": []},
+        {"required": ["ok", 1], "allOf": []},
+        {"allOf": [False]},
+        {"allOf": [{"type": "object"}]},
+        {"allOf": [{"properties": {}, "additionalProperties": False}]},
+        {"allOf": [{"properties": {}, "required": "id"}]},
+        {"allOf": [{"properties": {}, "required": [1]}]},
+        {
+            "allOf": [
+                {"properties": {}, "type": "string"},
+                {"properties": {}, "type": "integer"},
+            ]
+        },
+        {"type": "object", "allOf": [{"properties": {}, "type": "string"}]},
+        {
+            "allOf": [
+                {"properties": {"code": {"type": "string"}}},
+                {"properties": {"code": {"type": "integer"}}},
+            ]
+        },
+        {"properties": [], "allOf": [{"properties": {"id": {}}}]},
+        {
+            "additionalProperties": False,
+            "allOf": [{"properties": {"id": {"type": "string"}}}],
+        },
+    ],
+)
+def test_inline_allof_leaves_unsupported_shapes_untouched(
+    schema: _prepare.JsonObject,
+) -> None:
+    """Malformed or non-provably-safe intersections are never flattened."""
+    assert (
+        _prepare._apply_schema_transforms(
+            schema,
+            transforms=(SchemaTransform.INLINE_MERGEABLE_ALLOF,),
+        )
+        == schema
+    )
+
+
+def test_inline_allof_preserves_validation_for_safe_and_unsafe_object_merges() -> None:
+    """Behavior, not the shape alone, distinguishes safe and unsafe object merges."""
+    safe_schema = {
+        "type": "object",
+        "properties": {"id": {}, "parent": {}},
+        "required": ["parent"],
+        "additionalProperties": True,
+        "allOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "minLength": 3},
+                    "parent": {"type": "string"},
+                },
+                "required": ["id"],
+            }
+        ],
+    }
+    safe = _prepare._apply_schema_transforms(
+        safe_schema,
+        transforms=(SchemaTransform.INLINE_MERGEABLE_ALLOF,),
+    )
+    assert "allOf" not in safe
+    for instance, valid in [
+        ({"id": "abcd", "parent": "yes"}, True),
+        ({"id": "ab", "parent": "yes"}, False),
+        ({"id": 3, "parent": "yes"}, False),
+        ({"id": "abcd"}, False),
+    ]:
+        assert _validate_json_schema_subset(instance, safe) is valid
+        assert _validate_json_schema_subset(instance, safe_schema) is valid
+
+    unsafe_schema = {
+        "type": "object",
+        "allOf": [
+            {
+                "properties": {"name": {"type": "string"}},
+                "additionalProperties": False,
+            },
+            {"properties": {"nickname": {"type": "string"}}},
+        ],
+    }
+    unsafe = _prepare._apply_schema_transforms(
+        unsafe_schema,
+        transforms=(SchemaTransform.INLINE_MERGEABLE_ALLOF,),
+    )
+    assert unsafe == unsafe_schema
+    assert not _validate_json_schema_subset({"nickname": "x"}, unsafe)
+    assert (
+        _prepare._apply_schema_transforms(
+            {"allOf": []}, transforms=(SchemaTransform.INLINE_MERGEABLE_ALLOF,)
+        )
+        == {}
+    )
 
 
 def test_inline_references_merges_ref_siblings() -> None:
@@ -714,29 +867,66 @@ def test_generate_schema_codegen_target_preserves_existing_trailing_newline(
     assert output_path.read_text(encoding="utf-8").endswith("\n")
 
 
-def test_merge_allof_properties_prefers_the_constrained_side() -> None:
-    """A parent placeholder must not discard the branch that constrains it.
+def test_generate_target_preserves_existing_output_on_replace_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A failed atomic replacement cannot truncate committed generated models."""
+    output_path = tmp_path / "generated.py"
+    output_path.write_text("previous-models\n", encoding="utf-8")
+    loaded = LoadedSchemaCodegenConfig(
+        config=SchemaCodegenConfig.model_validate({
+            "defaults": {"generator": {}},
+            "sources": {},
+            "registry_profiles": {},
+            "targets": {
+                "demo": {
+                    "sources": [],
+                    "registry_profile": "local",
+                    "entrypoints": [],
+                    "generator": {"output": str(output_path)},
+                }
+            },
+        }),
+        path=tmp_path / "schema_codegen.yaml",
+    )
+    monkeypatch.setattr(
+        codegen_runner, "load_schema_codegen_config", lambda config_path=None: loaded
+    )
+    monkeypatch.setattr(
+        codegen_runner,
+        "_render_schema_codegen_target",
+        lambda *_args, **_kwargs: "new-models\n",
+    )
+    replace = Path.replace
 
-    Object-shaped ``allOf`` branches carry the real constraints while the parent
-    often holds ``{}`` placeholders, so first-wins would degrade required wire
-    fields to ``Any`` in the generated models.
-    """
+    def _fail_replace(path: Path, target: Path) -> Path:
+        if path.parent == output_path.parent and path.name.startswith(".generated.py."):
+            raise OSError("injected replace failure")
+        return replace(path, target)
+
+    monkeypatch.setattr(Path, "replace", _fail_replace)
+    with pytest.raises(OSError, match="injected replace failure"):
+        codegen_runner.generate_schema_codegen_target(target_name="demo")
+
+    assert output_path.read_text(encoding="utf-8") == "previous-models\n"
+    assert list(tmp_path.glob(".generated.py.*.tmp")) == []
+
+
+def test_merge_allof_properties_accepts_only_exact_or_placeholder_collisions() -> None:
+    """Constrained properties replace placeholders without shallow-merging peers."""
     result: _prepare.JsonObject = {
         "properties": {
             "placeholder": {},
             "constrained": {"type": "string"},
-            "both": {"type": "string"},
-            "scalar": 7,
             "equal": {"type": "string"},
         },
     }
-    _prepare._merge_allof_properties(
+    assert _prepare._merge_allof_properties(
         result,
         {
             "placeholder": {"pattern": "^a"},
             "constrained": {},
-            "both": {"minLength": 1},
-            "scalar": {"type": "integer"},
             "equal": {"type": "string"},
             "fresh": {"type": "boolean"},
         },
@@ -744,12 +934,30 @@ def test_merge_allof_properties_prefers_the_constrained_side() -> None:
     assert result["properties"] == {
         "placeholder": {"pattern": "^a"},
         "constrained": {"type": "string"},
-        "both": {"type": "string", "minLength": 1},
-        "scalar": {"type": "integer"},
         "equal": {"type": "string"},
         "fresh": {"type": "boolean"},
     }
 
+    collision: _prepare.JsonObject = {
+        "properties": {
+            "placeholder": {},
+            "code": {"type": "string", "minLength": 5},
+        }
+    }
+    assert not _prepare._merge_allof_properties(
+        collision,
+        {
+            "placeholder": {"type": "object"},
+            "code": {"type": "string", "minLength": 3},
+        },
+    )
+    assert collision == {
+        "properties": {
+            "placeholder": {},
+            "code": {"type": "string", "minLength": 5},
+        }
+    }
+
     untouched: _prepare.JsonObject = {"properties": {"kept": {"type": "string"}}}
-    _prepare._merge_allof_properties(untouched, {})
+    assert _prepare._merge_allof_properties(untouched, {})
     assert untouched == {"properties": {"kept": {"type": "string"}}}

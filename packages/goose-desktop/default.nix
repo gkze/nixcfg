@@ -4,6 +4,7 @@
   inputs,
   lib,
   makeWrapper,
+  mkMacAppPassthru,
   nixcfgElectron,
   nodejs_24,
   outputs,
@@ -277,11 +278,7 @@ stdenv.mkDerivation {
       pnpmDeps
       ;
 
-    macApp = {
-      bundleName = appBundleName;
-      bundleRelPath = "Applications/${appBundleName}";
-      installMode = "copy";
-    };
+    inherit (mkMacAppPassthru { bundleName = appBundleName; }) macApp;
   };
 
   meta = with lib; {

@@ -7,7 +7,7 @@ Usage:
     # Fetch/refresh schemas from latest commit on default branch:
     python -m lib.nix.schemas._fetch
 
-    # Verify vendored schemas match the pinned commit (for CI):
+    # Verify vendored schemas against _version.json checksums (offline, for CI):
     python -m lib.nix.schemas._fetch --check
 """
 
@@ -15,13 +15,16 @@ Usage:
 import functools
 import hashlib
 import json
+import shutil
 import sys
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from lib import codegen_utils, http_utils
+from lib.update import io as update_io
 
 REPO = "NixOS/nix"
 SCHEMA_PATH = "doc/manual/source/protocols/json/schema"
@@ -151,13 +154,24 @@ def _https_get(url: str, headers: dict[str, str] | None = None) -> bytes:
         return payload
 
 
-def _write_version(commit_sha: str, branch: str, files: list[dict[str, str]]) -> None:
-    """Write _version.json with pinned commit info and checksums."""
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _write_version(
+    commit_sha: str,
+    branch: str,
+    files: list[dict[str, str]],
+    *,
+    schemas_dir: Path,
+    version_file: Path,
+) -> None:
+    """Stage _version.json with pinned commit info and staged checksums."""
     checksums: dict[str, str] = {}
     for f in sorted(files, key=lambda x: x["name"]):
-        path = SCHEMAS_DIR / f["name"]
+        path = schemas_dir / f["name"]
         if path.exists():
-            checksums[f["name"]] = hashlib.sha256(path.read_bytes()).hexdigest()
+            checksums[f["name"]] = _sha256(path)
 
     manifest = SchemaVersionManifest(
         commit=commit_sha,
@@ -167,9 +181,82 @@ def _write_version(commit_sha: str, branch: str, files: list[dict[str, str]]) ->
         path=SCHEMA_PATH,
         checksums=checksums,
     )
-    VERSION_FILE.write_text(
-        json.dumps(manifest.model_dump(mode="json"), indent=2, sort_keys=True) + "\n"
+    update_io.atomic_write_text(
+        version_file,
+        json.dumps(manifest.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
     )
+
+
+class _SnapshotRollbackError(RuntimeError):
+    """A publish failure whose backup must remain available for recovery."""
+
+
+_RECOVERY_BACKUP_ATTRIBUTE = "_schema_fetch_recovery_backup"
+
+
+def _managed_schema_paths() -> dict[str, Path]:
+    """Return the live artifacts owned by the upstream schema snapshot."""
+    paths = {path.name: path for path in SCHEMAS_DIR.glob("*.yaml")}
+    if VERSION_FILE.exists():
+        paths[VERSION_FILE.name] = VERSION_FILE
+    return paths
+
+
+def _restore_schema_snapshot(backup_dir: Path, backups: dict[str, Path]) -> None:
+    """Restore a complete prior file set after a failed publication."""
+    for name, path in _managed_schema_paths().items():
+        if name not in backups:
+            path.unlink()
+    for name in backups:
+        backup = backup_dir / name
+        target = SCHEMAS_DIR / name
+        update_io.atomic_write_bytes(target, backup.read_bytes())
+        target.chmod(backup.stat().st_mode & 0o777)
+
+
+def _publish_schema_snapshot(staging_dir: Path, backup_dir: Path) -> None:
+    """Publish a staged file set, restoring the prior snapshot on any failure."""
+    backups = _managed_schema_paths()
+    backup_dir.mkdir()
+    for name, path in backups.items():
+        shutil.copy2(path, backup_dir / name)
+
+    staged = {path.name: path for path in staging_dir.iterdir() if path.is_file()}
+    try:
+        for name in sorted(staged.keys() - {VERSION_FILE.name}):
+            update_io.atomic_write_bytes(
+                SCHEMAS_DIR / name,
+                staged[name].read_bytes(),
+            )
+        for name in sorted(backups.keys() - staged.keys()):
+            backups[name].unlink()
+        update_io.atomic_write_bytes(
+            VERSION_FILE,
+            (staging_dir / VERSION_FILE.name).read_bytes(),
+        )
+    except BaseException as publish_error:
+        try:
+            _restore_schema_snapshot(backup_dir, backups)
+        except BaseException as rollback_error:  # noqa: BLE001 - preserve all failures
+            msg = (
+                f"Schema snapshot publication failed: {publish_error}; "
+                f"rollback also failed: {rollback_error}; "
+                f"recovery backup retained at {backup_dir}"
+            )
+            interruption = (
+                publish_error
+                if not isinstance(publish_error, Exception)
+                else rollback_error
+                if not isinstance(rollback_error, Exception)
+                else None
+            )
+            if interruption is not None:
+                # Tell fetch() to retain recovery evidence without wrapping the interrupt.
+                setattr(interruption, _RECOVERY_BACKUP_ATTRIBUTE, backup_dir)
+                interruption.add_note(msg)
+                raise interruption from None
+            raise _SnapshotRollbackError(msg) from publish_error
+        raise
 
 
 def _parse_version() -> SchemaVersionManifest | None:
@@ -196,53 +283,71 @@ def fetch(*, progress: ProgressReporter | None = None) -> None:
         progress, f"Fetching {total} schema file(s) from {branch}@{commit_sha}."
     )
 
-    for index, f in enumerate(files, start=1):
-        _emit_progress(progress, f"Downloading {index}/{total}: {f['name']}")
-        content = _download_schema(f["download_url"])
-        (SCHEMAS_DIR / f["name"]).write_bytes(content)
+    workspace = Path(tempfile.mkdtemp(prefix=".schema-fetch-", dir=SCHEMAS_DIR))
+    preserve_workspace = False
+    try:
+        staging_dir = workspace / "staged"
+        staging_dir.mkdir()
+        for index, f in enumerate(files, start=1):
+            _emit_progress(progress, f"Downloading {index}/{total}: {f['name']}")
+            content = _download_schema(f["download_url"])
+            (staging_dir / f["name"]).write_bytes(content)
 
-    _emit_progress(progress, "Updating schema version manifest.")
-    _write_version(commit_sha, branch, files)
+        _emit_progress(progress, "Updating schema version manifest.")
+        _write_version(
+            commit_sha,
+            branch,
+            files,
+            schemas_dir=staging_dir,
+            version_file=staging_dir / VERSION_FILE.name,
+        )
+        try:
+            _publish_schema_snapshot(staging_dir, workspace / "backup")
+        except BaseException as exc:
+            preserve_workspace = isinstance(exc, _SnapshotRollbackError) or (
+                getattr(exc, _RECOVERY_BACKUP_ATTRIBUTE, None) is not None
+            )
+            raise
+    finally:
+        _cleanup_fetch_workspace(workspace, preserve=preserve_workspace)
     _emit_progress(progress, "Schema fetch complete.")
 
 
+def _cleanup_fetch_workspace(workspace: Path, *, preserve: bool) -> None:
+    """Keep recovery evidence only after a rollback failure."""
+    if preserve:
+        return
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def _drift(name: str, local: str | None, recorded: str | None) -> str:
+    if local is None:
+        return f"{name}: missing"
+    if recorded is None:
+        return f"{name}: not recorded in {VERSION_FILE.name}"
+    return f"{name}: checksum differs from {VERSION_FILE.name}"
+
+
 def check() -> bool:
-    """Verify vendored schemas match the pinned commit. Returns True if OK."""
+    """Verify vendored schemas against the checksums recorded at fetch time.
+
+    Reports each drifted file on stderr. No network access is needed: the
+    manifest pins the upstream commit and the sha256 of every fetched file.
+    """
     version = _parse_version()
-    if version is None:
+    if version is None or not version.checksums:
+        sys.stderr.write(f"{VERSION_FILE.name} is missing, invalid, or empty.\n")
         return False
 
-    commit_sha = version.commit
-
-    files = _list_schema_files(commit_sha)
-    ok = True
-
-    # Check all remote files are present locally with matching content
-    for f in files:
-        local_path = SCHEMAS_DIR / f["name"]
-        if not local_path.exists():
-            ok = False
-            continue
-
-        remote_content = _download_schema(f["download_url"])
-        local_content = local_path.read_bytes()
-        if remote_content != local_content:
-            ok = False
-        else:
-            pass
-
-    # Check for stale local files not in remote
-    remote_names = {f["name"] for f in files}
-    for local_file in SCHEMAS_DIR.glob("*.yaml"):
-        if local_file.name not in remote_names:
-            ok = False
-
-    if ok:
-        pass
-    else:
-        pass
-
-    return ok
+    local = {path.name: _sha256(path) for path in SCHEMAS_DIR.glob("*.yaml")}
+    drift = [
+        _drift(name, local.get(name), version.checksums.get(name))
+        for name in sorted(local.keys() | version.checksums.keys())
+        if local.get(name) != version.checksums.get(name)
+    ]
+    for line in drift:
+        sys.stderr.write(f"Vendored schema drift: {line}\n")
+    return not drift
 
 
 def main() -> None:

@@ -1,6 +1,6 @@
-# Shared `passthru.macApp` shape for managed macOS app bundles. Used by the
-# darwin-apps helpers and by `withManagedMacApp` in overlays/default.nix so
-# the contract consumed by lib/mac-apps.nix has exactly one definition.
+# Shared `passthru.macApp` shape for managed macOS app bundles, exposed to
+# packages and overlays as the `mkMacAppPassthru` helper so the contract
+# consumed by lib/mac-apps.nix has exactly one definition.
 {
   bundleName,
   macApp ? { },

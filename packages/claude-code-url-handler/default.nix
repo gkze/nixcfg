@@ -1,6 +1,7 @@
 {
   claude-code,
   lib,
+  mkMacAppPassthru,
   stdenvNoCC,
   ...
 }:
@@ -19,13 +20,7 @@ stdenvNoCC.mkDerivation {
   doInstallCheck = true;
   installCheckPhase = ./check.sh;
 
-  passthru = {
-    macApp = {
-      bundleName = "Claude Code URL Handler.app";
-      bundleRelPath = "Applications/Claude Code URL Handler.app";
-      installMode = "copy";
-    };
-  };
+  passthru = mkMacAppPassthru { bundleName = "Claude Code URL Handler.app"; };
 
   meta = with lib; {
     description = "Background handler for Claude Code deep links";

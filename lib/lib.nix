@@ -38,7 +38,6 @@ let
   modulesPath = "${src}/modules";
   crate2nixTauri = import ./crate2nix-tauri.nix { inherit lib; };
   rustyV8 = import ./rusty-v8.nix { inherit lib; };
-  platformCompat = import ./pinned-input-platform-compat;
 
   scanSourcesIn =
     dir:
@@ -51,29 +50,54 @@ let
     builtins.mapAttrs (_name: path: fromJSON (readFile path)) sourceFiles.entries;
   packageSources = scanSourcesIn (src + "/packages") // scanSourcesIn (src + "/overlays");
   updateSourceOverrides = evaluationContext.sourceOverrides or { };
+  # Select exactly one entry by hash type and optional platform/URL identity.
+  # An omitted platform or URL does not filter it. `platform = null` matches an
+  # explicit null, while `unqualified = true` requires the attribute to be absent.
+  # Missing entries stay nullable so callers retain their own fallback policy.
   selectSourceHashEntry =
-    sourceEntry: fakeHashMode: name: hashType: platformArgs:
+    entries: hashType: selection:
     let
-      platformSpecific = platformArgs ? platform;
-      platform = platformArgs.platform or null;
+      matches = builtins.filter (
+        entry:
+        entry.hashType == hashType
+        && (
+          if selection.unqualified or false then
+            !(entry ? platform)
+          else if selection ? platform then
+            (entry.platform or null) == selection.platform
+          else
+            true
+        )
+        && (!(selection ? url) || (entry.url or null) == selection.url)
+      ) entries;
+      matchCount = length matches;
+    in
+    if matchCount == 1 then
+      elemAt matches 0
+    else if matchCount == 0 then
+      null
+    else
+      throw "selectSourceHashEntry: expected exactly one ${hashType} entry for ${builtins.toJSON selection}, found ${toString matchCount}";
+
+  resolveSourceHashEntry =
+    sourceEntry: fakeHashMode: name: hashType: selection:
+    let
+      platformSpecific = selection ? platform;
     in
     if fakeHashMode then
       {
         hash = lib.fakeHash;
         inherit hashType;
       }
-      // optionalAttrs platformSpecific platformArgs
+      // optionalAttrs platformSpecific { inherit (selection) platform; }
       // optionalAttrs (!platformSpecific) { gitDep = "fake-dep"; }
     else
       let
-        hashes = (sourceEntry name).hashes or [ ];
-        matchesPlatform =
-          hash: if platformSpecific then (hash.platform or null) == platform else !(hash ? platform);
-        matchEntry = findFirst (hash: hash.hashType == hashType && matchesPlatform hash) null hashes;
+        matchEntry = selectSourceHashEntry ((sourceEntry name).hashes or [ ]) hashType selection;
       in
       if matchEntry == null then
         throw "sources.json for '${name}' missing ${hashType}${
-          if platformSpecific then " on ${platform}" else ""
+          if platformSpecific then " on ${selection.platform}" else ""
         }"
       else
         matchEntry;
@@ -86,7 +110,7 @@ rec {
     tauriPluginEnvCrateNames
     ;
   inherit (rustyV8) mkRustyV8Build mkRustyV8PrebuiltArtifacts;
-  inherit modulesPath;
+  inherit modulesPath selectSourceHashEntry;
   flakeLock = (fromJSON (readFile (src + "/flake.lock"))).nodes;
   # Update tooling may override selected sources entries during evaluation
   # without mutating tracked sources.json files.
@@ -103,12 +127,14 @@ rec {
   sourceEntry =
     name: if hasAttr name sources then sources.${name} else throw "sources.json missing for '${name}'";
 
-  # Find hash entry matching hashType and optionally platform
-  sourceHashEntry = name: hashType: selectSourceHashEntry sourceEntry fakeHashMode name hashType { };
+  # Find hash entry matching hashType and optionally platform.
+  sourceHashEntry =
+    name: hashType:
+    resolveSourceHashEntry sourceEntry fakeHashMode name hashType { unqualified = true; };
 
   sourceHashEntryForPlatform =
     name: hashType: platform:
-    selectSourceHashEntry sourceEntry fakeHashMode name hashType { inherit platform; };
+    resolveSourceHashEntry sourceEntry fakeHashMode name hashType { inherit platform; };
 
   sourceHash = name: hashType: (sourceHashEntry name hashType).hash;
 
@@ -122,7 +148,7 @@ rec {
       # The fake-hash contract covers hashes only: the update probe still needs
       # the real download URL, and the fake record carries none. Resolve the
       # entry with fake mode off so both modes report the same url.
-      entry = selectSourceHashEntry sourceEntry false name hashType { };
+      entry = resolveSourceHashEntry sourceEntry false name hashType { unqualified = true; };
     in
     entry.url or (throw "sources.json for '${name}' missing url for ${hashType}");
 
@@ -316,12 +342,10 @@ rec {
     }:
     {
       inherit system;
-      extraSpecialArgs =
-        mkHomeModuleArgs { inherit system username; }
-        // {
-          pkgs = platformCompat.withLegacyPlatformAttrs pkgsFor.${system};
-        }
-        // extraSpecialArgs;
+      # The `pkgs` argument of `homeManagerConfiguration`: the configured
+      # package set from `pkgsFor` is the only Nixpkgs instance in play.
+      pkgs = pkgsFor.${system};
+      extraSpecialArgs = mkHomeModuleArgs { inherit system username; } // extraSpecialArgs;
       modules = mkHomeModules {
         inherit
           includeDefaultUserModule
@@ -384,6 +408,11 @@ rec {
       }
       // extraSpecialArgs;
       modules = [
+        # One Nixpkgs instance per system: the system evaluation and Home
+        # Manager (through useGlobalPkgs) both use the already configured
+        # `pkgsFor` set. Its creator owns `config` and overlays; the
+        # nix-darwin and NixOS modules reject `nixpkgs.config` next to it.
+        { nixpkgs.pkgs = lib.mkDefault pkgsFor.${system}; }
         "${modulesPath}/common.nix"
         "${modulesPath}/${kernel system}/base.nix"
       ]
@@ -402,7 +431,10 @@ rec {
                 system
                 ;
               slib = outputs.lib;
-              pkgs = platformCompat.withLegacyPlatformAttrs pkgsFor.${system};
+              # The same instance as `nixpkgs.pkgs` above. Some modules use
+              # `pkgs` to decide their own shape, so it must be a special
+              # argument; resolving it through `_module.args` recurses.
+              pkgs = pkgsFor.${system};
             }
             // homeManagerExtraSpecialArgs;
             users = listToAttrs (

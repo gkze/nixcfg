@@ -70,7 +70,7 @@ def _match_explicit_paths(root: Path, paths: tuple[str, ...]) -> set[str]:
     matches: set[str] = set()
     for relative_path in paths:
         candidate = root / relative_path
-        if candidate.is_file():
+        if candidate.is_file() or candidate.is_symlink():
             matches.add(relative_path)
     return matches
 
@@ -80,7 +80,7 @@ def _match_globs(root: Path, globs: tuple[str, ...]) -> set[str]:
     matches: set[str] = set()
     for pattern in globs:
         for candidate in root.glob(pattern):
-            if candidate.is_file():
+            if candidate.is_file() or candidate.is_symlink():
                 matches.add(candidate.relative_to(root).as_posix())
     return matches
 

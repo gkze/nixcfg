@@ -5,7 +5,8 @@ from pathlib import Path
 
 _EXPECTED_ARGC = 2
 _USAGE = "usage: patch_apple_toolchain_host_build_tools.py <toolchain.gni path>"
-_MISSING_ANCHOR = "apple toolchain host-build-tools anchor not found"
+_MISSING_ANCHOR = "apple toolchain host-build-tools anchor not found exactly once"
+_UNSUPPORTED_LEFT = "apple toolchain rustc_wrapper_inputs survived patching"
 
 _NEEDLE = "      toolchain_for_rust_host_build_tools = true\n"
 _REPLACEMENT = """      toolchain_for_rust_host_build_tools = true
@@ -22,11 +23,14 @@ def main() -> int:
 
     toolchain_gni = Path(sys.argv[1])
     original = toolchain_gni.read_text(encoding="utf-8")
-    if _NEEDLE not in original:
+    if original.count(_NEEDLE) != 1:
         raise SystemExit(_MISSING_ANCHOR)
 
     patched = original.replace(_NEEDLE, _REPLACEMENT, 1)
+    # Newer Chromium builds repeat this input per Rust tool; older ones omit it.
     patched = patched.replace(_UNSUPPORTED_RUST_TOOL_INPUT, "")
+    if "rustc_wrapper_inputs" in patched:
+        raise SystemExit(_UNSUPPORTED_LEFT)
     toolchain_gni.write_text(patched, encoding="utf-8")
     return 0
 

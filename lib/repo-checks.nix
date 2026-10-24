@@ -108,8 +108,15 @@ let
     (lib.fileset.fileFilter (file: file.hasExt "yaml") (src + "/lib/nix/schemas"))
     (lib.fileset.fileFilter (file: file.hasExt "json") (src + "/schemas/codegen"))
   ];
+  # Pytest reads Nix, JSON, YAML and fixture files throughout the tree, so its
+  # input is every repo file, minus local state that the test run never reads.
+  # Dropping that state keeps unrelated cache and venv churn from invalidating
+  # the check.
+  pytestFiles = repoFiles;
 in
 {
+  inherit mkCheckSource pytestFiles;
+
   checks = {
     "lint-update-ci" = {
       source = mkCheckSource (src + "/.github");

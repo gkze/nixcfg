@@ -16,6 +16,11 @@ let
 
   cfg = config.nixcfg.packageSets;
 
+  # Drop packages that are broken or unsupported on this platform.
+  availablePackages = filter (
+    package: lib.meta.availableOn pkgs.stdenv.hostPlatform package && !(package.meta.broken or false)
+  );
+
   # Package-set metadata and package membership live together here so the
   # option schema and resulting home.packages list stay in sync.
   packageSetTable = with pkgs; [
@@ -124,7 +129,6 @@ let
         httpie
         hermes-agent
         linear-cli
-        sculptor
         sd
         sentry-cli
         taplo
@@ -137,45 +141,46 @@ let
     {
       name = "guiApps";
       description = "GUI applications (code-cursor, slack, etc.)";
-      packages = [
-        code-cursor
-        dbeaver-bin
-        emdash
-        github-desktop
-        jetbrains.datagrip
-        hoppscotch
-        config.fonts.monospace.package
-        postman
-        red-reddit-cli
-        slack
-        spacedrive
-      ]
-      ++ lib.optionals (stdenv.hostPlatform.isDarwin || stdenv.hostPlatform.system == "x86_64-linux") [
-        superset
-      ]
-      ++ lib.optionals stdenv.hostPlatform.isLinux [
-        spotify
-        wl-clipboard
-      ]
-      ++ lib.optionals stdenv.hostPlatform.isDarwin [
-        appcleaner
-        commander
-        chatgpt
-        conductor
-        opencode-desktop-dev
-        container
-        cyberduck
-        google-chrome
-        granola
-        iina
-        mas
-        notion-app
-        raycast
-        rapidapi
-        sloth-app
-        t3code-desktop
-        wispr-flow
-      ];
+      packages = availablePackages (
+        [
+          code-cursor
+          dbeaver-bin
+          emdash
+          github-desktop
+          jetbrains.datagrip
+          hoppscotch
+          config.fonts.monospace.package
+          postman
+          slack
+          spacedrive
+        ]
+        ++ lib.optionals (stdenv.hostPlatform.isDarwin || stdenv.hostPlatform.system == "x86_64-linux") [
+          red-reddit-cli
+          superset
+        ]
+        ++ lib.optionals stdenv.hostPlatform.isLinux [
+          spotify
+          wl-clipboard
+        ]
+        ++ lib.optionals stdenv.hostPlatform.isDarwin [
+          appcleaner
+          commander
+          chatgpt
+          conductor
+          opencode-desktop-dev
+          container
+          cyberduck
+          google-chrome
+          iina
+          mas
+          notion-app
+          raycast
+          rapidapi
+          sloth-app
+          t3code-desktop
+          wispr-flow
+        ]
+      );
     }
     {
       name = "cloud";

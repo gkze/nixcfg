@@ -117,7 +117,7 @@ from lib.update.io import atomic_write_text
 from lib.update.nix import get_current_nix_platform
 from lib.update.paths import get_repo_root
 from lib.update.persistence import IsolatedUpdateWorkspace, planned_update_paths
-from lib.update.repair import propose_repair
+from lib.update.repair import check_applied_repair, propose_repair
 from lib.update.updaters import ensure_updaters_loaded
 
 if TYPE_CHECKING:
@@ -138,6 +138,12 @@ def repair(
 ) -> None:
     """Propose one packaging repair in isolation; never promote or certify it."""
     propose_repair(get_repo_root(), evidence=evidence, output=output, agent=agent)
+
+
+@app.command("check-repair")
+def check_repair() -> None:
+    """Re-check the staged repair patch; the publishing job trusts no artifact."""
+    check_applied_repair(get_repo_root())
 
 
 ValidationScope = Literal[
@@ -1174,12 +1180,13 @@ def _realize_rust_warmup(
     warmup_slot: int,
     *,
     flake_root: Path,
+    expected_tree: str,
 ) -> tuple[validation.DerivationValidationFailure, ...]:
     """Realize one rust-warmup stripe, skipping paths already in gkze."""
     requested_slots, requested_crates = _canary_warmup_selection()
     if requested_slots and warmup_slot not in requested_slots:
         return ()
-    plan = load_warmup_plan(warmup_plan)
+    plan = load_warmup_plan(warmup_plan, expected_tree=expected_tree)
     slot_paths, output_drvs = _slot_paths_with_gitbutler_canary(
         plan, warmup_slot, requested_crates, flake_root=flake_root
     )
@@ -1322,13 +1329,16 @@ def _realize_zed_warmup(
     warmup_plan: Path,
     *,
     flake_root: Path,
+    expected_tree: str | None = None,
 ) -> tuple[validation.DerivationValidationFailure, ...]:
     """Build the whole Zed rust family on one runner, or substitute all of it.
 
     Mixed Cachix presence force-locals every family drv. Distinct rustc
     generations fail closed. --keep-going surfaces every broken crate.
     """
-    plan = load_warmup_plan(warmup_plan)
+    if expected_tree is None:
+        expected_tree = git(flake_root, "rev-parse", "HEAD^{tree}").decode().strip()
+    plan = load_warmup_plan(warmup_plan, expected_tree=expected_tree)
     family_outputs = zed_family_warmup_outputs(plan.rust_layers)
     rust_zed_out = tuple(
         path for path in family_outputs if is_rust_zed_store_path(path)
@@ -1406,9 +1416,10 @@ def _realize_cascade_paths(
     *,
     flake_root: Path,
     label: str,
+    expected_tree: str,
 ) -> tuple[validation.DerivationValidationFailure, ...]:
     """Realize planned cascade outputs one drv at a time, skip-if-in-gkze."""
-    plan = load_warmup_plan(warmup_plan)
+    plan = load_warmup_plan(warmup_plan, expected_tree=expected_tree)
     missing = skip_cached_warmup_paths(
         paths,
         present=check_path_in_cachix,
@@ -1442,6 +1453,7 @@ def _realize_cascade_warmup(
     warmup_slot: int,
     *,
     flake_root: Path,
+    expected_tree: str,
 ) -> tuple[validation.DerivationValidationFailure, ...]:
     """Realize one cascade-warmup stripe, one drv at a time, skip-if-in-gkze.
 
@@ -1451,12 +1463,13 @@ def _realize_cascade_warmup(
     rust crate FODs). ``foo.drv^*`` is the output set; rust-warmup
     already passes ``.drv`` paths.
     """
-    plan = load_warmup_plan(warmup_plan)
+    plan = load_warmup_plan(warmup_plan, expected_tree=expected_tree)
     return _realize_cascade_paths(
         warmup_plan,
         slot_cascade_paths(plan.cascade_layers, warmup_slot),
         flake_root=flake_root,
         label="cascade-warmup",
+        expected_tree=expected_tree,
     )
 
 
@@ -1464,6 +1477,7 @@ def _realize_cascade_canary(
     warmup_plan: Path,
     *,
     flake_root: Path,
+    expected_tree: str,
 ) -> tuple[validation.DerivationValidationFailure, ...]:
     """Realize cascade-canary outputs once so stripe slots substitute them.
 
@@ -1473,12 +1487,13 @@ def _realize_cascade_canary(
     canary had already gone green. A dedicated canary runner publishes
     those NARs before the 5-wide stripe starts.
     """
-    plan = load_warmup_plan(warmup_plan)
+    plan = load_warmup_plan(warmup_plan, expected_tree=expected_tree)
     return _realize_cascade_paths(
         warmup_plan,
         cascade_canary_paths(plan.cascade_layers),
         flake_root=flake_root,
         label="cascade-canary",
+        expected_tree=expected_tree,
     )
 
 
@@ -1544,23 +1559,38 @@ def _realize_requested_warmup(
     warmup_slot: int | None,
     *,
     flake_root: Path,
+    expected_tree: str,
 ) -> tuple[validation.DerivationValidationFailure, ...]:
     """Dispatch rust/cascade warmups, the canaries, leaf-prebuild, or zed-warmup."""
     if scope == "rust-warmup":
         if warmup_plan is None or warmup_slot is None:
             msg = "rust-warmup requires a warmup plan and slot"
             raise ValueError(msg)
-        return _realize_rust_warmup(warmup_plan, warmup_slot, flake_root=flake_root)
+        return _realize_rust_warmup(
+            warmup_plan,
+            warmup_slot,
+            flake_root=flake_root,
+            expected_tree=expected_tree,
+        )
     if scope == "cascade-warmup":
         if warmup_plan is None or warmup_slot is None:
             msg = "cascade-warmup requires a warmup plan and slot"
             raise ValueError(msg)
-        return _realize_cascade_warmup(warmup_plan, warmup_slot, flake_root=flake_root)
+        return _realize_cascade_warmup(
+            warmup_plan,
+            warmup_slot,
+            flake_root=flake_root,
+            expected_tree=expected_tree,
+        )
     if scope == "cascade-canary":
         if warmup_plan is None:
             msg = "cascade-canary requires a warmup plan"
             raise ValueError(msg)
-        return _realize_cascade_canary(warmup_plan, flake_root=flake_root)
+        return _realize_cascade_canary(
+            warmup_plan,
+            flake_root=flake_root,
+            expected_tree=expected_tree,
+        )
     if scope == "fod-canary":
         return _realize_fod_canary(flake_root=flake_root)
     if scope == "leaf-prebuild":
@@ -1569,7 +1599,11 @@ def _realize_requested_warmup(
         if warmup_plan is None:
             msg = "zed-warmup requires a warmup plan"
             raise ValueError(msg)
-        return _realize_zed_warmup(warmup_plan, flake_root=flake_root)
+        return _realize_zed_warmup(
+            warmup_plan,
+            flake_root=flake_root,
+            expected_tree=expected_tree,
+        )
     return ()
 
 
@@ -1713,6 +1747,7 @@ def validate_candidate(
                 warmup_plan,
                 warmup_slot,
                 flake_root=snapshot.root,
+                expected_tree=candidate.tree,
             )
             if "packages" in gates:
                 sources = None if candidate.validate_all_packages else candidate.sources
@@ -2073,7 +2108,12 @@ def plan_shards(
             paths = _timed_phase("root-paths", lambda: root_store_paths(root, manifest))
             warmup = _timed_phase(
                 "warmup-plan",
-                lambda: plan_darwin_warmup(root, manifest=manifest, shards=shards),
+                lambda: plan_darwin_warmup(
+                    root,
+                    tree=prepared.tree,
+                    manifest=manifest,
+                    shards=shards,
+                ),
             )
     write_root_out_path_cache(
         output.with_name(ROOT_OUT_PATHS_NAME),

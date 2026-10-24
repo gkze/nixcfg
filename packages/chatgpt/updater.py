@@ -5,13 +5,10 @@ the same origin (``/linux/deb``). The macOS appcasts contain no Linux enclosure,
 so the deb index is the only source of truth for the Linux artifacts.
 """
 
-import re
 from dataclasses import dataclass
 from posixpath import basename
 from typing import TYPE_CHECKING, ClassVar, cast
 from urllib.parse import urlparse
-
-from defusedxml import ElementTree
 
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.net import fetch_url
@@ -21,17 +18,19 @@ from lib.update.updaters import (
     register_updater,
 )
 from lib.update.updaters.metadata import AssetURLsMetadata, metadata_get
+from lib.update.updaters.vendor_feeds import (
+    SparkleAppcastItem,
+    debian_version_key,
+    fetch_sparkle_appcast_items,
+    parse_debian_packages,
+    require_url,
+    require_version,
+)
 
 if TYPE_CHECKING:
-    from xml.etree.ElementTree import Element
-
     import aiohttp
 
     from lib.update.updaters.core import UpdateContext
-
-_SPARKLE_NS = "http://www.andymatuschak.org/xml-namespaces/sparkle"
-_SPARKLE_SHORT_VERSION = f"{{{_SPARKLE_NS}}}shortVersionString"
-_SPARKLE_BUILD_VERSION = f"{{{_SPARKLE_NS}}}version"
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,50 +79,6 @@ class ChatGPTUpdater(DownloadHashUpdater):
         ),
     )
 
-    def _parse_appcast(self, xml_data: str, *, appcast_url: str) -> Element:
-        try:
-            return ElementTree.fromstring(xml_data)
-        except ElementTree.ParseError as exc:
-            snippet = xml_data[:200].replace("\n", " ").strip()
-            msg = f"Invalid ChatGPT appcast XML from {appcast_url}; snippet: {snippet}"
-            raise RuntimeError(msg) from exc
-
-    @staticmethod
-    def _extract_items(root: Element, *, appcast_url: str) -> tuple[Element, ...]:
-        items = tuple(root.findall("./channel/item"))
-        if not items:
-            msg = f"No items found in ChatGPT appcast {appcast_url}"
-            raise RuntimeError(msg)
-        return items
-
-    @staticmethod
-    def _required_text(item: Element, tag: str, label: str) -> str:
-        node = item.find(tag)
-        if node is None:
-            msg = f"No {label} found in ChatGPT appcast"
-            raise RuntimeError(msg)
-        value = (node.text or "").strip()
-        if not value:
-            msg = f"Blank {label} found in ChatGPT appcast"
-            raise RuntimeError(msg)
-        return value
-
-    @staticmethod
-    def _extract_enclosure(item: Element) -> Element:
-        enclosure = item.find("enclosure")
-        if enclosure is None:
-            msg = "No enclosure found in ChatGPT appcast"
-            raise RuntimeError(msg)
-        return enclosure
-
-    @staticmethod
-    def _extract_download_url(enclosure: Element) -> str:
-        value = (enclosure.get("url") or "").strip()
-        if not value:
-            msg = "No URL found in ChatGPT appcast enclosure"
-            raise RuntimeError(msg)
-        return value
-
     @staticmethod
     def _require_version_pinned_url(*, url: str, short_version: str) -> None:
         """Reject latest-only archives whose basename omits the short version.
@@ -143,58 +98,6 @@ class ChatGPTUpdater(DownloadHashUpdater):
         )
         raise RuntimeError(msg)
 
-    @staticmethod
-    def _parse_deb_stanza(block: str) -> dict[str, str]:
-        """Parse one ``Packages`` paragraph into a field mapping."""
-        fields: dict[str, str] = {}
-        for line in block.splitlines():
-            if not line or line.startswith((" ", "\t")):
-                continue
-            key, separator, value = line.partition(":")
-            if not separator:
-                continue
-            fields[key.strip()] = value.strip()
-        return fields
-
-    @staticmethod
-    def _deb_version_key(version: str) -> tuple[int, ...]:
-        """Order the dotted numeric release versions OpenAI publishes."""
-        return tuple(int(part) for part in re.findall(r"\d+", version))
-
-    def _select_deb_stanza(self, payload: str, *, index_url: str) -> dict[str, str]:
-        """Return the newest ``chatgpt`` stanza from a deb ``Packages`` index."""
-        stanzas = (
-            self._parse_deb_stanza(block) for block in re.split(r"\n\s*\n", payload)
-        )
-        candidates = [
-            stanza for stanza in stanzas if stanza.get("Package") == self.DEB_PACKAGE
-        ]
-        if not candidates:
-            msg = (
-                f"No {self.DEB_PACKAGE} package found in ChatGPT deb index {index_url}"
-            )
-            raise RuntimeError(msg)
-        return max(
-            candidates,
-            key=lambda stanza: self._deb_version_key(stanza.get("Version", "")),
-        )
-
-    def _deb_artifact_url(self, stanza: dict[str, str], *, index_url: str) -> str:
-        """Return the version-pinned pool URL for one deb stanza."""
-        version = stanza.get("Version", "")
-        filename = stanza.get("Filename", "")
-        if not version or not filename:
-            msg = (
-                f"Incomplete {self.DEB_PACKAGE} stanza in ChatGPT deb index {index_url}"
-            )
-            raise RuntimeError(msg)
-        if version not in basename(filename):
-            msg = (
-                f"ChatGPT deb URL is not version-pinned: {filename} (version {version})"
-            )
-            raise RuntimeError(msg)
-        return f"{self.DEB_BASE_URL}/{filename}"
-
     async def _fetch_deb_artifact_url(
         self,
         session: aiohttp.ClientSession,
@@ -209,37 +112,31 @@ class ChatGPTUpdater(DownloadHashUpdater):
             request_timeout=self.config.default_timeout,
             config=self.config,
         )
-        stanza = self._select_deb_stanza(payload.decode(), index_url=index_url)
-        return self._deb_artifact_url(stanza, index_url=index_url)
-
-    def _extract_appcast_item(self, item: Element) -> _ChatGPTAppcastItem:
-        enclosure = self._extract_enclosure(item)
-        short_version = self._required_text(
-            item,
-            _SPARKLE_SHORT_VERSION,
-            "short version",
+        packages = parse_debian_packages(
+            payload,
+            package=self.DEB_PACKAGE,
+            architecture=self.PLATFORMS[platform],
+            label=f"ChatGPT deb index {index_url}",
         )
-        url = self._extract_download_url(enclosure)
+        if not packages:
+            msg = (
+                f"No {self.DEB_PACKAGE} package found in ChatGPT deb index {index_url}"
+            )
+            raise RuntimeError(msg)
+        newest = max(packages, key=lambda package: debian_version_key(package.version))
+        return f"{self.DEB_BASE_URL}/{newest.filename}"
+
+    def _validated_appcast_item(
+        self, item: SparkleAppcastItem, *, appcast_url: str
+    ) -> _ChatGPTAppcastItem:
+        context = f"ChatGPT appcast {appcast_url}"
+        short_version = require_version(item.short_version, context=context)
+        url = require_url(item.url, context=context)
         self._require_version_pinned_url(url=url, short_version=short_version)
         return _ChatGPTAppcastItem(
             short_version=short_version,
-            build_version=self._required_text(
-                item,
-                _SPARKLE_BUILD_VERSION,
-                "build version",
-            ),
+            build_version=require_version(item.version, context=context),
             url=url,
-        )
-
-    def _extract_appcast_items(
-        self,
-        root: Element,
-        *,
-        appcast_url: str,
-    ) -> tuple[_ChatGPTAppcastItem, ...]:
-        return tuple(
-            self._extract_appcast_item(item)
-            for item in self._extract_items(root, appcast_url=appcast_url)
         )
 
     @staticmethod
@@ -284,15 +181,12 @@ class ChatGPTUpdater(DownloadHashUpdater):
         platform: str,
     ) -> tuple[_ChatGPTAppcastItem, ...]:
         appcast_url = self.APPCASTS[platform]
-        xml_payload = await fetch_url(
-            session,
-            appcast_url,
-            user_agent="Sparkle/2.0",
-            request_timeout=self.config.default_timeout,
-            config=self.config,
+        return tuple(
+            self._validated_appcast_item(item, appcast_url=appcast_url)
+            for item in await fetch_sparkle_appcast_items(
+                session, appcast_url, config=self.config
+            )
         )
-        root = self._parse_appcast(xml_payload.decode(), appcast_url=appcast_url)
-        return self._extract_appcast_items(root, appcast_url=appcast_url)
 
     async def fetch_latest(
         self, session: aiohttp.ClientSession, *, context: UpdateContext

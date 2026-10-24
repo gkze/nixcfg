@@ -19,19 +19,19 @@ additional surfaces:
 workarounds for upstream breakage. Do not remove a pin without finding out why
 it exists.
 
-| Input                 | Role                                                       |
-| --------------------- | ---------------------------------------------------------- |
-| `nixpkgs`             | Primary package set (`nixos-unstable`)                     |
-| `nixpkgs-swift`       | Pinned package set with a working Swift build              |
-| `nix-darwin`          | Darwin system configuration                                |
-| `home-manager`        | User configuration                                         |
-| `flakelight`          | Flake output scaffolding                                   |
-| `devshell`            | Development shell                                          |
-| `treefmt-nix`         | Formatter wiring for `nix fmt`                             |
-| `nix-homebrew`        | Homebrew tap and cask management, with a pinned `brew-src` |
-| `nix-rosetta-builder` | Rosetta builder for Linux builds on Apple silicon          |
-| `git-hooks`           | Generated `.pre-commit-config.yaml`                        |
-| `stylix`, `nixvim`    | Theming and editor configuration                           |
+| Input                        | Role                                                       |
+| ---------------------------- | ---------------------------------------------------------- |
+| `nixpkgs`                    | Primary package set (`nixos-unstable`)                     |
+| `nixpkgs-openchamber-compat` | Nixpkgs source pin for OpenChamber's Sherpa and ONNX ABI   |
+| `nix-darwin`                 | Darwin system configuration                                |
+| `home-manager`               | User configuration                                         |
+| `flakelight`                 | Flake output scaffolding                                   |
+| `devshell`                   | Development shell                                          |
+| `treefmt-nix`                | Formatter wiring for `nix fmt`                             |
+| `nix-homebrew`               | Homebrew tap and cask management, with a pinned `brew-src` |
+| `nix-rosetta-builder`        | Rosetta builder for Linux builds on Apple silicon          |
+| `git-hooks`                  | Generated `.pre-commit-config.yaml`                        |
+| `stylix`, `nixvim`           | Theming and editor configuration                           |
 
 Package-source inputs, such as `emdash`, `gitbutler`, and `scratch`, set
 `flake = false` and provide source trees only.
@@ -42,7 +42,7 @@ Package-source inputs, such as `emdash`, `gitbutler`, and `scratch`, set
 | ------------------------ | ----------------------------------------------------- |
 | `flake.nix`              | Inputs, outputs, systems, and the formatter           |
 | `default.nix`, `lib.nix` | Public API entrypoints                                |
-| `darwin/`                | Host entrypoints: `argus`, `rocinante`, `zeus`        |
+| `darwin/`                | Host entrypoints and George's host profiles           |
 | `home/`                  | User configuration, including `home/george/`          |
 | `modules/`               | Reusable module sets                                  |
 | `packages/`              | Standalone `callPackage` derivations, auto-discovered |
@@ -93,7 +93,7 @@ before you export it.
 | `packages.<system>.<name>`     | Auto-discovered packages from `packages/`        |
 | `overlays`                     | Fragment-based overlays plus helper overlays     |
 | `checks.<system>.*`            | Repo checks, formatter checks, and root closures |
-| `legacyPackages.<system>`      | The package set with overlays applied            |
+| `pkgs.<system>`                | The package set with overlays applied            |
 | `apps.<system>.nixcfg`         | The `nixcfg` CLI                                 |
 | `formatter.<system>`           | The `treefmt` wrapper used by `nix fmt`          |
 | `darwinModules`, `homeModules` | Exported module sets for downstream use          |
@@ -105,11 +105,22 @@ platform-specific drift.
 
 ## Host entrypoints
 
-Each host file selects a profile and imports the shared modules:
+Each host file composes profiles from `darwin/george/profiles.nix` with
+`profiles.mkHost` and lists only its own differences:
 
-- `darwin/argus.nix`
-- `darwin/rocinante.nix`
-- `darwin/zeus.nix`
+- `darwin/argus.nix`: `georgeBase` and `townWorkstation`, plus the rocinante
+  substituter
+- `darwin/rocinante.nix`: `georgeBase`, plus the personal Dock
+- `darwin/zeus.nix`: `georgeBase` and `townWorkstation`, plus the computer name
+
+`georgeBase` holds the settings that all of George's machines share.
+`townWorkstation` adds the work profile, the Town Dock, and the Town tools.
+Later profiles override scalar arguments and append to the module lists.
+
+`darwin/george/` holds George's personal Darwin modules: caches, Homebrew apps,
+Dock layouts, and the work App Store apps. These modules are not part of the
+exported module sets. `darwin/george/` has no `default.nix`, so flakelight does
+not load it as a host.
 
 `home/george/default.nix` is the user entrypoint. `home/george/configuration.nix`
 holds the personal policy that the shared modules must not absorb, such as the

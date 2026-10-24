@@ -1756,219 +1756,431 @@ def test_unsloth_audits_source_owned_transformer(
         _load_updater_module()._audit_oxc_sources(payloads)
 
 
-def test_unsloth_rejects_re_pinned_oxc_darwin_binding_drift(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The lock must retain the native arm64 parser selected on this platform."""
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    lock = json.loads(source_payloads[_OXC_LOCK_PATH])
-    lock["packages"]["node_modules/@oxc-parser/binding-darwin-arm64"]["cpu"] = ["x64"]
-    source_payloads[_OXC_LOCK_PATH] = json.dumps(lock, sort_keys=True).encode()
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
-
-    with pytest.raises(RuntimeError, match="OXC darwin-arm64 binding"):
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
-        )
+type _PayloadMutation = Callable[[dict[str, bytes]], None]
+_SHA512_X = f"sha512-{base64.b64encode(b'x' * 64).decode()}"
+_ADDED_NPM = b"npm install unexpected-runtime-package\n"
 
 
-def test_unsloth_rejects_incomplete_oxc_optional_dependency_lock_entry(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Every source-owned optional binding must retain fetchable lock metadata."""
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    lock = json.loads(source_payloads[_OXC_LOCK_PATH])
-    runtime = lock["packages"]["node_modules/oxc-parser"]
-    runtime["optionalDependencies"]["@oxc-parser/binding-unreviewed"] = "0.131.0"
-    lock["packages"]["node_modules/@oxc-parser/binding-unreviewed"] = {
-        "integrity": f"sha512-{base64.b64encode(b'x' * 64).decode()}",
-        "optional": True,
-        "version": "0.131.0",
-    }
-    source_payloads[_OXC_LOCK_PATH] = json.dumps(lock, sort_keys=True).encode()
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
+def _insert_line(path: str, line: bytes) -> _PayloadMutation:
+    """Insert *line* after the first line of one source payload."""
 
-    with pytest.raises(RuntimeError, match="OXC locked runtime"):
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
-        )
+    def mutate(payloads: dict[str, bytes]) -> None:
+        payloads[path] = payloads[path].replace(b"\n", b"\n" + line, 1)
+
+    return mutate
 
 
-def test_unsloth_accepts_a_coherent_source_owned_optional_binding(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A future OXC binding can flow from a complete immutable lock entry."""
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    lock = json.loads(source_payloads[_OXC_LOCK_PATH])
-    runtime = lock["packages"]["node_modules/oxc-parser"]
-    package_name = "@oxc-parser/binding-future"
-    runtime["optionalDependencies"][package_name] = "0.131.0"
-    lock["packages"][f"node_modules/{package_name}"] = {
-        "integrity": f"sha512-{base64.b64encode(b'x' * 64).decode()}",
-        "optional": True,
-        "resolved": (
-            "https://registry.npmjs.org/@oxc-parser/binding-future/-/"
-            "binding-future-0.131.0.tgz"
+def _replace(path: str, old: bytes, new: bytes, count: int = -1) -> _PayloadMutation:
+    def mutate(payloads: dict[str, bytes]) -> None:
+        payloads[path] = payloads[path].replace(old, new, count)
+
+    return mutate
+
+
+def _append(path: str, suffix: bytes) -> _PayloadMutation:
+    def mutate(payloads: dict[str, bytes]) -> None:
+        payloads[path] += suffix
+
+    return mutate
+
+
+def _set_payload(path: str, value: bytes) -> _PayloadMutation:
+    return lambda payloads: payloads.__setitem__(path, value)
+
+
+def _set_json(path: str, keys: tuple[str, ...], value: object) -> _PayloadMutation:
+    return lambda payloads: _set_json_path(payloads, path, keys, value)
+
+
+def _add_lock_package(
+    name: str, entry: dict[str, object], *, optional_of: str | None = None
+) -> _PayloadMutation:
+    """Add one lock entry, optionally declared by an existing runtime package."""
+
+    def mutate(payloads: dict[str, bytes]) -> None:
+        lock = json.loads(payloads[_OXC_LOCK_PATH])
+        if optional_of is not None:
+            runtime = lock["packages"][f"node_modules/{optional_of}"]
+            runtime["optionalDependencies"][name] = entry["version"]
+        lock["packages"][f"node_modules/{name}"] = entry
+        payloads[_OXC_LOCK_PATH] = json.dumps(lock, sort_keys=True).encode()
+
+    return mutate
+
+
+def _ambiguous_validator_seam(copies: int) -> _PayloadMutation:
+    def mutate(payloads: dict[str, bytes]) -> None:
+        seam = _load_updater_module().OXC_VALIDATOR_PATCH_SEAM.encode()
+        _replace(_OXC_VALIDATE_PATH, seam, seam * copies)(payloads)
+
+    return mutate
+
+
+_PARSER_INTEGRITY = ("packages", "node_modules/oxc-parser", "integrity")
+_VALIDATOR_TIMEOUT_MARKERS = (
+    b'import { performance } from "node:perf_hooks";',
+    b"const OXLINT_DEFAULT_BUDGET_MS = 30_000;",
+    b"const OXLINT_BUDGET_MARGIN_MS = 2_000;",
+    b"const OXLINT_MIN_TIMEOUT_MS = 1_000;",
+    (
+        b"return Number.isFinite(parsed) && parsed > 0 "
+        b"? Math.floor(parsed) : OXLINT_DEFAULT_BUDGET_MS;"
+    ),
+    b"budgetMs - OXLINT_BUDGET_MARGIN_MS - performance.now()",
+    b"if (timeoutMs < OXLINT_MIN_TIMEOUT_MS) {",
+    b"oxlint skipped: validation budget exhausted",
+    b"timeout: timeoutMs,",
+    b'killSignal: "SIGKILL",',
+    b"runLintBatch(entries, oxlintBudgetMs)",
+    b"runLintBatch(lintTargets, oxlintBudgetMs)",
+    b"const oxlintBudgetMs = mapBudgetMs(payload?.timeout_ms);",
+    b"runValidation({ codes, lang, mode, codeShape, oxlintBudgetMs })",
+)
+_CALLER_TIMEOUT_MARKERS = (
+    b"_OXC_TIMEOUT_S = 30",
+    b'"timeout_ms": int(_OXC_TIMEOUT_S * 1000),',
+    b"timeout = _OXC_TIMEOUT_S,",
+    b"except subprocess.TimeoutExpired:",
+    b'"OXC validation timed out"',
+)
+_SH_QUOTED_HASH_PREFIXES = (b"printf '#';", b"printf '\n#';")
+_PS1_QUOTED_HASH_PREFIXES = (b"Write-Output '#';", b"Write-Output '\n#';")
+
+# Each row re-pins the audited OXC sources with one mutation. Digest
+# re-pinning alone must never weaken the audited runtime contract.
+_RE_PINNED_OXC_REJECTIONS: list[tuple[str, _PayloadMutation, type[Exception], str]] = [
+    (
+        "darwin-binding-cpu",
+        _set_json(
+            _OXC_LOCK_PATH,
+            ("packages", "node_modules/@oxc-parser/binding-darwin-arm64", "cpu"),
+            ["x64"],
         ),
-        "version": "0.131.0",
-    }
-    source_payloads[_OXC_LOCK_PATH] = json.dumps(lock, sort_keys=True).encode()
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
-
-    assert (
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
-        ).version
-        == _VERSION
-    )
-
-
-def test_unsloth_accepts_source_owned_oxc_transitive_metadata(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Valid locked metadata may change without duplicating it in the updater."""
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    lock = json.loads(source_payloads[_OXC_LOCK_PATH])
-    lock["packages"]["node_modules/@oxc-project/types"] = {
-        "integrity": f"sha512-{base64.b64encode(b'x' * 64).decode()}",
-        "resolved": "https://registry.npmjs.org/@oxc-project/types/-/types-0.131.0.tgz",
-        "version": "0.131.0",
-    }
-    source_payloads[_OXC_LOCK_PATH] = json.dumps(lock, sort_keys=True).encode()
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
-
-    assert (
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
-        ).version
-        == _VERSION
-    )
-
-
-def test_unsloth_rejects_re_pinned_oxc_malformed_integrity(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A sha512 label alone must not pass as npm source provenance."""
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    _set_json_path(
-        source_payloads,
-        _OXC_LOCK_PATH,
-        ("packages", "node_modules/oxc-parser", "integrity"),
-        "sha512-not-base64!",
-    )
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
-
-    with pytest.raises(RuntimeError, match="OXC locked runtime"):
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
-        )
-
-
-def test_unsloth_rejects_re_pinned_oxc_truncated_integrity(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A valid base64 payload must still contain a full 64-byte SHA-512."""
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    _set_json_path(
-        source_payloads,
-        _OXC_LOCK_PATH,
-        ("packages", "node_modules/oxc-parser", "integrity"),
+        RuntimeError,
+        "OXC darwin-arm64 binding",
+    ),
+    (
+        "optional-binding-without-resolved",
+        _add_lock_package(
+            "@oxc-parser/binding-unreviewed",
+            {"integrity": _SHA512_X, "optional": True, "version": "0.131.0"},
+            optional_of="oxc-parser",
+        ),
+        RuntimeError,
+        "OXC locked runtime",
+    ),
+    (
+        "malformed-integrity",
+        _set_json(_OXC_LOCK_PATH, _PARSER_INTEGRITY, "sha512-not-base64!"),
+        RuntimeError,
+        "OXC locked runtime",
+    ),
+    (
+        "truncated-integrity",
+        _set_json(
+            _OXC_LOCK_PATH,
+            _PARSER_INTEGRITY,
+            (
+                "sha512-SJ3/7ZPbgie8dr5Z9BI/M51zZbpXba+hRSG0MDzVwMW5CRQg2fjY"
+                "E0jHGlLX4eeiibGgC/mzoDFKSDHwVZEH"
+            ),
+        ),
+        RuntimeError,
+        "OXC locked runtime",
+    ),
+    (
+        "non-sha512-integrity",
+        _set_json(
+            _OXC_LOCK_PATH,
+            _PARSER_INTEGRITY,
+            (
+                "sha256-SJ3/7ZPbgie8dr5Z9BI/M51zZbpXba+hRSG0MDzVwMW5CRQg2fjY"
+                "E0jHGlLX4eeiibGgC/mzoDFKSDHwVZEHRQ=="
+            ),
+        ),
+        RuntimeError,
+        "OXC locked runtime",
+    ),
+    (
+        "setup-sh-mutation-removed",
+        _set_payload(_SETUP_SH_PATH, b"# npm mutation removed\n"),
+        RuntimeError,
+        "OXC setup.sh npm install",
+    ),
+    (
+        "setup-sh-additional-install",
+        _insert_line(_SETUP_SH_PATH, _ADDED_NPM),
+        RuntimeError,
+        "OXC setup.sh npm install",
+    ),
+    (
+        "setup-sh-split-install",
+        _insert_line(_SETUP_SH_PATH, b"npm \\\n  install unexpected-runtime-package\n"),
+        RuntimeError,
+        "OXC setup.sh npm install",
+    ),
+    (
+        "setup-sh-quoted-install",
+        _insert_line(
+            _SETUP_SH_PATH, b"eval 'npm install unexpected-runtime-package'\n"
+        ),
+        RuntimeError,
+        "OXC setup.sh npm install",
+    ),
+    *(
         (
-            "sha512-SJ3/7ZPbgie8dr5Z9BI/M51zZbpXba+hRSG0MDzVwMW5CRQg2fjY"
-            "E0jHGlLX4eeiibGgC/mzoDFKSDHwVZEH"
-        ),
-    )
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
-
-    with pytest.raises(RuntimeError, match="OXC locked runtime"):
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
+            f"setup-sh-quoted-hash-{index}",
+            _insert_line(_SETUP_SH_PATH, prefix + b" " + _ADDED_NPM),
+            RuntimeError,
+            "OXC setup.sh npm install",
         )
+        for index, prefix in enumerate(_SH_QUOTED_HASH_PREFIXES)
+    ),
+    (
+        "setup-ps1-mutation-removed",
+        _set_payload(_SETUP_PS1_PATH, b"# npm mutation removed\n"),
+        RuntimeError,
+        "OXC setup.ps1 npm install",
+    ),
+    (
+        "setup-ps1-additional-install",
+        _insert_line(
+            _SETUP_PS1_PATH,
+            b"$unexpected = Invoke-SetupCommand "
+            b"{ cmd /c npm install unexpected-runtime-package }\n",
+        ),
+        RuntimeError,
+        "OXC setup.ps1 npm install",
+    ),
+    (
+        "setup-ps1-case-changed-install",
+        _insert_line(_SETUP_PS1_PATH, b"NPM install unexpected-runtime-package\n"),
+        RuntimeError,
+        "OXC setup.ps1 npm install",
+    ),
+    (
+        "setup-ps1-quoted-install",
+        _insert_line(_SETUP_PS1_PATH, b'& "npm" install unexpected-runtime-package\n'),
+        RuntimeError,
+        "OXC setup.ps1 npm install",
+    ),
+    *(
+        (
+            f"setup-ps1-quoted-hash-{index}",
+            _insert_line(
+                _SETUP_PS1_PATH, prefix + b" NPM install unexpected-runtime-package\n"
+            ),
+            RuntimeError,
+            "OXC setup.ps1 npm install",
+        )
+        for index, prefix in enumerate(_PS1_QUOTED_HASH_PREFIXES)
+    ),
+    (
+        "validator-entrypoint",
+        _replace(_OXC_VALIDATE_PATH, b'from "oxc-parser"', b'from "other-parser"'),
+        RuntimeError,
+        "OXC validator entrypoint",
+    ),
+    *(
+        (
+            f"validator-timeout-{index}",
+            _replace(_OXC_VALIDATE_PATH, marker, b""),
+            RuntimeError,
+            "OXC validator timeout",
+        )
+        for index, marker in enumerate(_VALIDATOR_TIMEOUT_MARKERS)
+    ),
+    (
+        "validator-missing-timeout-call-path",
+        _replace(
+            _OXC_VALIDATE_PATH,
+            b"runLintBatch(entries, oxlintBudgetMs)",
+            b"runLintBatch(entries)",
+            1,
+        ),
+        RuntimeError,
+        "OXC validator timeout",
+    ),
+    *(
+        (
+            f"caller-timeout-{index}",
+            _replace(_OXC_CALLER_PATH, marker, b""),
+            RuntimeError,
+            "OXC caller timeout",
+        )
+        for index, marker in enumerate(_CALLER_TIMEOUT_MARKERS)
+    ),
+    *(
+        (
+            f"validator-seam-copies-{copies}",
+            _ambiguous_validator_seam(copies),
+            RuntimeError,
+            "OXC validator patch seam",
+        )
+        for copies in (0, 2)
+    ),
+    *(
+        (
+            f"structure-{source_path.rsplit('/', 1)[-1]}-{'.'.join(keys)}",
+            _set_json(source_path, keys, value),
+            error_type,
+            message,
+        )
+        for source_path, keys, value, error_type, message in (
+            (_OXC_PACKAGE_PATH, ("name",), "other", RuntimeError, "package identity"),
+            (
+                _OXC_PACKAGE_PATH,
+                ("version",),
+                "rolling",
+                RuntimeError,
+                "package identity",
+            ),
+            (
+                _OXC_PACKAGE_PATH,
+                ("dependencies", "oxlint"),
+                "",
+                RuntimeError,
+                "dependencies drifted",
+            ),
+            (_OXC_PACKAGE_PATH, ("scripts",), {}, RuntimeError, "package shape"),
+            (_OXC_LOCK_PATH, ("lockfileVersion",), 2, RuntimeError, "lock identity"),
+            (
+                _OXC_LOCK_PATH,
+                ("packages", "", "name"),
+                "other",
+                RuntimeError,
+                "lock root",
+            ),
+            (
+                _OXC_LOCK_PATH,
+                ("packages", "node_modules/oxlint", "version"),
+                "1.66.0",
+                RuntimeError,
+                "locked runtime",
+            ),
+            (
+                _OXC_LOCK_PATH,
+                (
+                    "packages",
+                    "node_modules/oxlint",
+                    "optionalDependencies",
+                    "@oxlint/binding-darwin-arm64",
+                ),
+                "",
+                RuntimeError,
+                "locked runtime drifted",
+            ),
+            (
+                _OXC_LOCK_PATH,
+                ("packages", "node_modules/@oxlint/binding-darwin-arm64", "optional"),
+                False,
+                RuntimeError,
+                "locked runtime drifted",
+            ),
+            (
+                _OXC_LOCK_PATH,
+                (
+                    "packages",
+                    "node_modules/oxc-parser",
+                    "dependencies",
+                    "@oxc-project/types",
+                ),
+                1,
+                TypeError,
+                "dependencies .* drifted",
+            ),
+        )
+    ),
+]
 
 
 @pytest.mark.parametrize(
-    "keys",
+    ("mutate", "error_type", "message"),
+    [pytest.param(*row[1:], id=row[0]) for row in _RE_PINNED_OXC_REJECTIONS],
+)
+def test_unsloth_rejects_re_pinned_oxc_source_drift(
+    mutate: _PayloadMutation, error_type: type[Exception], message: str
+) -> None:
+    """Re-pinned OXC sources must still satisfy the audited runtime contract."""
+    payloads = _oxc_source_payloads()
+    mutate(payloads)
+    with pytest.raises(error_type, match=message):
+        _load_updater_module()._audit_oxc_sources(payloads)
+
+
+@pytest.mark.parametrize("prefix", [*_SH_QUOTED_HASH_PREFIXES])
+def test_unsloth_quoted_hash_setup_fixture_really_invokes_npm(prefix: bytes) -> None:
+    """The quoted-hash rows above must model text Bash actually executes as npm."""
+    executed = subprocess.run(  # noqa: S603 -- executes a fixed fixture with an inert npm stub
+        [  # noqa: S607 -- resolves Bash from the test environment
+            "bash",
+            "-c",
+            "npm() { printf 'npm was invoked\\n'; }\n"
+            + (prefix + b" " + _ADDED_NPM).decode(),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert executed.stdout.endswith("npm was invoked\n")
+
+
+@pytest.mark.parametrize(
+    "mutate",
     [
-        ("packages", "node_modules/oxc-parser", "integrity"),
-        (
-            "packages",
-            "node_modules/@oxc-parser/binding-darwin-arm64",
-            "integrity",
+        pytest.param(
+            _add_lock_package(
+                "@oxc-parser/binding-future",
+                {
+                    "integrity": _SHA512_X,
+                    "optional": True,
+                    "resolved": (
+                        "https://registry.npmjs.org/@oxc-parser/binding-future/-/"
+                        "binding-future-0.131.0.tgz"
+                    ),
+                    "version": "0.131.0",
+                },
+                optional_of="oxc-parser",
+            ),
+            id="coherent-optional-binding",
         ),
-        ("packages", "node_modules/oxlint", "integrity"),
-        (
-            "packages",
-            "node_modules/@oxlint/binding-darwin-arm64",
-            "integrity",
+        pytest.param(
+            _add_lock_package(
+                "@oxc-project/types",
+                {
+                    "integrity": _SHA512_X,
+                    "resolved": "https://registry.npmjs.org/@oxc-project/types/-/types-0.131.0.tgz",
+                    "version": "0.131.0",
+                },
+            ),
+            id="transitive-metadata",
+        ),
+        *(
+            pytest.param(
+                _set_json(_OXC_LOCK_PATH, keys, _SHA512_X), id=f"integrity-{keys[1]}"
+            )
+            for keys in (
+                _PARSER_INTEGRITY,
+                (
+                    "packages",
+                    "node_modules/@oxc-parser/binding-darwin-arm64",
+                    "integrity",
+                ),
+                ("packages", "node_modules/oxlint", "integrity"),
+                ("packages", "node_modules/@oxlint/binding-darwin-arm64", "integrity"),
+            )
+        ),
+        pytest.param(
+            _append(_OXC_VALIDATE_PATH, b"\n// upstream documentation\n"),
+            id="validator-comment",
         ),
     ],
 )
-def test_unsloth_accepts_source_owned_valid_oxc_integrity(
-    monkeypatch: pytest.MonkeyPatch,
-    keys: tuple[str, ...],
-) -> None:
-    """The immutable lock owns valid package integrity values."""
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    _set_json_path(
-        source_payloads,
-        _OXC_LOCK_PATH,
-        keys,
-        f"sha512-{base64.b64encode(b'x' * 64).decode()}",
-    )
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
-
-    assert (
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
-        ).version
-        == _VERSION
-    )
-
-
-def test_unsloth_rejects_re_pinned_oxc_non_sha512_integrity(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The updater must preserve npm's SHA-512 integrity algorithm contract."""
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    _set_json_path(
-        source_payloads,
-        _OXC_LOCK_PATH,
-        ("packages", "node_modules/oxc-parser", "integrity"),
-        (
-            "sha256-SJ3/7ZPbgie8dr5Z9BI/M51zZbpXba+hRSG0MDzVwMW5CRQg2fjY"
-            "E0jHGlLX4eeiibGgC/mzoDFKSDHwVZEHRQ=="
-        ),
-    )
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
-
-    with pytest.raises(RuntimeError, match="OXC locked runtime"):
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
-        )
+def test_unsloth_accepts_source_owned_oxc_drift(mutate: _PayloadMutation) -> None:
+    """Valid source-owned lock metadata and comments flow without updater edits."""
+    payloads = _oxc_source_payloads()
+    mutate(payloads)
+    _load_updater_module()._audit_oxc_sources(payloads)
 
 
 def _locked_oxc_source_payloads() -> dict[str, bytes]:
@@ -2034,483 +2246,6 @@ def test_unsloth_accepts_removed_oxc_windows_comment() -> None:
     )
 
     module._audit_oxc_runtime_sources(source_payloads)
-
-
-def test_unsloth_rejects_re_pinned_oxc_setup_mutation_drift(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The blocker must stay tied to the exact runtime npm mutation path."""
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    source_payloads[_SETUP_SH_PATH] = b"# npm mutation removed\n"
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
-
-    with pytest.raises(RuntimeError, match="OXC setup.sh npm install"):
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
-        )
-
-
-def test_unsloth_rejects_re_pinned_additional_oxc_setup_mutation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The audited Unix block must not hide another runtime npm install."""
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    source_payloads[_SETUP_SH_PATH] = source_payloads[_SETUP_SH_PATH].replace(
-        b"\n",
-        b"\nnpm install unexpected-runtime-package\n",
-        1,
-    )
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
-
-    with pytest.raises(RuntimeError, match="OXC setup.sh npm install"):
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
-        )
-
-
-def test_unsloth_rejects_re_pinned_split_oxc_setup_mutation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A shell continuation must not hide an added runtime npm command."""
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    source_payloads[_SETUP_SH_PATH] = source_payloads[_SETUP_SH_PATH].replace(
-        b"\n",
-        b"\nnpm " + b"\\" + b"\n  install unexpected-runtime-package\n",
-        1,
-    )
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
-
-    with pytest.raises(RuntimeError, match="OXC setup.sh npm install"):
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
-        )
-
-
-def test_unsloth_rejects_re_pinned_quoted_oxc_setup_mutation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Quoted shell command indirection must not hide an added npm command."""
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    source_payloads[_SETUP_SH_PATH] = source_payloads[_SETUP_SH_PATH].replace(
-        b"\n",
-        b"\neval 'npm install unexpected-runtime-package'\n",
-        1,
-    )
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
-
-    with pytest.raises(RuntimeError, match="OXC setup.sh npm install"):
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
-        )
-
-
-@pytest.mark.parametrize("prefix", [b"printf '#';", b"printf '\n#';"])
-def test_unsloth_rejects_re_pinned_quoted_hash_oxc_setup_mutation(
-    monkeypatch: pytest.MonkeyPatch,
-    prefix: bytes,
-) -> None:
-    """A quoted hash must not make later executable npm text look commented."""
-    mutation = prefix + b" npm install unexpected-runtime-package\n"
-    executed = subprocess.run(  # noqa: S603 -- executes a fixed fixture with an inert npm stub
-        [  # noqa: S607 -- resolves Bash from the test environment
-            "bash",
-            "-c",
-            "npm() { printf 'npm was invoked\\n'; }\n" + mutation.decode(),
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert executed.stdout.endswith("npm was invoked\n")
-
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    source_payloads[_SETUP_SH_PATH] = source_payloads[_SETUP_SH_PATH].replace(
-        b"\n",
-        b"\n" + mutation,
-        1,
-    )
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
-
-    with pytest.raises(RuntimeError, match="OXC setup.sh npm install"):
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
-        )
-
-
-def test_unsloth_rejects_re_pinned_oxc_windows_setup_mutation_drift(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The Windows setup path must retain the same audited runtime mutation."""
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    source_payloads[_SETUP_PS1_PATH] = b"# npm mutation removed\n"
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
-
-    with pytest.raises(RuntimeError, match="OXC setup.ps1 npm install"):
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
-        )
-
-
-def test_unsloth_rejects_re_pinned_additional_oxc_windows_setup_mutation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The audited PowerShell block must reject another runtime npm install."""
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    source_payloads[_SETUP_PS1_PATH] = source_payloads[_SETUP_PS1_PATH].replace(
-        b"\n",
-        (
-            b"\n$unexpected = Invoke-SetupCommand "
-            b"{ cmd /c npm install unexpected-runtime-package }\n"
-        ),
-        1,
-    )
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
-
-    with pytest.raises(RuntimeError, match="OXC setup.ps1 npm install"):
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
-        )
-
-
-def test_unsloth_rejects_re_pinned_case_changed_oxc_windows_setup_mutation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """PowerShell command matching must remain case-insensitive."""
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    source_payloads[_SETUP_PS1_PATH] = source_payloads[_SETUP_PS1_PATH].replace(
-        b"\n",
-        b"\nNPM install unexpected-runtime-package\n",
-        1,
-    )
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
-
-    with pytest.raises(RuntimeError, match="OXC setup.ps1 npm install"):
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
-        )
-
-
-def test_unsloth_rejects_re_pinned_quoted_oxc_windows_setup_mutation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """PowerShell's call operator must not hide a quoted npm executable."""
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    source_payloads[_SETUP_PS1_PATH] = source_payloads[_SETUP_PS1_PATH].replace(
-        b"\n",
-        b'\n& "npm" install unexpected-runtime-package\n',
-        1,
-    )
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
-
-    with pytest.raises(RuntimeError, match="OXC setup.ps1 npm install"):
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
-        )
-
-
-@pytest.mark.parametrize("prefix", [b"Write-Output '#';", b"Write-Output '\n#';"])
-def test_unsloth_rejects_re_pinned_quoted_hash_oxc_windows_setup_mutation(
-    monkeypatch: pytest.MonkeyPatch,
-    prefix: bytes,
-) -> None:
-    """PowerShell must not treat a quoted hash as a source comment."""
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    source_payloads[_SETUP_PS1_PATH] = source_payloads[_SETUP_PS1_PATH].replace(
-        b"\n",
-        b"\n" + prefix + b" NPM install unexpected-runtime-package\n",
-        1,
-    )
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
-
-    with pytest.raises(RuntimeError, match="OXC setup.ps1 npm install"):
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
-        )
-
-
-def test_unsloth_rejects_re_pinned_oxc_validator_entrypoint_drift(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Validation must keep using the locked parser and package-local oxlint."""
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    source_payloads[_OXC_VALIDATE_PATH] = source_payloads[_OXC_VALIDATE_PATH].replace(
-        b'from "oxc-parser"', b'from "other-parser"'
-    )
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
-
-    with pytest.raises(RuntimeError, match="OXC validator entrypoint"):
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
-        )
-
-
-@pytest.mark.parametrize(
-    "marker",
-    [
-        b'import { performance } from "node:perf_hooks";',
-        b"const OXLINT_DEFAULT_BUDGET_MS = 30_000;",
-        b"const OXLINT_BUDGET_MARGIN_MS = 2_000;",
-        b"const OXLINT_MIN_TIMEOUT_MS = 1_000;",
-        (
-            b"return Number.isFinite(parsed) && parsed > 0 "
-            b"? Math.floor(parsed) : OXLINT_DEFAULT_BUDGET_MS;"
-        ),
-        b"budgetMs - OXLINT_BUDGET_MARGIN_MS - performance.now()",
-        b"if (timeoutMs < OXLINT_MIN_TIMEOUT_MS) {",
-        b"oxlint skipped: validation budget exhausted",
-        b"timeout: timeoutMs,",
-        b'killSignal: "SIGKILL",',
-        b"runLintBatch(entries, oxlintBudgetMs)",
-        b"runLintBatch(lintTargets, oxlintBudgetMs)",
-        b"const oxlintBudgetMs = mapBudgetMs(payload?.timeout_ms);",
-        (b"runValidation({ codes, lang, mode, codeShape, oxlintBudgetMs })"),
-    ],
-)
-def test_unsloth_rejects_re_pinned_oxc_validator_timeout_drift(
-    monkeypatch: pytest.MonkeyPatch,
-    marker: bytes,
-) -> None:
-    """Re-pinning must preserve the caller-budgeted hard-kill contract."""
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    source_payloads[_OXC_VALIDATE_PATH] = source_payloads[_OXC_VALIDATE_PATH].replace(
-        marker,
-        b"",
-    )
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
-
-    with pytest.raises(RuntimeError, match="OXC validator timeout"):
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
-        )
-
-
-def test_unsloth_rejects_re_pinned_oxc_validator_missing_timeout_call_path(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Both lint modes must forward the caller's remaining timeout budget."""
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    source_payloads[_OXC_VALIDATE_PATH] = source_payloads[_OXC_VALIDATE_PATH].replace(
-        b"runLintBatch(entries, oxlintBudgetMs)",
-        b"runLintBatch(entries)",
-        1,
-    )
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
-
-    with pytest.raises(RuntimeError, match="OXC validator timeout"):
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
-        )
-
-
-@pytest.mark.parametrize(
-    "marker",
-    [
-        b"_OXC_TIMEOUT_S = 30",
-        b'"timeout_ms": int(_OXC_TIMEOUT_S * 1000),',
-        b"timeout = _OXC_TIMEOUT_S,",
-        b"except subprocess.TimeoutExpired:",
-        b'"OXC validation timed out"',
-    ],
-)
-def test_unsloth_rejects_re_pinned_oxc_caller_timeout_drift(
-    monkeypatch: pytest.MonkeyPatch,
-    marker: bytes,
-) -> None:
-    """The Python caller must share the wrapper's timeout and fallback contract."""
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    source_payloads[_OXC_CALLER_PATH] = source_payloads[_OXC_CALLER_PATH].replace(
-        marker,
-        b"",
-    )
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
-
-    with pytest.raises(RuntimeError, match="OXC caller timeout"):
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
-        )
-
-
-def test_unsloth_accepts_validator_comment_drift(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Upstream comments must not require a new hard-coded source digest."""
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    source_payloads[_OXC_VALIDATE_PATH] += b"\n// upstream documentation\n"
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
-
-    assert (
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
-        ).version
-        == _VERSION
-    )
-
-
-@pytest.mark.parametrize("copies", [0, 2])
-def test_unsloth_rejects_ambiguous_oxc_validator_patch_seam(
-    monkeypatch: pytest.MonkeyPatch,
-    copies: int,
-) -> None:
-    """The updater must find exactly one instance of the Nix transformation seam."""
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    seam = module.OXC_VALIDATOR_PATCH_SEAM.encode()
-    source_payloads[_OXC_VALIDATE_PATH] = source_payloads[_OXC_VALIDATE_PATH].replace(
-        seam,
-        seam * copies,
-    )
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
-
-    with pytest.raises(RuntimeError, match="OXC validator patch seam"):
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
-        )
-
-
-@pytest.mark.parametrize(
-    ("source_path", "keys", "value", "error_type", "message"),
-    [
-        (_OXC_PACKAGE_PATH, ("name",), "other", RuntimeError, "package identity"),
-        (
-            _OXC_PACKAGE_PATH,
-            ("version",),
-            "rolling",
-            RuntimeError,
-            "package identity",
-        ),
-        (
-            _OXC_PACKAGE_PATH,
-            ("dependencies", "oxlint"),
-            "",
-            RuntimeError,
-            "dependencies drifted",
-        ),
-        (_OXC_PACKAGE_PATH, ("scripts",), {}, RuntimeError, "package shape"),
-        (
-            _OXC_LOCK_PATH,
-            ("lockfileVersion",),
-            2,
-            RuntimeError,
-            "lock identity",
-        ),
-        (
-            _OXC_LOCK_PATH,
-            ("packages", "", "name"),
-            "other",
-            RuntimeError,
-            "lock root",
-        ),
-        (
-            _OXC_LOCK_PATH,
-            ("packages", "node_modules/oxlint", "version"),
-            "1.66.0",
-            RuntimeError,
-            "locked runtime",
-        ),
-        (
-            _OXC_LOCK_PATH,
-            (
-                "packages",
-                "node_modules/oxlint",
-                "optionalDependencies",
-                "@oxlint/binding-darwin-arm64",
-            ),
-            "",
-            RuntimeError,
-            "locked runtime drifted",
-        ),
-        (
-            _OXC_LOCK_PATH,
-            (
-                "packages",
-                "node_modules/@oxlint/binding-darwin-arm64",
-                "optional",
-            ),
-            False,
-            RuntimeError,
-            "locked runtime drifted",
-        ),
-        (
-            _OXC_LOCK_PATH,
-            (
-                "packages",
-                "node_modules/oxc-parser",
-                "dependencies",
-                "@oxc-project/types",
-            ),
-            1,
-            TypeError,
-            "dependencies .* drifted",
-        ),
-    ],
-)
-def test_unsloth_rejects_re_pinned_oxc_source_structure_drift(
-    monkeypatch: pytest.MonkeyPatch,
-    source_path: str,
-    keys: tuple[str, ...],
-    value: object,
-    error_type: type[Exception],
-    message: str,
-) -> None:
-    """Digest re-pinning alone cannot weaken the audited source structure."""
-    module = _load_updater_module()
-    source_payloads = _oxc_source_payloads()
-    _set_json_path(source_payloads, source_path, keys, value)
-    _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
-
-    with pytest.raises(error_type, match=message):
-        run_async(
-            module.UnslothUpdater().fetch_latest(
-                object(), context=UpdateContext(current=None)
-            )
-        )
 
 
 def test_unsloth_rejects_release_without_immutable_commit(

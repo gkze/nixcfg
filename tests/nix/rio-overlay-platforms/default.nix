@@ -12,6 +12,7 @@ let
   fragmentFor =
     system:
     import (src + "/overlays/rio") {
+      final = { };
       prev = {
         lib.optionalAttrs = cond: attrs: if cond then attrs else { };
         stdenv.hostPlatform = { inherit system; };

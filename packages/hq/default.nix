@@ -5,6 +5,7 @@
   gzip,
   gnutar,
   lib,
+  mkMacAppPassthru,
   nodejs_24,
   python3,
   selfSource,
@@ -12,6 +13,10 @@
   ...
 }:
 assert stdenv.hostPlatform.system == "aarch64-darwin";
+# Not mkTgzApp: the install strips the vendor signature, compiles and injects
+# a launcher, patches the updater, and re-signs every Mach-O with hardened
+# runtime entitlements, then audits the result. The helpers copy and link a
+# bundle; they own none of that per-file signing contract.
 stdenv.mkDerivation {
   pname = "hq";
   inherit (selfSource) version;
@@ -257,11 +262,9 @@ stdenv.mkDerivation {
     runHook postInstallCheck
   '';
 
-  passthru.macApp = {
-    bundleId = "ai.indigo.hq-sync-menubar";
+  passthru = mkMacAppPassthru {
     bundleName = "HQ.app";
-    bundleRelPath = "Applications/HQ.app";
-    installMode = "copy";
+    macApp.bundleId = "ai.indigo.hq-sync-menubar";
   };
 
   meta = {

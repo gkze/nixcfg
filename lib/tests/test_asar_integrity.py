@@ -29,7 +29,10 @@ def _write_raw_asar(
     archive_header_size: int | None = None,
 ) -> None:
     separators = (",", ":") if compact else None
-    header = json.dumps(header_value, separators=separators).encode()
+    # Electron writes raw UTF-8 headers; never ASCII-escape non-ASCII names.
+    header = json.dumps(
+        header_value, separators=separators, ensure_ascii=False
+    ).encode()
     resolved_archive_size = (
         8 + len(header) if archive_header_size is None else archive_header_size
     )
@@ -134,6 +137,29 @@ def test_replace_packed_file_preserves_size_and_refreshes_integrity(
     assert (
         asar_integrity.read_packed_file(asar_path, "dist/main.js")
         == b"before managed updater after"
+    )
+
+
+def test_replace_packed_file_keeps_raw_utf8_header_for_non_ascii_paths(
+    tmp_path: Path,
+) -> None:
+    """Re-serializing must not ASCII-escape names Electron stored as UTF-8."""
+    asar_path = tmp_path / "app.asar"
+    relative_path = "dist/\u00e9t\u00e9/main.js"
+    _write_packed_asar(asar_path, relative_path, b"before mutable after")
+    original_header = asar_integrity.read_asar_header(asar_path)
+
+    asar_integrity.replace_packed_file(
+        asar_path,
+        relative_path,
+        lambda payload: payload.replace(b"mutable", b"managed"),
+    )
+
+    header = asar_integrity.read_asar_header(asar_path)
+    assert len(header) == len(original_header)
+    assert "\u00e9t\u00e9".encode() in header
+    assert asar_integrity.read_packed_file(asar_path, relative_path) == (
+        b"before managed after"
     )
 
 
@@ -694,3 +720,47 @@ def test_bundle_publication_retains_original_when_rollback_fails(
     assert str(recovery_files[0]) in str(raised.value)
     assert "plist publish denied" in str(raised.value)
     assert "archive restore denied" in str(raised.value)
+
+
+def test_bundle_publication_succeeds_or_rolls_back_the_archive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Publish both files, or restore the archive when the plist cannot publish."""
+    archive = tmp_path / "app.asar"
+    plist = tmp_path / "Info.plist"
+    _write_packed_asar(archive, "main.js", b"before")
+    plist.write_bytes(plistlib.dumps({"CFBundleIdentifier": "test"}))
+    original = archive.read_bytes()
+
+    def patch(staged: Path) -> str:
+        return asar_integrity.replace_packed_file(
+            staged, "main.js", lambda _payload: b"after!"
+        )
+
+    replace = Path.replace
+
+    def fail_publish(source: Path, target: Path) -> Path:
+        if target == plist:
+            msg = "plist publish denied"
+            raise OSError(msg)
+        return replace(source, target)
+
+    with monkeypatch.context() as patched:
+        patched.setattr(Path, "replace", fail_publish)
+        with pytest.raises(OSError, match="plist publish denied"):
+            asar_integrity.patch_bundle_integrity(archive, plist, patch)
+    assert archive.read_bytes() == original
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "Info.plist",
+        "app.asar",
+    ]
+
+    digest = asar_integrity.patch_bundle_integrity(archive, plist, patch)
+    assert asar_integrity.read_packed_file(archive, "main.js") == b"after!"
+    assert digest == asar_integrity.asar_header_hash(archive)
+    asar_integrity.check_info_plist_hash(plist, archive)
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "Info.plist",
+        "app.asar",
+    ]

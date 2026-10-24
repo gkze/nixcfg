@@ -65,7 +65,7 @@ in
       };
 
       postConfigure =
-        prev.lib.replaceStrings
+        final.replaceStringsExact
           [
             "yarn --cwd app/node_modules/desktop-notifications run install"
             ''
@@ -101,6 +101,9 @@ in
           ]
           oldAttrs.postConfigure;
 
+      # Not mkDmgApp/mkZipApp: this bundle is built from source by
+      # electron-builder in buildPhase; the darwin-apps helpers unpack a fetched
+      # vendor archive and cannot install a build-tree bundle.
       installPhase =
         if prev.stdenv.hostPlatform.isDarwin then
           ''
@@ -125,7 +128,7 @@ in
             runHook postInstall
           ''
         else
-          prev.lib.replaceStrings
+          final.replaceStringsExact
             [
               "ln -s $out/share/github-desktop/resources/app/static/icon-logo.png $out/share/icons/hicolor/512x512/apps/github-desktop.png"
             ]
@@ -144,11 +147,7 @@ in
         electronHeaders = electronRuntime.passthru.headers;
         electronRuntimeVersion = electronRuntime.version;
         electronVersion = electronRuntime.version;
-        macApp = {
-          bundleName = "GitHub Desktop.app";
-          bundleRelPath = "Applications/GitHub Desktop.app";
-          installMode = "copy";
-        };
+        inherit (final.mkMacAppPassthru { bundleName = "GitHub Desktop.app"; }) macApp;
         upstreamChannel = "beta";
       };
 
