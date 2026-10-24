@@ -1,6 +1,24 @@
 {
-  "drvHash": "platforms-v1:846c63b06705dc3ef98e49fa754193e699762c166a2aaa12cc7f81aed5edbd0c",
+  "drvHash": "platforms-v1:d0db381700e31e65a5da232b0ae4b67f7e29f791574a53006e758f2013592e88",
   "hashes": [
+    {
+      "hash": "sha256-kJh6OhbX21VtiGrD1VHnttPt8KHPQ6yu1iLoZ2vh0S8=",
+      "hashType": "bunRuntimeHash",
+      "platform": "aarch64-darwin",
+      "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-darwin-aarch64.zip"
+    },
+    {
+      "hash": "sha256-VDKLvC2cjgyfiSxUTWbFeoO4QTnjSQnl7oF1jxrI/ac=",
+      "hashType": "bunRuntimeHash",
+      "platform": "aarch64-linux",
+      "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-linux-aarch64.zip"
+    },
+    {
+      "hash": "sha256-xngEDxT+BEDrg503y9DOTAUaMtpygGrJfeamqra/co8=",
+      "hashType": "bunRuntimeHash",
+      "platform": "x86_64-linux",
+      "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-linux-x64-baseline.zip"
+    },
     {
       "hash": "sha256-llSqPk7coKEobIJaLYu/dxFLAwNT9g96FeG3IO+55q0=",
       "hashType": "nodeModulesHash",
@@ -18,10 +36,13 @@
     }
   ],
   "input": "opencode",
+  "pins": {
+    "bunVersion": "1.4.2"
+  },
   "platformDrvHashes": {
-    "aarch64-darwin": "jx3q5pqpalc23hbdk0hf5bkdsq4x0hzl",
-    "aarch64-linux": "q2jmdhg64p1mhcy5iz051dvxmjqkphsr",
-    "x86_64-linux": "07yscnpqlwp9fjaam9c08j36bf6nwm9y"
+    "aarch64-darwin": "ppr8xzi79x330zddw18m7wgm0r6imn0h",
+    "aarch64-linux": "f01jb2aqfnkxnq6a0y3fr6dxxdqrcgxm",
+    "x86_64-linux": "a9v3n637wngdakv0ax6nkzn5cdpkszz7"
   },
   "version": "gkze/patches"
 }

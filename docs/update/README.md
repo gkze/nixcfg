@@ -135,10 +135,12 @@ to package and root validation. A command that hits the timeout is not retried.
 
 Source-derived toolchain metadata comes from the pinned upstream manifests and
 locks. Node and pnpm selection must satisfy upstream requirements through the
-pinned nixpkgs package set. Mux and Superset use the exact Bun version from
-`packageManager`, with updater-generated runtime hashes. The updater owns these
-generated values. Reviewed compatibility pins and platform policy remain
-explicit.
+pinned nixpkgs package set. Mux, OpenCode, and Superset use the exact Bun
+version from `packageManager`, with updater-generated runtime hashes. A Bun
+lockfile is reproducible only under the Bun release that wrote it. A different
+release can re-resolve it and fail `--frozen-lockfile`. OpenCode Desktop
+installs with OpenCode's exact Bun. The updater owns these generated values.
+Reviewed compatibility pins and platform policy remain explicit.
 
 ## CI execution
 

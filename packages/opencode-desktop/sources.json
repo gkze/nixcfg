@@ -1,5 +1,5 @@
 {
-  "drvHash": "platforms-v1:0b7b4ae4ddefdba24e48e7da2cdc20b0c34ed898670539d849219fc6015d98b0",
+  "drvHash": "platforms-v1:5f336d5891f96c1b72382a4801717cc20bdbc03fa551ac253e5ebc1f469022bb",
   "electronVersion": "42.10.1",
   "hashes": [
     {
@@ -23,9 +23,9 @@
     "desktopWorkspace": "packages/desktop"
   },
   "platformDrvHashes": {
-    "aarch64-darwin": "j2bc9lrh9c6rwxvybx2qnl47s3vb36b3",
-    "aarch64-linux": "ngx003daqxvacl41sbarw5bcp5rdljr2",
-    "x86_64-linux": "3riwln6jd5ps53yzpg8fjzpzb7ry9y80"
+    "aarch64-darwin": "30lvg4iq7cda562mx9vdxyxzv2hcbgp3",
+    "aarch64-linux": "7q1vr7frxr2c9iyviy35bw78yjqvk1xc",
+    "x86_64-linux": "0przrh47bdlgsgagb05grigi83k3z0wv"
   },
   "version": "gkze/patches"
 }

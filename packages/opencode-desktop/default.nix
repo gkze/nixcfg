@@ -194,7 +194,6 @@ let
     '';
   });
 
-  packageManagerSync = opencodeOverlayDir + "/sync_package_manager_bun_version.py";
   hoistedOpentuiLinker = opencodeOverlayDir + "/link-hoisted-opentui-packages.sh";
   patchDesktopSource = ./patch_desktop_source.sh;
   desktopCli =
@@ -260,9 +259,6 @@ stdenv.mkDerivation {
   '';
 
   postPatch = ''
-    bunVersion="$(bun -v | tr -d '\n')"
-    ${lib.getExe python3} ${packageManagerSync} . "$bunVersion"
-
     if [ ! -f .github/TEAM_MEMBERS ]; then
       mkdir -p .github
       if [ -f ${inputs.opencode}/.github/TEAM_MEMBERS ]; then
