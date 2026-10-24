@@ -1156,15 +1156,16 @@ def test_render_build_zig_zon_nix_yields_tool_resolution_events(
         )
     )
 
+    flake_url = module._local_flake_url(Path("/repo/root"))
     resolution_messages = [event.message for event in events]
     assert resolution_messages[0] == (
-        "resolving git+file:///repo/root?dirty=1#pkgs.aarch64-darwin.zig_0_15"
+        f"resolving {flake_url}#pkgs.aarch64-darwin.zig_0_15"
     )
     assert resolution_messages[1].startswith("resolving ")
     assert_nix_ast_equal(
         resolution_messages[1].removeprefix("resolving "),
         _expected_flake_attr_expression(
-            "git+file:///repo/root?dirty=1",
+            flake_url,
             "inputs",
             "zon2nix",
             "packages",

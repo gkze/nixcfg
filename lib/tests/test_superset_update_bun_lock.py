@@ -19,7 +19,7 @@ from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.import_utils import load_module_from_path
-from lib.update.paths import REPO_ROOT
+from lib.update.paths import REPO_ROOT, local_flake_url
 
 
 def _load_module() -> ModuleType:
@@ -422,7 +422,7 @@ def test_main_happy_path_runs_prepare_and_copies_outputs(
             [
                 "nix",
                 "run",
-                f"git+file://{repo_root}?dirty=1#nixcfg",
+                f"{local_flake_url(repo_root)}#nixcfg",
                 "--",
                 "ci",
                 "pipeline",

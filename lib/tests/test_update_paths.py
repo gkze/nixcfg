@@ -100,4 +100,4 @@ def test_local_flake_url_uses_git_source_view(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
 
-    assert local_flake_url(repo_root) == f"git+file://{repo_root}?dirty=1"
+    assert local_flake_url(repo_root) == f"git+file://{repo_root}?dirty=1&shallow=1"
