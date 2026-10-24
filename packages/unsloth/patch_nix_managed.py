@@ -382,6 +382,17 @@ _PATCHES = (
     }
     use tauri_plugin_autostart::ManagerExt;
 """,
+        alternatives=((
+            """fn reconcile_autostart_entry(app: &tauri::AppHandle) {
+    // A dev run would repoint the entry at target/debug.
+""",
+            """fn reconcile_autostart_entry(app: &tauri::AppHandle) {
+    if crate::nix_managed::enabled() {
+        return;
+    }
+    // A dev run would repoint the entry at target/debug.
+""",
+        ),),
     ),
     _SourcePatch(
         Path("studio/src-tauri/src/main.rs"),
@@ -488,6 +499,31 @@ _PATCHES = (
     update_state: tauri::State<'_, update::UpdateState>,
     diagnostics: tauri::State<'_, DiagnosticsState>,
     skip_long_paths: Option<bool>,
+) -> Result<(), String> {
+    crate::nix_managed::require_mutable("install the backend")?;
+    if has_owned_backend(&backend_state)? {
+""",
+            ),
+            (
+                """pub async fn start_install(
+    app: AppHandle,
+    state: tauri::State<'_, install::InstallState>,
+    backend_state: tauri::State<'_, BackendState>,
+    update_state: tauri::State<'_, update::UpdateState>,
+    diagnostics: tauri::State<'_, DiagnosticsState>,
+    skip_long_paths: Option<bool>,
+    chat_only: Option<bool>,
+) -> Result<(), String> {
+    if has_owned_backend(&backend_state)? {
+""",
+                """pub async fn start_install(
+    app: AppHandle,
+    state: tauri::State<'_, install::InstallState>,
+    backend_state: tauri::State<'_, BackendState>,
+    update_state: tauri::State<'_, update::UpdateState>,
+    diagnostics: tauri::State<'_, DiagnosticsState>,
+    skip_long_paths: Option<bool>,
+    chat_only: Option<bool>,
 ) -> Result<(), String> {
     crate::nix_managed::require_mutable("install the backend")?;
     if has_owned_backend(&backend_state)? {
@@ -1133,6 +1169,71 @@ _BACKEND_PATCHES = (
         return False
 
 """,
+        ), (
+            """def _install_package_wheel_first(
+    *,
+    event_queue: Any,
+    import_name: str,
+    display_name: str,
+    pypi_name: str,
+    required: bool = False,
+    extension: str | None = None,
+    **kwargs: Any,
+) -> bool:
+    \"\"\"Install a fast-path package, wheel first, and never leave an unusable one behind. The two
+    "touch nothing" guards run here, outside the cleanup: an already-working package returns
+    before any subprocess, and offline changes nothing. Everything after them is an install
+    attempt, so ANY unsuccessful exit -- timeout, failed install, bad import -- discards what is
+    left rather than leaving metadata the in-process import would pick up. Enforced here rather
+    than at each return because four separate exits have now been found that forgot to clean up.
+    With *extension*, a copy without that compiled module (the extension-free mamba_ssm wheel) is
+    replaced rather than accepted.\"\"\"
+    from utils.ssm_runtime import _unblock_import, forget_imported_modules
+
+    _unblock_import(import_name)  # an earlier in-process block; this call probes afresh
+
+    def kernel_usable() -> bool:
+        return _is_importable(import_name) and (extension is None or _is_importable(extension))
+
+    if kernel_usable():
+        logger.info("%s already installed", display_name)
+        return True
+
+""",
+            """def _install_package_wheel_first(
+    *,
+    event_queue: Any,
+    import_name: str,
+    display_name: str,
+    pypi_name: str,
+    required: bool = False,
+    extension: str | None = None,
+    **kwargs: Any,
+) -> bool:
+    \"\"\"Install a fast-path package, wheel first, and never leave an unusable one behind. The two
+    "touch nothing" guards run here, outside the cleanup: an already-working package returns
+    before any subprocess, and offline changes nothing. Everything after them is an install
+    attempt, so ANY unsuccessful exit -- timeout, failed install, bad import -- discards what is
+    left rather than leaving metadata the in-process import would pick up. Enforced here rather
+    than at each return because four separate exits have now been found that forgot to clean up.
+    With *extension*, a copy without that compiled module (the extension-free mamba_ssm wheel) is
+    replaced rather than accepted.\"\"\"
+    from utils.ssm_runtime import _unblock_import, forget_imported_modules
+
+    _unblock_import(import_name)  # an earlier in-process block; this call probes afresh
+
+    def kernel_usable() -> bool:
+        return _is_importable(import_name) and (extension is None or _is_importable(extension))
+
+    if kernel_usable():
+        logger.info("%s already installed", display_name)
+        return True
+
+    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
+        logger.info("Skipping %s installation in the Nix-managed backend", display_name)
+        return False
+
+""",
         ),),
     ),
     _SourcePatch(
@@ -1206,6 +1307,48 @@ _BACKEND_PATCHES = (
     pypi_spec: str | None = None,
     pypi_status_message: str | None = None,
     allow_source_build: bool = True,
+) -> bool:
+    \"\"\"The install itself. Call it through _install_package_wheel_first, never directly.\"\"\"
+    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
+        logger.info("Skipping %s installation in the Nix-managed backend", display_name)
+        return False
+""",
+        ), (
+            """def _attempt_package_install(
+    *,
+    event_queue: Any,
+    import_name: str,
+    display_name: str,
+    pypi_name: str,
+    pypi_version: str | None = None,
+    filename_prefix: str | None = None,
+    release_tag: str | None = None,
+    release_base_url: str | None = None,
+    wheel_url_builder: Callable[[dict[str, str] | None], str | None] | None = None,
+    pypi_spec: str | None = None,
+    pypi_status_message: str | None = None,
+    allow_source_build: bool = True,
+    extension: str | None = None,
+    replacing: bool = False,
+) -> bool:
+    \"\"\"The install itself. Call it through _install_package_wheel_first, never directly.\"\"\"
+""",
+            """def _attempt_package_install(
+    *,
+    event_queue: Any,
+    import_name: str,
+    display_name: str,
+    pypi_name: str,
+    pypi_version: str | None = None,
+    filename_prefix: str | None = None,
+    release_tag: str | None = None,
+    release_base_url: str | None = None,
+    wheel_url_builder: Callable[[dict[str, str] | None], str | None] | None = None,
+    pypi_spec: str | None = None,
+    pypi_status_message: str | None = None,
+    allow_source_build: bool = True,
+    extension: str | None = None,
+    replacing: bool = False,
 ) -> bool:
     \"\"\"The install itself. Call it through _install_package_wheel_first, never directly.\"\"\"
     if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
@@ -1402,6 +1545,67 @@ _BACKEND_PATCHES = (
         return False
 
 """,
+        ), (
+            """def _install_kernel(
+    *,
+    import_name: str,
+    display_name: str,
+    pypi_name: str,
+    package_version: str,
+    release_tag: str,
+    release_base_url: str,
+    status_cb: StatusCb,
+    run: Callable[..., Any],
+    newly_installed: list[str] | None = None,
+    allow_source_build: bool = True,
+    required: bool = False,
+    wheel_url_builder: Callable[[dict[str, str] | None], str | None] | None = None,
+    extension: str | None = None,
+) -> bool:
+    \"\"\"Install one kernel wheel-first, then (when *allow_source_build*) a HIP-aware PyPI source build
+    (never on Windows). Returns True iff importable afterwards; idempotent (no-op when already
+    installed). An install this call made is appended to *newly_installed*. One install per kernel
+    runs at a time across processes; a failed one is not retried in this process. With
+    *extension*, an installed copy without that compiled module (the extension-free mamba_ssm
+    wheel) is replaced rather than accepted.\"\"\"
+    _unblock_import(import_name)  # a previous load's in-process block; this one probes afresh
+    if kernel_usable(import_name, extension):
+        logger.info("%s already installed", display_name)
+        return True
+
+""",
+            """def _install_kernel(
+    *,
+    import_name: str,
+    display_name: str,
+    pypi_name: str,
+    package_version: str,
+    release_tag: str,
+    release_base_url: str,
+    status_cb: StatusCb,
+    run: Callable[..., Any],
+    newly_installed: list[str] | None = None,
+    allow_source_build: bool = True,
+    required: bool = False,
+    wheel_url_builder: Callable[[dict[str, str] | None], str | None] | None = None,
+    extension: str | None = None,
+) -> bool:
+    \"\"\"Install one kernel wheel-first, then (when *allow_source_build*) a HIP-aware PyPI source build
+    (never on Windows). Returns True iff importable afterwards; idempotent (no-op when already
+    installed). An install this call made is appended to *newly_installed*. One install per kernel
+    runs at a time across processes; a failed one is not retried in this process. With
+    *extension*, an installed copy without that compiled module (the extension-free mamba_ssm
+    wheel) is replaced rather than accepted.\"\"\"
+    _unblock_import(import_name)  # a previous load's in-process block; this one probes afresh
+    if kernel_usable(import_name, extension):
+        logger.info("%s already installed", display_name)
+        return True
+
+    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
+        logger.info("Skipping %s installation in the Nix-managed backend", display_name)
+        return False
+
+""",
         ),),
     ),
     _SourcePatch(
@@ -1488,6 +1692,29 @@ _BACKEND_PATCHES = (
         }}
     if not _claim_operation(backend_request):
 """,
+        alternatives=((
+            """def _start_llama_job(backend_request: Optional[str] = None) -> dict:
+    \"\"\"Shared body of start_update() and start_backend_switch().\"\"\"
+    # Read before the claim replaces the previous job.
+    whisper_retry = _whisper_retry_owed()
+    if not _claim_operation(backend_request):
+""",
+            f"""def _start_llama_job(backend_request: Optional[str] = None) -> dict:
+    \"\"\"Shared body of start_update() and start_backend_switch().\"\"\"
+    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
+        with _job_lock:
+            job = dict(_job)
+        return {{
+            "started": False,
+            "reason": "nix_managed",
+            "message": "Cannot update package-owned helper binaries: {_MANAGED_ERROR}.",
+            "job": job,
+        }}
+    # Read before the claim replaces the previous job.
+    whisper_retry = _whisper_retry_owed()
+    if not _claim_operation(backend_request):
+""",
+        ),),
     ),
     _SourcePatch(
         Path("studio/backend/core/inference/sd_cpp_backend.py"),
