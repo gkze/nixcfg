@@ -1,10 +1,12 @@
 ---
 # Trusted events deliberately fail after a unique store path is pushed. The
 # proof job is the required check: the designed fail step exits 1, and
-# gkze.cachix.org must still have the path. Fork PRs instead run a read-only
-# cache proof with no upload credential. continue-on-error is only on the
-# designed fail step. The trusted job conclusion stays green only when flush
-# and the cachix-action post hook both succeed; a post-hook throw fails it.
+# gkze.cachix.org must still have the path. A third path is built into a
+# SIGSTOPped daemon so flush must time out `daemon stop` and republish it from
+# the store. Fork PRs instead run a read-only cache proof with no upload
+# credential. continue-on-error is only on the designed fail step. The trusted
+# job conclusion stays green only when flush and the cachix-action post hook
+# both succeed; a post-hook throw (missing pid after a drained daemon) fails it.
 name: Cachix flush proof
 on:
   pull_request:
@@ -109,6 +111,45 @@ jobs:
               built + "\n"
           )
         shell: python
+      # 40048292663: a wedged daemon dropped queued paths and `daemon stop`
+      # never returned. SIGSTOP reproduces both: the hook's push only lands
+      # in the socket backlog, and stop gets no reply. Flush must time stop
+      # out, kill the daemon, and republish this path from the local store.
+      - name: Wedge the daemon and realize a queued path
+        if: always()
+        env:
+          PROOF_NAME: cachix-flush-proof-wedged-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          import os
+          import signal
+          import subprocess
+          from pathlib import Path
+
+          daemon = Path(os.environ["CACHIX_DAEMON_DIR"]) / "daemon.pid"
+          os.kill(int(daemon.read_text().strip()), signal.SIGSTOP)
+          name = os.environ["PROOF_NAME"]
+          cwd = Path.cwd()
+          expr = (
+              "let pkgs = (builtins.getFlake "
+              f'"path:{cwd}").pkgs.x86_64-linux; '
+              f'in pkgs.runCommand "{name}" {{}} "echo {name} > $out"'
+          )
+          built = subprocess.check_output(
+              [
+                  "nix",
+                  "build",
+                  "--impure",
+                  "--no-link",
+                  "--print-out-paths",
+                  "--expr",
+                  expr,
+              ],
+              text=True,
+          ).strip()
+          Path(os.environ["RUNNER_TEMP"], "proof-path-wedged.txt").write_text(
+              built + "\n"
+          )
+        shell: python
       - name: Retain proof path
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -117,14 +158,36 @@ jobs:
           path: |
             ${{ runner.temp }}/proof-path.txt
             ${{ runner.temp }}/proof-path-after.txt
+            ${{ runner.temp }}/proof-path-wedged.txt
           if-no-files-found: error
+      # Flush stays the last step; the same step then proves it took the
+      # wedged-daemon recovery rather than a normal drain.
       - name: Flush Cachix daemon
         if: always()
+        timeout-minutes: 15
         env:
           NIXCFG_CI_STAGE: flush-cachix
+          NIXCFG_CACHIX_STOP_TIMEOUT_SECONDS: "30"
         run: |
+          import os
           import runpy
-          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+          from pathlib import Path
+
+          try:
+              runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+          except SystemExit as exit_:
+              if exit_.code not in (0, None):
+                  raise
+          log = (
+              Path(os.environ["RUNNER_TEMP"]) / "update-artifacts" / "cachix-flush.log"
+          ).read_text()
+          for needle in (
+              "cachix daemon stop returncode=124",
+              "wedged Cachix daemon pid=",
+              "locally built paths on gkze.cachix.org or cache.nixos.org",
+          ):
+              if needle not in log:
+                  raise SystemExit(f"flush did not take the wedge recovery: {needle!r}")
         shell: python
   fork-read-only:
     if: >-
@@ -192,7 +255,12 @@ jobs:
           evidence = Path(os.environ["RUNNER_TEMP"]) / "proof"
           before = (evidence / "proof-path.txt").read_text().strip()
           after = (evidence / "proof-path-after.txt").read_text().strip()
-          for label, path in (("before-failure", before), ("after-failure", after)):
+          wedged = (evidence / "proof-path-wedged.txt").read_text().strip()
+          for label, path in (
+              ("before-failure", before),
+              ("after-failure", after),
+              ("wedged-daemon", wedged),
+          ):
               if not path.startswith("/nix/store/"):
                   raise SystemExit(f"invalid {label} proof path: {path}")
               subprocess.run(
@@ -203,6 +271,7 @@ jobs:
         shell: python
       - name: Flush Cachix daemon
         if: always()
+        timeout-minutes: 15
         env:
           NIXCFG_CI_STAGE: flush-cachix
         run: |

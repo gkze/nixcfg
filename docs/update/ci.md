@@ -177,6 +177,27 @@ path and post-failure flush proof, while fork jobs only run `nix store ping`
 against `gkze` with no Cachix secret. The aggregate `proof` check requires the
 appropriate branch's success and never uses `pull_request_target`.
 
+Every job that passes an explicit `cachix-token` input to `update-runtime`
+ends with `flush-cachix`; read-only `repair` and `start-repair` do not. That
+step stops the daemon, then pushes and pins the job's recorded root receipts.
+Cachix's HTTP client has no response timeout. In run 40048292663 a stalled
+request froze the daemon's queue, so `cachix daemon stop` never returned, and
+the flush spent the job's last three hours. Flush therefore runs inside a
+40-minute budget. `native` and `publish` use a 45-minute step timeout as a
+backstop; trusted proof flushes use 15 minutes. `fork-read-only` has no
+step-level override and remains within its 30-minute job cap. Each Cachix or
+Nix call in flush has its own timeout, and pushes retry with fresh connections.
+
+The daemon logs a queued path only when a worker starts it, so its log
+cannot name what a stuck queue dropped. When `daemon stop` fails or times
+out, flush kills the daemon and pushes every path the runner built itself
+(Nix marks these `ultimate`). It then checks each path's narinfo on
+`gkze.cachix.org` or `cache.nixos.org`, the upstream that `cachix push`
+skips. Flush fails the job unless every one of those paths is served. The
+`cachix-flush-proof` workflow freezes the daemon with `SIGSTOP` to exercise
+this recovery path on same-repository pull requests and workflow dispatches;
+fork pull requests run only the read-only proof.
+
 ### Generator cache
 
 Preparation and repair restore Cargo registry/Git downloads and verified
