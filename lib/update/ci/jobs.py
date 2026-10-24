@@ -11,6 +11,7 @@ import math
 import os
 import queue
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -24,12 +25,14 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TextIO, cast
 
-# A direct script invocation has only lib/update/ci on sys.path. The policy module
-# and both package initializers are dependency-free, preserving the bootstrap.
+# A direct script invocation has only lib/update/ci on sys.path. The policy and
+# paths modules and both package initializers are dependency-free, preserving the
+# bootstrap.
 if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from lib.update.nix_policy import NO_IMPORT_FROM_DERIVATION_ARGS
+from lib.update.paths import local_flake_url
 
 _BINARY_CACHE = "gkze"
 _VALIDATION_SCOPES = frozenset({
@@ -84,6 +87,9 @@ _CACHIX_FLUSH_BUDGET_SECONDS = 2400.0
 _CACHIX_DAEMON_EXIT_GRACE_SECONDS = 10.0
 _DAEMON_LOG_TAIL_LINES = 20
 _TIMEOUT_RETURNCODE = 124
+# 40089810663 bootstrap exited 1 with no diagnostic: the captured stderr of the
+# failing ``nix eval`` was discarded with the exception.
+_FAILURE_STDERR_TAIL_LINES = 50
 # cachix push omits paths its upstream (cache.nixos.org) already serves, so
 # a recovered path is proven by a narinfo on either cache.
 _RECOVERY_SUBSTITUTERS = ("https://gkze.cachix.org", "https://cache.nixos.org")
@@ -277,7 +283,7 @@ def bootstrap() -> None:
         "-c",
         "pass",
     )
-    flake_url = json.dumps(f"git+file://{Path.cwd()}")
+    flake_url = json.dumps(local_flake_url(Path.cwd()))
     nixpkgs = _run(
         "nix",
         "eval",
@@ -2777,12 +2783,37 @@ def main(stage: str) -> int:
     return 0
 
 
+def _report_process_failure(error: subprocess.CalledProcessError, log: TextIO) -> None:
+    """Name the failed command and the tail of any stderr it captured."""
+    command = (
+        error.cmd if isinstance(error.cmd, str) else shlex.join(map(str, error.cmd))
+    )
+    print(
+        f"::error::Command failed with exit status {error.returncode}: {command}",
+        file=log,
+    )
+    stderr = _timeout_text(error.stderr)
+    if stderr.strip():
+        lines = stderr.rstrip("\n").splitlines()
+        omitted = len(lines) - _FAILURE_STDERR_TAIL_LINES
+        if omitted > 0:
+            print(f"[{omitted} earlier stderr lines omitted]", file=log)
+        print("\n".join(lines[-_FAILURE_STDERR_TAIL_LINES:]), file=log)
+    log.flush()
+
+
+def entrypoint(stage: str, log: TextIO | None = None) -> int:
+    """Run *stage* and keep a failed child's exit status and diagnostics."""
+    try:
+        return main(stage)
+    except subprocess.CalledProcessError as error:
+        _report_process_failure(error, sys.stderr if log is None else log)
+        return error.returncode
+
+
 if (
     __name__ == "__main__"
 ):  # pragma: no cover -- entrypoint delegates to tested operations
-    try:
-        sys.exit(
-            main(sys.argv[1] if len(sys.argv) > 1 else os.environ["NIXCFG_CI_STAGE"])
-        )
-    except subprocess.CalledProcessError as error:
-        sys.exit(error.returncode)
+    sys.exit(
+        entrypoint(sys.argv[1] if len(sys.argv) > 1 else os.environ["NIXCFG_CI_STAGE"])
+    )

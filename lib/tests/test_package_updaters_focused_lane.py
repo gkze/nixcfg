@@ -783,7 +783,7 @@ def test_scratch_expr_builders_fetch_hashes_and_build_result(
                     value=FunctionCall(
                         name=module.identifier_attr_path("builtins", "getFlake"),
                         argument=StringPrimitive(
-                            value=f"git+file://{module.REPO_ROOT}?dirty=1"
+                            value=module.local_flake_url(module.REPO_ROOT)
                         ),
                     ),
                 ),

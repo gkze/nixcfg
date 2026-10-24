@@ -12,12 +12,14 @@ import threading
 import time
 from io import StringIO
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 import yaml
 from typer.testing import CliRunner
 
 from lib.system_policy import supported_systems
+from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._update_workspace_helpers import init_update_workspace_repo
 from lib.update.candidate import git
 from lib.update.ci import candidate as pipeline
@@ -3799,6 +3801,123 @@ def test_bootstrap_rejects_empty_nixpkgs(job_repository, monkeypatch) -> None:
     )
     with pytest.raises(ValueError, match="Pinned nixpkgs path is empty"):
         jobs.bootstrap()
+
+
+def test_bootstrap_reads_pinned_nixpkgs_through_a_shallow_safe_flake_url(
+    job_repository, monkeypatch
+) -> None:
+    """40089810663: a bare git+file URL fails on Actions' fetch-depth 1 checkout.
+
+    Determinate Nix refuses a clean shallow clone ("shallow Git repository, so
+    'revCount' is not available") unless the URL opts in with ``shallow=1``.
+    """
+    calls: list[tuple[str, ...]] = []
+
+    def run(*args: str, **_kwargs: object):
+        calls.append(args)
+        stdout = "/nix/store/pinned-nixpkgs\n" if args[:2] == ("nix", "eval") else ""
+        return subprocess.CompletedProcess(args, 0, stdout=stdout)
+
+    monkeypatch.setattr(jobs, "_run", run)
+    jobs.bootstrap()
+
+    evaluation = next(call for call in calls if call[:2] == ("nix", "eval"))
+    assert evaluation[:-1] == (
+        "nix",
+        "eval",
+        "--impure",
+        "--raw",
+        "--no-write-lock-file",
+        "--option",
+        "allow-import-from-derivation",
+        "false",
+        "--expr",
+    )
+    flake_url = jobs.local_flake_url(job_repository)
+    assert_nix_ast_equal(
+        evaluation[-1],
+        f"(builtins.getFlake {json.dumps(flake_url)}).inputs.nixpkgs.outPath",
+    )
+    url = urlsplit(flake_url)
+    assert (url.scheme, Path(url.path)) == ("git+file", job_repository.resolve())
+    assert parse_qs(url.query)["shallow"] == ["1"]
+
+
+def test_job_launcher_reports_the_failed_command_and_its_captured_stderr(
+    tmp_path: Path,
+) -> None:
+    """40089810663: bootstrap exited 1 with the failing eval's stderr discarded."""
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    nix = tools / "nix"
+    nix.write_text(
+        f"#!{sys.executable}\n"
+        "import sys\n"
+        "if sys.argv[1] == 'eval':\n"
+        "    sys.stderr.write(\"error: '/repo' is a shallow Git repository, \"\n"
+        "                     \"so 'revCount' is not available\\n\")\n"
+        "    sys.exit(1)\n"
+    )
+    nix.chmod(0o755)
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    env = os.environ | {
+        "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}",
+        "RUNNER_TEMP": str(tmp_path),
+        "GITHUB_OUTPUT": str(tmp_path / "outputs"),
+        "NIXCFG_CI_STAGE": "bootstrap",
+    }
+    env.pop("PYTHONPATH", None)
+
+    result = subprocess.run(  # noqa: S603 -- the job launcher under test
+        [sys.executable, str(SCRIPT)],
+        cwd=checkout,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert (
+        "::error::Command failed with exit status 1: nix eval --impure --raw"
+        in result.stderr
+    )
+    assert "shallow Git repository, so 'revCount' is not available" in result.stderr
+    assert not (tmp_path / "outputs").exists()
+
+
+def test_entrypoint_bounds_reported_stderr_and_preserves_exit_status(
+    job_repository, monkeypatch
+) -> None:
+    """Failure reports keep the stderr tail; streamed children report the command."""
+    stderr = "".join(f"line {index}\n" for index in range(60)).encode()
+
+    def captured_failure(*args: str, **_kwargs: object):
+        raise subprocess.CalledProcessError(7, args, stderr=stderr)
+
+    monkeypatch.setattr(jobs, "_run", captured_failure)
+    log = StringIO()
+    assert jobs.entrypoint("bootstrap", log) == 7
+    report = log.getvalue().splitlines()
+    assert report[0].startswith(
+        "::error::Command failed with exit status 7: nix build --no-write-lock-file"
+    )
+    assert report[1:] == [
+        "[10 earlier stderr lines omitted]",
+        *(f"line {index}" for index in range(10, 60)),
+    ]
+
+    def streamed_failure(*_args: str, **_kwargs: object):
+        raise subprocess.CalledProcessError(3, "sudo true")
+
+    monkeypatch.setattr(jobs, "_run", streamed_failure)
+    log = StringIO()
+    assert jobs.entrypoint("bootstrap", log) == 3
+    assert log.getvalue() == "::error::Command failed with exit status 3: sudo true\n"
+
+    monkeypatch.setattr(jobs, "main", lambda stage: len(stage))
+    assert jobs.entrypoint("quality") == len("quality")
 
 
 def test_bootstrap_and_failure_evidence(job_repository, tmp_path, monkeypatch) -> None:
