@@ -1,0 +1,57 @@
+---
+name: Rebuild Bun fixed outputs
+on:
+  pull_request:
+    paths:
+      - overlays/bun/**
+      - packages/t3code/**
+      - packages/t3code-desktop/**
+      - .github/workflows/rebuild-bun-fixed-outputs.yml
+permissions:
+  contents: read
+jobs:
+  rebuild:
+    # These fixed outputs are aarch64-darwin. A Linux --rebuild cannot
+    # execute that Bun, so the proof runs on the same macos-15 image as
+    # prepare-darwin.
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/update-runtime
+        with:
+          github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Rebuild pkgs.bun fixed outputs
+        shell: python
+        run: |
+          import subprocess
+
+          targets = [
+              ".#pkgs.aarch64-darwin.t3code.node_modules",
+              ".#pkgs.aarch64-darwin.t3code-desktop.node_modules",
+          ]
+          for target in targets:
+              subprocess.run(
+                  [
+                      "nix",
+                      "build",
+                      "--print-build-logs",
+                      "--no-link",
+                      target,
+                  ],
+                  check=True,
+              )
+              subprocess.run(
+                  [
+                      "nix",
+                      "build",
+                      "--rebuild",
+                      "--print-build-logs",
+                      "--no-link",
+                      target,
+                  ],
+                  check=True,
+              )
