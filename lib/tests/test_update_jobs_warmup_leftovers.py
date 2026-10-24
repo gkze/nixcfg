@@ -25,7 +25,7 @@ def test_warmup_leftovers_skip_missing_receipts_without_losing_diagnostics(
     monkeypatch.setattr(jobs, "_run", push)
     log = StringIO()
 
-    jobs._push_warmup_leftovers(paths, log)
+    jobs._push_warmup_leftovers(paths, log, jobs._FlushBudget(10_000.0))
 
     skipped = paths if all_missing else (missing,)
     diagnostic = "warmup leftovers missing locally; skipping push: " + ", ".join(
@@ -38,7 +38,13 @@ def test_warmup_leftovers_skip_missing_receipts_without_losing_diagnostics(
         assert "pushing " not in log.getvalue()
     else:
         push.assert_called_once_with(
-            "cachix", "push", "gkze", *present, check=False, capture=True
+            "cachix",
+            "push",
+            "gkze",
+            *present,
+            check=False,
+            capture=True,
+            timeout=jobs._CACHIX_PUSH_TIMEOUT_SECONDS,
         )
         assert "pushing 2 warmup leftovers without gkze fail-close" in log.getvalue()
         assert "cachix push warmup-leftovers returncode=0" in log.getvalue()
