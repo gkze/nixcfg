@@ -158,8 +158,12 @@ def _validate_workspace_parity(
 
 
 def _local_flake_installable(repo_root: Path, attr: str) -> str:
-    """Return a local installable through Git's clean source view."""
-    return f"git+file://{repo_root.resolve()}?dirty=1#{attr}"
+    """Return a local installable through Git's clean source view.
+
+    This standalone script cannot import ``lib.update.paths.local_flake_url``; its
+    test keeps the two URLs identical, including the shallow-checkout opt-in.
+    """
+    return f"git+file://{repo_root.resolve()}?dirty=1&shallow=1#{attr}"
 
 
 def main() -> int:
