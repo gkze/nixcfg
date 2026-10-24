@@ -2647,6 +2647,7 @@ def test_cachix_flush_is_last_step_of_every_update_runtime_cachix_job() -> None:
         "cachix-flush-proof.yml:assert-partial",
         "cachix-flush-proof.yml:fail-after-push",
         "cachix-flush-proof.yml:fork-read-only",
+        "rebuild-bun-fixed-outputs.yml:rebuild",
         "update-native.yml:native",
         "update.yml:publish",
     ]
