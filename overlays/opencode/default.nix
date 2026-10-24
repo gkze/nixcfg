@@ -5,27 +5,34 @@
   system,
   ...
 }:
+let
+  upstream = inputs.opencode.packages.${system}.opencode;
+  source = slib.sourceEntry "opencode";
+  # The flake input's packageManager owns the Bun release: its lockfile is
+  # regenerated and verified with exactly that Bun, and other Bun releases may
+  # re-resolve it and reject --frozen-lockfile.
+  bun =
+    import ../../lib/exact-bun.nix
+      {
+        inherit (final) bun fetchurl lib;
+      }
+      {
+        packageManifest = final.lib.importJSON "${inputs.opencode}/package.json";
+        packageName = "opencode";
+        inherit source system;
+        version =
+          (source.pins or { }).bunVersion or (throw "opencode sources.json is missing pins.bunVersion");
+      };
+  node_modules = (upstream.node_modules.override { inherit bun; }).overrideAttrs (_: {
+    outputHash = slib.sourceHashForPlatform "opencode" "nodeModulesHash" system;
+  });
+in
 {
-  opencode = inputs.opencode.packages.${system}.opencode.overrideAttrs (old: {
-    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ final.python3 ];
+  opencode = (upstream.override { inherit bun node_modules; }).overrideAttrs (old: {
     passthru = (old.passthru or { }) // {
-      # Upstream owns the Bun release used by its dependency installer and CLI.
-      buildBun =
-        final.lib.findFirst (input: (input.pname or "") == "bun")
-          (throw "OpenCode's dependency installer does not expose its Bun runtime")
-          old.node_modules.nativeBuildInputs;
+      buildBun = bun;
     };
-    # IMPORTANT: Keep this postPatch in place unless upstream removes
-    # versionCheckHook/packageManager strictness. Removing it can reintroduce
-    # Bun version mismatch failures when nixpkgs Bun lags/leads opencode.
     postPatch = (old.postPatch or "") + ''
-      # Keep packageManager in sync with the selected build-time Bun so
-      # versionCheckHook accepts the runtime Bun used in the build.
-      bunVersion="$(bun -v | tr -d '\n')"
-      ${final.lib.getExe final.python3} ${./sync_package_manager_bun_version.py} \
-        . \
-        "$bunVersion"
-
       # Some package sources omit .github, but build scripts read this.
       # Prefer the authoritative team list from the flake input when present.
       if [ ! -f .github/TEAM_MEMBERS ]; then
@@ -55,8 +62,5 @@
       + final.lib.optionalString (old.meta.mainProgram == "opencode2") ''
         ln -s opencode2 "$out/bin/opencode"
       '';
-    node_modules = old.node_modules.overrideAttrs (_: {
-      outputHash = slib.sourceHashForPlatform "opencode" "nodeModulesHash" system;
-    });
   });
 }

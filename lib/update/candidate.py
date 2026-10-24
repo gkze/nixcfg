@@ -5,6 +5,7 @@ metadata, never a Python execution checkpoint. Preparation cannot promote files.
 """
 
 import subprocess
+from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Annotated, Literal
 
@@ -33,10 +34,16 @@ def git(root: Path, *args: str, input_bytes: bytes | None = None) -> bytes:
 def _metadata_types() -> dict[str, type[MappingMetadata]]:
     # Only classes already registered by trusted updater code can be hydrated.
     # Artifact contents can never request an import or execute a pickle.
-    return {
-        f"{cls.__module__}.{cls.__qualname__}": cls
-        for cls in MappingMetadata.__subclasses__()
-    }
+    # Shared metadata bases are specialized by package updaters, so walk the
+    # whole subclass tree rather than only direct subclasses. Visit in
+    # definition order so a reloaded module's class replaces its stale twin.
+    types: dict[str, type[MappingMetadata]] = {}
+    pending = deque(MappingMetadata.__subclasses__())
+    while pending:
+        cls = pending.popleft()
+        types[f"{cls.__module__}.{cls.__qualname__}"] = cls
+        pending.extend(cls.__subclasses__())
+    return types
 
 
 class ResolvedVersion(BaseModel):

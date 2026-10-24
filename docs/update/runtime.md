@@ -225,7 +225,10 @@ prerequisite prevents dependent work, and an independent source continues.
 A wait for a prerequisite does not consume a source-task slot.
 
 Dependency edges come from `companion_of` and `aggregate_into`. The
-`graphlib.TopologicalSorter` of Python owns the cycle detection and the
+workspace `sources.json` files keep their pre-update entries during a run.
+A companion therefore evaluates its hash probes against its parent's
+result from the run, not against the parent's workspace file.
+The `graphlib.TopologicalSorter` of Python owns the cycle detection and the
 prerequisite ordering. The planner translates a cycle error into an
 updater diagnostic. The planner creates the tasks in that order, so a
 prerequisite exists even with an eager task factory.

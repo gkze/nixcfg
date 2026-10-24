@@ -17,9 +17,9 @@ from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_e
 from lib.tests._shell_ast import command_texts, indented_string_body, parse_shell
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
-from lib.update.config import default_config
+from lib.update.config import default_config, resolve_config
 from lib.update.electron_manifest import ElectronManifestMetadata
-from lib.update.nix import _build_package_path_attr_expr
+from lib.update.nix import PreparedProbe, _build_package_path_attr_expr
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters import UpdateContext, VersionInfo
 
@@ -56,6 +56,62 @@ def test_dependency_probe_targets_only_the_desktop_node_modules(
                 fake_hashes=True,
             ),
         )
+
+
+@pytest.mark.parametrize("parent_in_run", [True, False])
+def test_dependency_probe_reads_opencodes_in_run_bun_pin(
+    monkeypatch: pytest.MonkeyPatch,
+    parent_in_run: bool,
+) -> None:
+    """The desktop installer is opencode's exact Bun, whose pin may change in-run.
+
+    The workspace sources.json still holds opencode's pre-update entry, so a
+    bumped packageManager would otherwise evaluate a stale exact-Bun pin.
+    """
+    module = _load_updater_module()
+    updater = module.OpencodeDesktopUpdater(
+        config=resolve_config(hash_build_platforms=("aarch64-darwin",))
+    )
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform", lambda: "aarch64-darwin"
+    )
+    candidate = SourceEntry(
+        hashes=[],
+        pins={"desktopWorkspace": "packages/desktop"},
+        electron_version=_ELECTRON_VERSION,
+    )
+    opencode = SourceEntry(hashes=[], pins={"bunVersion": "1.4.4"})
+    prepared: list[dict[str, str]] = []
+
+    async def prepare(_source: str, expressions: dict[str, str], **_kwargs: object):
+        prepared.append(dict(expressions))
+        return {
+            key: PreparedProbe("/nix/store/desktop.drv", "fingerprint", expression)
+            for key, expression in expressions.items()
+        }
+
+    monkeypatch.setattr("lib.update.nix.prepare_fixed_output_probes", prepare)
+    context = UpdateContext(
+        current=None,
+        effective_sources={"opencode": opencode} if parent_in_run else {},
+    )
+
+    _run(updater._prepare_hash_probes(candidate, context=context))
+
+    expected_overrides = {"opencode-desktop": candidate}
+    if parent_in_run:
+        expected_overrides = {"opencode": opencode, **expected_overrides}
+    assert updater.companion_of == "opencode"
+    assert_nix_ast_equal(
+        prepared[0]["aarch64-darwin"],
+        _build_package_path_attr_expr(
+            "opencode-desktop",
+            ".node_modules",
+            system="aarch64-darwin",
+            source_overrides=expected_overrides,
+            fake_hashes=True,
+        ),
+    )
 
 
 def _load_updater_module() -> ModuleType:

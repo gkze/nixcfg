@@ -187,6 +187,8 @@ class OpencodeDesktopUpdater(FlakeInputHashUpdater):
 
     name = "opencode-desktop"
     aggregate_into = ("electron-runtimes",)
+    # The desktop node_modules installer is opencode's exact-Bun derivation.
+    companion_of = "opencode"
     input_name = "opencode"
     hash_type: HashType = "nodeModulesHash"
     hash_attr_path = ".node_modules"

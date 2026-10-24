@@ -54,6 +54,8 @@ from lib.update.updaters.metadata import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     import aiohttp
 
     from lib.nix.models.flake_lock import FlakeLockNode
@@ -358,7 +360,9 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
         )
         package_expr = self._package_hash_expr(
             system=system,
-            source_override=source_override,
+            source_overrides=(
+                {self.name: source_override} if source_override is not None else None
+            ),
         )
         if package_expr is not None:
             return await update_nix.compute_fixed_output_hash(
@@ -381,7 +385,7 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
         self,
         *,
         system: str | None,
-        source_override: SourceEntry | None = None,
+        source_overrides: Mapping[str, SourceEntry] | None = None,
     ) -> str | None:
         updater_path = update_paths.package_file_for(
             self.name,
@@ -395,10 +399,8 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
             self.name,
             self.hash_attr_path,
             system=system,
-            source_overrides=(
-                {self.name: source_override} if source_override is not None else None
-            ),
-            fake_hashes=True if source_override is not None else None,
+            source_overrides=source_overrides,
+            fake_hashes=True if source_overrides is not None else None,
         )
 
     async def _compute_drv_fingerprint(
@@ -427,8 +429,28 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
             }
         )
 
-    def _probe_expressions(self, source: SourceEntry) -> dict[str, str]:
+    def _companion_sources(self, context: UpdateContext) -> dict[str, SourceEntry]:
+        """Return this run's entry for the companion parent the package reads.
+
+        The workspace sources.json still holds the parent's pre-update entry, so
+        a parent pin that changed in this run (for example an exact Bun release)
+        is visible to this package's evaluation only through an override.
+        """
+        parent = self.companion_of
+        if parent is None or parent not in context.effective_sources:
+            return {}
+        return {parent: context.effective_sources[parent]}
+
+    def _probe_expressions(
+        self,
+        source: SourceEntry,
+        prerequisite_sources: Mapping[str, SourceEntry] | None = None,
+    ) -> dict[str, str]:
         override = self._fingerprint_source(source)
+        source_overrides = {
+            **(prerequisite_sources or {}),
+            **({self.name: override} if override is not None else {}),
+        } or None
         targets = (
             self._platform_targets(update_nix.get_current_nix_platform())
             if self.platform_specific
@@ -437,17 +459,15 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
         expressions = {}
         for target in targets:
             expression = self._package_hash_expr(
-                system=target or None, source_override=override
+                system=target or None, source_overrides=source_overrides
             )
             if expression is None:
                 expression = _build_overlay_attr_expr(
                     self.name,
                     self.hash_attr_path,
                     system=target or None,
-                    source_overrides={self.name: override}
-                    if override is not None
-                    else None,
-                    fake_hashes=True if override is not None else None,
+                    source_overrides=source_overrides,
+                    fake_hashes=True if source_overrides is not None else None,
                 )
             expressions[target] = expression
         return expressions
@@ -459,7 +479,7 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
         context: UpdateContext,
         emit: EventSink = ignore_event,
     ) -> str:
-        expressions = self._probe_expressions(source)
+        expressions = self._probe_expressions(source, self._companion_sources(context))
         if {
             key: probe.expression for key, probe in context.prepared_probes.items()
         } != expressions:

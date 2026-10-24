@@ -1,28 +1,11 @@
 """Updater for mux's platform-specific Bun offline cache hashes."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, override
 
 from lib import json_utils
-from lib.nix.models.flake_lock import (
-    FlakeLockNode,  # noqa: TC001 -- candidate metadata is validated at runtime
-)
-from lib.nix.models.sources import (
-    HashCollection,
-    HashEntry,
-)
-from lib.system_policy import supported_systems
-from lib.update import process as update_process
 from lib.update.bun_lock import parse_bun_lock_text
-from lib.update.bun_toolchain import (
-    bun_release_urls,
-    bun_runtime_hash_entries,
-    require_bun_package_manager,
-)
-from lib.update.events import (
-    EventSink,
-    ignore_event,
-)
+from lib.update.bun_toolchain import require_bun_package_manager
 from lib.update.locked_source import locked_github_source
 from lib.update.net import fetch_json, fetch_url, github_raw_url
 from lib.update.npm_semver import (
@@ -30,12 +13,14 @@ from lib.update.npm_semver import (
     require_npm_version_matches_spec,
 )
 from lib.update.updaters import (
-    BunNodeModulesHashUpdater,
     UpdateContext,
     VersionInfo,
     register_updater,
 )
-from lib.update.updaters.metadata import MappingMetadata
+from lib.update.updaters.exact_bun import (
+    ExactBunMetadata,
+    ExactBunNodeModulesHashUpdater,
+)
 
 if TYPE_CHECKING:
     import aiohttp
@@ -44,26 +29,19 @@ if TYPE_CHECKING:
 
 _MANIFEST_PATH = "package.json"
 _LOCK_PATH = "bun.lock"
-_SUPPORTED_SYSTEMS = supported_systems()
 
 
-@dataclass(frozen=True, slots=True)
-class MuxSourceMetadata(MappingMetadata):
+@dataclass(frozen=True, slots=True, kw_only=True)
+class MuxSourceMetadata(ExactBunMetadata):
     """Immutable source identity and Electron closure selected for one release."""
 
-    node: FlakeLockNode
-    commit: str
-    bun_version: str
     electron_version: str
-    bun_runtime_hashes: tuple[HashEntry, ...] = ()
 
     @override
     def to_dict(self) -> dict[str, object]:
         """Expose fields through the updater metadata compatibility mapping."""
         return {
-            "node": self.node,
-            "commit": self.commit,
-            "bunVersion": self.bun_version,
+            **ExactBunMetadata.to_dict(self),
             "electronVersion": self.electron_version,
         }
 
@@ -191,27 +169,8 @@ def _resolve_release_contract(
     )
 
 
-def _require_metadata(info: VersionInfo) -> MuxSourceMetadata:
-    metadata = info.metadata
-    if not isinstance(metadata, MuxSourceMetadata):
-        msg = "Mux version metadata is missing its resolved release source"
-        raise TypeError(msg)
-    return metadata
-
-
-def _with_bun_runtime_hashes(
-    info: VersionInfo,
-    hashes: list[HashEntry],
-) -> VersionInfo:
-    metadata = _require_metadata(info)
-    return VersionInfo(
-        version=info.version,
-        metadata=replace(metadata, bun_runtime_hashes=tuple(hashes)),
-    )
-
-
 @register_updater
-class MuxUpdater(BunNodeModulesHashUpdater):
+class MuxUpdater(ExactBunNodeModulesHashUpdater):
     """Bun node_modules hash updater for mux."""
 
     name = "mux"
@@ -250,124 +209,12 @@ class MuxUpdater(BunNodeModulesHashUpdater):
             ),
         )
 
-    def source_pins_for(self, info: VersionInfo) -> dict[str, str]:
-        """Persist the source manifest's exact Bun runtime identity."""
-        return {"bunVersion": _require_metadata(info).bun_version}
-
-    async def _is_latest(
-        self,
-        context: UpdateContext,
-        info: VersionInfo,
-    ) -> bool:
-        """Fingerprint the package with its persisted exact Bun sources."""
-        current = context.current
-        if current is None or current.hashes.entries is None:
-            return False
-        bun_hashes = [
-            entry
-            for entry in current.hashes.entries
-            if entry.hash_type == "bunRuntimeHash"
-        ]
-        expected_urls = bun_release_urls(
-            _require_metadata(info).bun_version,
-            _SUPPORTED_SYSTEMS,
-        )
-        if {(entry.platform, entry.url) for entry in bun_hashes} != set(
-            expected_urls.items()
-        ):
-            return False
-        return await super()._is_latest(
-            context,
-            _with_bun_runtime_hashes(info, bun_hashes),
-        )
-
-    async def _fetch_bun_runtime_hashes(
-        self,
-        info: VersionInfo,
-        *,
-        emit: EventSink,
-    ) -> list[HashEntry]:
-        """Hash the exact Bun release archives for every supported system.
-
-        The archives are fixed URLs, so any builder can hash every system.
-        """
-        bun_version = _require_metadata(info).bun_version
-        bun_urls = bun_release_urls(bun_version, _SUPPORTED_SYSTEMS)
-        hashes_by_url = await update_process.compute_url_hashes(
-            self.name, bun_urls.values(), config=self.config, emit=emit
-        )
-        return bun_runtime_hash_entries(
-            bun_version,
-            _SUPPORTED_SYSTEMS,
-            hashes_by_url,
-        )
-
-    async def fetch_hashes(
-        self,
-        info: VersionInfo,
-        session: aiohttp.ClientSession,
-        *,
-        context: UpdateContext,
-        emit: EventSink = ignore_event,
-    ) -> SourceHashes:
-        """Hash exact Bun runtimes before probing Bun's node_modules cache."""
-        bun_hashes = await self._fetch_bun_runtime_hashes(info, emit=emit)
-        node_hashes = await super().fetch_hashes(
-            _with_bun_runtime_hashes(info, bun_hashes),
-            session,
-            context=context,
-            emit=emit,
-        )
-        if not isinstance(node_hashes, list):
-            msg = "Mux node_modules hashes must use structured hash entries"
-            raise TypeError(msg)
-        return [*bun_hashes, *node_hashes]
-
-    @override
-    async def _finalize_result(
-        self,
-        result: SourceEntry,
-        *,
-        info: VersionInfo | None = None,
-        context: UpdateContext,
-        emit: EventSink = ignore_event,
-    ) -> SourceEntry:
-        """Give a bumped pin its exact Bun runtimes before fingerprinting.
-
-        The pin stage drops hashes on a version bump, but lib/exact-bun.nix
-        cannot evaluate mux without one bunRuntimeHash per system. Without
-        them the pin persisted no drvHash, and every partial native prepare
-        then refused to preserve one (Update run 39760093470). The archives
-        are platform-independent, so the pin stage hashes them here; native
-        jobs still re-hash them alongside node_modules.
-        """
-        if context.pins_only and info is not None:
-            if result.hashes.mapping:
-                msg = "Mux candidate hashes must use structured hash entries"
-                raise TypeError(msg)
-            entries = list(result.hashes.entries or ())
-            if not any(entry.hash_type == "bunRuntimeHash" for entry in entries):
-                bun_hashes = await self._fetch_bun_runtime_hashes(info, emit=emit)
-                result = result.model_copy(
-                    update={
-                        "hashes": HashCollection.from_value([*bun_hashes, *entries])
-                    }
-                )
-        return await super()._finalize_result(
-            result, info=info, context=context, emit=emit
-        )
-
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist the lockfile-resolved Electron runtime as source identity."""
-        metadata = _require_metadata(info)
-        if metadata.bun_runtime_hashes:
-            if not isinstance(hashes, list):
-                msg = "Mux candidate hashes must use structured hash entries"
-                raise TypeError(msg)
-            if any(entry.hash_type == "bunRuntimeHash" for entry in hashes):
-                msg = "Mux candidate contains duplicate Bun runtime hashes"
-                raise RuntimeError(msg)
-            hashes = [*metadata.bun_runtime_hashes, *hashes]
+        metadata = self.exact_bun_metadata(info)
+        if not isinstance(metadata, MuxSourceMetadata):
+            msg = "mux version metadata is missing its resolved release source"
+            raise TypeError(msg)
         return (
             super()
             .build_result(info, hashes)
