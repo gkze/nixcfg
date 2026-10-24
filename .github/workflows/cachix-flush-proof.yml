@@ -2,7 +2,8 @@
 # Deliberate failure after a unique store path is pushed. The proof job is
 # the required check: the designed fail step exits 1, and gkze.cachix.org
 # must still have the path. A third path is built into a SIGSTOPped daemon
-# so flush must time out `daemon stop` and republish it from the store. continue-on-error is only on that designed
+# so flush must time out `daemon stop` and republish it from the store.
+# continue-on-error is only on that designed
 # fail step. The job conclusion stays green only when flush and the
 # cachix-action post hook both succeed; a post-hook throw (missing pid
 # after a drained daemon) fails the job and this workflow.

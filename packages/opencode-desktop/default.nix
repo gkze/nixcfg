@@ -147,7 +147,7 @@ let
 
   electronDist = electronBuild.dist;
 
-  node_modules = opencode.node_modules.overrideAttrs (old: {
+  node_modules = opencode.node_modules.overrideAttrs (_old: {
     pname = "${sourceHashPackageName}-node_modules";
     outputHash = slib.sourceHashForPlatform sourceHashPackageName "nodeModulesHash" system;
     buildPhase = ''
