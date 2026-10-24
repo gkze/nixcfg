@@ -7,6 +7,8 @@ from lib.update.updaters import register_updater
 from lib.update.updaters.flake_backed import FlakeInputHashUpdater
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from lib.nix.models.sources import SourceEntry
 
 
@@ -37,6 +39,10 @@ class T3CodeWorkspaceUpdater(FlakeInputHashUpdater):
             system=cls.DARWIN_PLATFORM,
         )
 
-    def _probe_expressions(self, source: SourceEntry) -> dict[str, str]:
-        _ = source
+    def _probe_expressions(
+        self,
+        source: SourceEntry,
+        prerequisite_sources: Mapping[str, SourceEntry] | None = None,
+    ) -> dict[str, str]:
+        _ = (source, prerequisite_sources)
         return {self.DARWIN_PLATFORM: self._workspace_expr()}

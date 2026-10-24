@@ -183,8 +183,12 @@ class _Updater(FlakeInputHashUpdater):
     hash_type = "nodeModulesHash"
     platform_specific = True
 
-    def _probe_expressions(self, source: SourceEntry) -> dict[str, str]:
-        _ = source
+    def _probe_expressions(
+        self,
+        source: SourceEntry,
+        prerequisite_sources: Mapping[str, SourceEntry] | None = None,
+    ) -> dict[str, str]:
+        _ = (source, prerequisite_sources)
         return {key: key for key in self._platform_targets(_NATIVE)}
 
 
