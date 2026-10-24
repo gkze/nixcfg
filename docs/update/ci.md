@@ -137,6 +137,24 @@ Prefetches append store paths to an invocation-local JSONL receipt that stays
 with the job artifacts. Publication validates and deduplicates these paths
 without a scan of the runner's store.
 
+Every job that starts the daemon ends with `flush-cachix`. That step stops
+the daemon, then pushes and pins the job's recorded root receipts. Cachix's
+HTTP client has no response timeout. In run 40048292663 a stalled request
+froze the daemon's queue, so `cachix daemon stop` never returned, and the
+flush spent the job's last three hours. Flush therefore runs inside a
+40-minute budget, and the workflow step has a 45-minute timeout as a
+backstop. Each Cachix or Nix call in flush has its own timeout, and pushes
+retry with fresh connections.
+
+The daemon logs a queued path only when a worker starts it, so its log
+cannot name what a stuck queue dropped. When `daemon stop` fails or times
+out, flush kills the daemon and pushes every path the runner built itself
+(Nix marks these `ultimate`). It then checks each path's narinfo on
+`gkze.cachix.org` or `cache.nixos.org`, the upstream that `cachix push`
+skips. Flush fails the job unless every one of those paths is served. The
+`cachix-flush-proof` workflow freezes the daemon with `SIGSTOP` to exercise
+this recovery path on every PR.
+
 ### Generator cache
 
 Preparation and repair restore Cargo registry/Git downloads and verified

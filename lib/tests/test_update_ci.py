@@ -45,14 +45,21 @@ def native_job(tmp_path: Path) -> tuple[dict[str, str], Path]:
         "from pathlib import Path\n"
         "name = Path(sys.argv[0]).name\n"
         "args = sys.argv[1:]\n"
+        "if name == 'nix' and args[:3] == ['path-info', '--all', '--sigs']:\n"
+        "    print(os.environ.get('TEST_NIX_SIGS', ''), end='')\n"
+        "    sys.exit(int(os.environ.get('TEST_NIX_SIGS_EXIT', '0')))\n"
         "if name == 'nix':\n"
         "    print('devshell startup', flush=True)\n"
         "    sys.exit(subprocess.call(args[args.index('--command') + 1:]))\n"
         "if name == 'cachix':\n"
         "    Path(os.environ['TEST_CACHE_LOG']).write_text(json.dumps(args))\n"
+        "    with Path(os.environ['TEST_CACHE_LOG'] + 'l').open('a') as calls:\n"
+        "        calls.write(json.dumps(args) + '\\n')\n"
         "    if seconds := os.environ.get('TEST_CACHE_SLEEP_SECONDS'):\n"
         "        time.sleep(float(seconds))\n"
         "    if args[:2] == ['daemon', 'stop']:\n"
+        "        if seconds := os.environ.get('TEST_CACHE_STOP_SLEEP_SECONDS'):\n"
+        "            time.sleep(float(seconds))\n"
         "        err = os.environ.get('TEST_CACHE_STOP_STDERR', '')\n"
         "        if err:\n"
         "            print(err, file=sys.stderr)\n"
@@ -815,7 +822,7 @@ def test_flush_cachix_pushes_recorded_paths_when_daemon_is_gone(
     monkeypatch.delenv("CACHIX_DAEMON_SOCKET", raising=False)
     monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path == store)
     monkeypatch.setattr(
-        jobs, "_realized_root_path_in_cachix", lambda path: path == store
+        jobs, "_realized_root_path_in_cachix", lambda path, _budget: path == store
     )
     monkeypatch.chdir(checkout)
     with pytest.raises(jobs.CachixFlushError, match="socket is unknown"):
@@ -844,8 +851,42 @@ def test_flush_cachix_fails_closed_when_socket_is_missing_or_stop_fails(
         jobs.main("flush-cachix")
     (daemon_dir / "daemon.sock").write_text("")
     monkeypatch.setenv("TEST_CACHE_EXIT", "1")
+    monkeypatch.setenv("TEST_NIX_SIGS", f"{_QUEUED} ultimate\n")
     with pytest.raises(jobs.CachixFlushError, match="stop failed"):
         jobs.main("flush-cachix")
+
+
+_QUEUED = "/nix/store/ph3arvv0hh8ll8yz4r6v6y4mpmhrk5qr-cargo-package-flate2-1.1.9"
+_SUBSTITUTED = "/nix/store/2h2rzk1a5jbd9hljrdw2x8vhm204p9zf-cargo-src-subtle-2.6.1"
+
+
+def _cachix_calls(env: dict[str, str]) -> list[list[str]]:
+    """Return every fake ``cachix`` argv in call order."""
+    calls = Path(env["TEST_CACHE_LOG"] + "l")
+    if not calls.is_file():
+        return []
+    return [json.loads(line) for line in calls.read_text().splitlines()]
+
+
+def _serve_narinfo(monkeypatch: pytest.MonkeyPatch, present: set[str]) -> list[str]:
+    """Answer narinfo HEADs from *present* digests and record each URL."""
+    asked: list[str] = []
+
+    def status(url: str, _timeout: float) -> int:
+        asked.append(url)
+        digest = url.rsplit("/", 1)[-1].removesuffix(".narinfo")
+        return 200 if digest in present else 404
+
+    monkeypatch.setattr(jobs, "_narinfo_status", status)
+    return asked
+
+
+def _budget(seconds: float = 600.0) -> jobs._FlushBudget:
+    return jobs._FlushBudget(seconds)
+
+
+def _digest(path: str) -> str:
+    return path.removeprefix("/nix/store/").split("-", 1)[0]
 
 
 def test_unfinished_cachix_daemon_paths_keeps_pushing_without_pushed() -> None:
@@ -864,18 +905,13 @@ def test_unfinished_cachix_daemon_paths_keeps_pushing_without_pushed() -> None:
     assert jobs.unfinished_cachix_daemon_paths("started\n") == ()
 
 
-def test_flush_cachix_pushes_drain_timeout_leftovers(native_job, monkeypatch) -> None:
-    """38577749898: daemon stop exit 3 is recoverable when leftovers are named."""
-    env, checkout = native_job
-    leftover = "/nix/store/p928kiq59rgwhynxma6ywfzpn9bbyq98-rust_litemap-0.8.0"
+def _drain_timeout_job(
+    env: dict[str, str], monkeypatch: pytest.MonkeyPatch, daemon_log: str
+) -> tuple[Path, Path]:
+    """Wire a flush whose ``cachix daemon stop`` exits 3 on the drain timeout."""
     Path(env["RUNNER_TEMP"]).mkdir(parents=True, exist_ok=True)
     daemon_dir = _cachix_daemon_dir(Path(env["RUNNER_TEMP"]))
-    (daemon_dir / "daemon.log").write_text(
-        f"[2026-10-14 16:40:35][Info] Pushing {leftover}\n"
-        "[2026-10-14 17:15:19][Warning] Push manager drain timed out. "
-        "Some jobs may not have completed.\n"
-        "[2026-10-14 17:15:19][Warning] Failed 1 stuck jobs after drain timeout.\n"
-    )
+    (daemon_dir / "daemon.log").write_text(daemon_log)
     github_env = Path(env["RUNNER_TEMP"]) / "github-env"
     github_env.write_text("KEEP=1\n")
     for key, value in env.items():
@@ -886,17 +922,55 @@ def test_flush_cachix_pushes_drain_timeout_leftovers(native_job, monkeypatch) ->
     _allow_hosted_github_env(monkeypatch)
     monkeypatch.setenv("TEST_CACHE_STOP_EXIT", "3")
     monkeypatch.setenv("TEST_CACHE_STOP_STDERR", "Failed to push some store paths")
+    return daemon_dir, github_env
+
+
+_LEFTOVER = "/nix/store/p928kiq59rgwhynxma6ywfzpn9bbyq98-rust_litemap-0.8.0"
+_DRAIN_TIMEOUT_LOG = (
+    f"[2026-10-14 16:40:35][Info] Pushing {_LEFTOVER}\n"
+    "[2026-10-14 17:15:19][Warning] Push manager drain timed out. "
+    "Some jobs may not have completed.\n"
+    "[2026-10-14 17:15:19][Warning] Failed 1 stuck jobs after drain timeout.\n"
+)
+_STORE_SIGS = (
+    f"{_LEFTOVER}\tultimate\n"
+    f"{_QUEUED}  \tultimate ca:fixed:r:sha256:0abc\n"
+    f"{_SUBSTITUTED}\tcache.nixos.org-1:c2ln\n"
+    "/nix/store/kqpjsbs6773sswdprbl1cjqyyjy69lwg-rust_search-0.1.0.drv\tultimate\n"
+)
+
+
+def test_flush_cachix_recovers_paths_the_drain_timeout_never_named(
+    native_job, monkeypatch
+) -> None:
+    """40048292663: queued paths never reach daemon.log, so stop exit 3 needs the store.
+
+    ``_QUEUED`` stands for the 81 cargo-package outputs that never logged
+    ``Pushing``. Flush republishes every ``ultimate`` path, not just the
+    named leftover, and proves each one substitutable before succeeding.
+    """
+    env, checkout = native_job
+    daemon_dir, github_env = _drain_timeout_job(env, monkeypatch, _DRAIN_TIMEOUT_LOG)
+    monkeypatch.setenv("TEST_NIX_SIGS", _STORE_SIGS)
+    asked = _serve_narinfo(monkeypatch, {_digest(_LEFTOVER), _digest(_QUEUED)})
     monkeypatch.chdir(checkout)
     assert jobs.main("flush-cachix") == 0
-    assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
-        "push",
-        "gkze",
-        leftover,
+    assert _cachix_calls(env) == [
+        ["daemon", "stop", "--socket", str(daemon_dir / "daemon.sock")],
+        ["push", "gkze", _LEFTOVER, _QUEUED],
+        ["push", "gkze", _LEFTOVER],
     ]
+    assert sorted(asked) == sorted(
+        f"https://gkze.cachix.org/{_digest(path)}.narinfo"
+        for path in (_LEFTOVER, _QUEUED)
+    )
     flush_log = (
         Path(env["RUNNER_TEMP"]) / "update-artifacts" / "cachix-flush.log"
     ).read_text()
-    assert "retrying 1 unpushed Cachix paths after drain timeout" in flush_log
+    assert "did not confirm a clean drain returncode=3" in flush_log
+    assert "Failed 1 stuck jobs after drain timeout." in flush_log
+    assert "republishing 2 locally built paths" in flush_log
+    assert "verified 2 locally built paths" in flush_log
     assert "cachix push leftover returncode=0" in flush_log
     assert "cleared CACHIX_DAEMON_DIR" in flush_log
     assert "CACHIX_DAEMON_DIR" not in os.environ
@@ -908,37 +982,22 @@ def test_flush_cachix_pushes_realized_roots_after_leftover_recovery(
 ) -> None:
     """Drain recovery must still publish the thin darwin-system wrappers."""
     env, checkout = native_job
-    leftover = "/nix/store/p928kiq59rgwhynxma6ywfzpn9bbyq98-rust_litemap-0.8.0"
     store = "/nix/store/98bwk8gpzhmr12navdg9knjscv09k2nm-darwin-system-26.11.57a3171"
     artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
     artifacts.mkdir(parents=True)
     (artifacts / "realized-root-paths.json").write_text(
         json.dumps({"storePaths": [store]}) + "\n"
     )
-    daemon_dir = _cachix_daemon_dir(Path(env["RUNNER_TEMP"]))
-    (daemon_dir / "daemon.log").write_text(
-        f"[2026-10-14 16:40:35][Info] Pushing {leftover}\n"
-        "[2026-10-14 17:15:19][Warning] Push manager drain timed out. "
-        "Some jobs may not have completed.\n"
-        "[2026-10-14 17:15:19][Warning] Failed 1 stuck jobs after drain timeout.\n"
-    )
-    github_env = Path(env["RUNNER_TEMP"]) / "github-env"
-    github_env.write_text("KEEP=1\n")
-    for key, value in env.items():
-        monkeypatch.setenv(key, value)
-    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
-    monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
-    monkeypatch.setenv("GITHUB_ENV", str(github_env))
-    _allow_hosted_github_env(monkeypatch)
-    monkeypatch.setenv("TEST_CACHE_STOP_EXIT", "3")
-    monkeypatch.setenv("TEST_CACHE_STOP_STDERR", "Failed to push some store paths")
+    _drain_timeout_job(env, monkeypatch, _DRAIN_TIMEOUT_LOG)
+    monkeypatch.setenv("TEST_NIX_SIGS", f"{_LEFTOVER}\tultimate\n")
+    _serve_narinfo(monkeypatch, {_digest(_LEFTOVER)})
     monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path == store)
     monkeypatch.setattr(
-        jobs, "_realized_root_path_in_cachix", lambda path: path == store
+        jobs, "_realized_root_path_in_cachix", lambda path, _budget: path == store
     )
     monkeypatch.chdir(checkout)
     assert jobs.main("flush-cachix") == 0
-    assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
+    assert _cachix_calls(env)[-1] == [
         "pin",
         "gkze",
         "darwin-system-98bwk8gp",
@@ -947,75 +1006,121 @@ def test_flush_cachix_pushes_realized_roots_after_leftover_recovery(
         "14",
     ]
     flush_log = (artifacts / "cachix-flush.log").read_text()
-    assert "retrying 1 unpushed Cachix paths after drain timeout" in flush_log
+    assert "retrying 1 unpushed Cachix paths from daemon.log" in flush_log
     assert "pushing 1 realized root paths after daemon drain" in flush_log
     assert "cachix push realized-roots returncode=0" in flush_log
     assert "cachix pin darwin-system-98bwk8gp returncode=0" in flush_log
 
 
-def test_flush_cachix_fails_closed_on_drain_timeout_without_named_leftovers(
+def test_flush_cachix_fails_closed_when_a_recovered_path_is_unsubstitutable(
     native_job, monkeypatch
 ) -> None:
-    """A drain timeout with no Pushing line cannot invent the missing path."""
+    """``cachix push`` exit 0 is not proof; a 404 on both caches fails the job."""
     env, checkout = native_job
-    Path(env["RUNNER_TEMP"]).mkdir(parents=True, exist_ok=True)
-    daemon_dir = _cachix_daemon_dir(Path(env["RUNNER_TEMP"]))
-    (daemon_dir / "daemon.log").write_text(
-        "[2026-10-14 17:14:18][Info] Remaining store paths: 1\n"
-        "[2026-10-14 17:15:19][Warning] Push manager drain timed out. "
-        "Some jobs may not have completed.\n"
+    _daemon_dir, github_env = _drain_timeout_job(
+        env, monkeypatch, "[2026-10-14 17:14:18][Info] Remaining store paths: 1\n"
     )
-    github_env = Path(env["RUNNER_TEMP"]) / "github-env"
-    github_env.write_text("KEEP=1\n")
-    for key, value in env.items():
-        monkeypatch.setenv(key, value)
-    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
-    monkeypatch.setenv("GITHUB_ENV", str(github_env))
-    _allow_hosted_github_env(monkeypatch)
-    monkeypatch.setenv("TEST_CACHE_STOP_EXIT", "3")
-    monkeypatch.setenv("TEST_CACHE_STOP_STDERR", "Failed to push some store paths")
+    monkeypatch.setenv("TEST_NIX_SIGS", f"{_QUEUED}\tultimate\n")
+    asked = _serve_narinfo(monkeypatch, set())
     monkeypatch.chdir(checkout)
-    with pytest.raises(jobs.CachixFlushError, match="stop failed"):
+    with pytest.raises(jobs.CachixFlushError, match="stop failed") as error:
         jobs.main("flush-cachix")
-    assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
-        "daemon",
-        "stop",
-        "--socket",
-        str(daemon_dir / "daemon.sock"),
+    assert "neither gkze.cachix.org nor cache.nixos.org" in str(error.value)
+    assert _QUEUED in str(error.value)
+    assert ["push", "gkze", _QUEUED] in _cachix_calls(env)
+    assert asked == [
+        f"https://gkze.cachix.org/{_digest(_QUEUED)}.narinfo",
+        f"https://cache.nixos.org/{_digest(_QUEUED)}.narinfo",
     ]
     assert "CACHIX_DAEMON_DIR" not in os.environ
     assert "CACHIX_DAEMON_DIR=\n" in github_env.read_text()
 
 
-def test_flush_cachix_fails_closed_when_leftover_push_fails(
+def test_flush_cachix_fails_closed_when_recovery_push_fails(
+    native_job, monkeypatch
+) -> None:
+    """Retries are bounded; the primary recovery error survives receipt cleanup."""
+    env, checkout = native_job
+    root = "/nix/store/98bwk8gpzhmr12navdg9knjscv09k2nm-darwin-system-26.11.57a3171"
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    artifacts.mkdir(parents=True)
+    (artifacts / "realized-root-paths.json").write_text(
+        json.dumps({"storePaths": [root]}) + "\n"
+    )
+    _drain_timeout_job(env, monkeypatch, _DRAIN_TIMEOUT_LOG)
+    monkeypatch.setenv("TEST_CACHE_EXIT", "1")
+    monkeypatch.setenv("TEST_NIX_SIGS", f"{_LEFTOVER}\tultimate\n")
+    monkeypatch.setattr(jobs, "_store_path_exists", lambda _path: False)
+    monkeypatch.chdir(checkout)
+    with pytest.raises(jobs.CachixFlushError, match="stop failed") as error:
+        jobs.main("flush-cachix")
+    assert "cachix push of locally built paths failed" in str(error.value)
+    pushes = [call for call in _cachix_calls(env) if call[0] == "push"]
+    assert pushes == [["push", "gkze", _LEFTOVER]] * (2 * jobs._CACHIX_PUSH_ATTEMPTS)
+    flush_log = (artifacts / "cachix-flush.log").read_text()
+    assert "attempt=3/3 paths=1 returncode=1" in flush_log
+    assert "receipt publication after failed recovery: realized root paths" in flush_log
+    assert "CACHIX_DAEMON_DIR" not in os.environ
+
+
+def test_flush_cachix_fails_closed_when_the_store_cannot_be_listed(
     native_job, monkeypatch
 ) -> None:
     env, checkout = native_job
-    leftover = "/nix/store/p928kiq59rgwhynxma6ywfzpn9bbyq98-rust_litemap-0.8.0"
-    Path(env["RUNNER_TEMP"]).mkdir(parents=True, exist_ok=True)
-    daemon_dir = _cachix_daemon_dir(Path(env["RUNNER_TEMP"]))
-    (daemon_dir / "daemon.log").write_text(
-        f"[2026-10-14 16:40:35][Info] Pushing {leftover}\n"
-    )
-    github_env = Path(env["RUNNER_TEMP"]) / "github-env"
-    github_env.write_text("")
-    for key, value in env.items():
-        monkeypatch.setenv(key, value)
-    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
-    monkeypatch.setenv("GITHUB_ENV", str(github_env))
-    _allow_hosted_github_env(monkeypatch)
-    monkeypatch.setenv("TEST_CACHE_STOP_EXIT", "3")
-    monkeypatch.setenv("TEST_CACHE_STOP_STDERR", "Failed to push some store paths")
-    monkeypatch.setenv("TEST_CACHE_EXIT", "1")
+    _drain_timeout_job(env, monkeypatch, _DRAIN_TIMEOUT_LOG)
+    monkeypatch.setenv("TEST_NIX_SIGS_EXIT", "1")
     monkeypatch.chdir(checkout)
-    with pytest.raises(jobs.CachixFlushError, match="stop failed"):
+    with pytest.raises(jobs.CachixFlushError, match="could not list locally built"):
         jobs.main("flush-cachix")
-    assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
-        "push",
-        "gkze",
-        leftover,
+
+
+def test_flush_cachix_bounds_a_wedged_daemon_stop(native_job, monkeypatch) -> None:
+    """40048292663: ``daemon stop`` hung 3h; flush must time out and recover.
+
+    A real child named ``cachix`` stands in for the daemon so termination is
+    observed through the OS rather than a mock.
+    """
+    env, checkout = native_job
+    daemon_dir, github_env = _drain_timeout_job(env, monkeypatch, "started\n")
+    monkeypatch.delenv("TEST_CACHE_STOP_EXIT")
+    monkeypatch.setenv("TEST_CACHE_STOP_SLEEP_SECONDS", "60")
+    monkeypatch.setenv("NIXCFG_CACHIX_STOP_TIMEOUT_SECONDS", "1")
+    monkeypatch.setenv("TEST_NIX_SIGS", f"{_QUEUED}\tultimate\n")
+    _serve_narinfo(monkeypatch, {_digest(_QUEUED)})
+    tools = Path(env["PATH"].split(os.pathsep)[0])
+    daemon = subprocess.Popen(  # noqa: S603 -- fixed test boundary
+        [str(tools / "cachix"), "daemon", "run"],
+        env=env
+        | {
+            "TEST_CACHE_LOG": str(Path(env["RUNNER_TEMP"]) / "daemon-cache.json"),
+            "TEST_CACHE_SLEEP_SECONDS": "60",
+        },
+    )
+    reaper = threading.Thread(target=daemon.wait)
+    reaper.start()
+    (daemon_dir / "daemon.pid").write_text(f"{daemon.pid}\n")
+    monkeypatch.chdir(checkout)
+    started = time.monotonic()
+    try:
+        assert jobs.main("flush-cachix") == 0
+    finally:
+        if daemon.poll() is None:
+            daemon.kill()
+        reaper.join(timeout=10)
+    assert time.monotonic() - started < 30
+    assert daemon.returncode == -signal.SIGTERM
+    assert _cachix_calls(env) == [
+        ["daemon", "stop", "--socket", str(daemon_dir / "daemon.sock")],
+        ["push", "gkze", _QUEUED],
     ]
-    assert "CACHIX_DAEMON_DIR" not in os.environ
+    flush_log = (
+        Path(env["RUNNER_TEMP"]) / "update-artifacts" / "cachix-flush.log"
+    ).read_text()
+    assert "cachix daemon stop returncode=124" in flush_log
+    assert "timed out after 1s" in flush_log
+    assert f"terminated wedged Cachix daemon pid={daemon.pid}" in flush_log
+    assert "verified 1 locally built paths" in flush_log
+    assert "CACHIX_DAEMON_DIR=\n" in github_env.read_text()
 
 
 def test_remember_realized_store_paths_writes_receipt(native_job, monkeypatch) -> None:
@@ -1149,7 +1254,7 @@ def test_flush_cachix_pushes_realized_root_paths(native_job, monkeypatch) -> Non
     _allow_hosted_github_env(monkeypatch)
     monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path == store)
     monkeypatch.setattr(
-        jobs, "_realized_root_path_in_cachix", lambda path: path == store
+        jobs, "_realized_root_path_in_cachix", lambda path, _budget: path == store
     )
     monkeypatch.chdir(checkout)
     assert jobs.main("flush-cachix") == 0
@@ -1191,7 +1296,7 @@ def test_flush_cachix_pins_substituted_linux_builder_image(
     monkeypatch.setenv("RUNNER_OS", "Linux")
     monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path == store)
     monkeypatch.setattr(
-        jobs, "_realized_root_path_in_cachix", lambda path: path == store
+        jobs, "_realized_root_path_in_cachix", lambda path, _budget: path == store
     )
     monkeypatch.chdir(checkout)
     assert jobs.main("flush-cachix") == 0
@@ -1301,7 +1406,9 @@ def test_flush_fails_closed_when_nothing_to_push_but_remote_misses(
         "Nothing to push - all store paths are already on Cachix.",
     )
     monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path == store)
-    monkeypatch.setattr(jobs, "_realized_root_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(
+        jobs, "_realized_root_path_in_cachix", lambda _path, _budget: False
+    )
     monkeypatch.chdir(checkout)
     with pytest.raises(jobs.CachixFlushError, match="missing from gkze.cachix.org"):
         jobs.main("flush-cachix")
@@ -1352,7 +1459,7 @@ def test_flush_does_not_fail_closed_on_warmup_fod_remote_miss(
     _allow_hosted_github_env(monkeypatch)
     monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path in {fod, root})
     monkeypatch.setattr(
-        jobs, "_realized_root_path_in_cachix", lambda path: path == root
+        jobs, "_realized_root_path_in_cachix", lambda path, _budget: path == root
     )
     monkeypatch.chdir(checkout)
     assert jobs.main("flush-cachix") == 0
@@ -1421,7 +1528,9 @@ def test_flush_still_fails_closed_when_darwin_root_misses_among_fods(
     monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
     monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
     monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path in {fod, root})
-    monkeypatch.setattr(jobs, "_realized_root_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(
+        jobs, "_realized_root_path_in_cachix", lambda _path, _budget: False
+    )
     monkeypatch.chdir(checkout)
     with pytest.raises(
         jobs.CachixFlushError, match="missing from gkze.cachix.org"
@@ -1558,13 +1667,13 @@ def test_linux_builder_pin_helpers_fail_closed(
         jobs._linux_builder_pin_name()
     image = "/nix/store/wy15yizd3i7z6bmg3llr43a2pflg9yyb-nixos-disk-image"
     log = StringIO()
-    jobs._pin_linux_builder_paths(("/nix/store/other",), log)
+    jobs._pin_linux_builder_paths(("/nix/store/other",), log, _budget())
     with pytest.raises(jobs.CachixFlushError, match="expected one linux-builder"):
-        jobs._pin_linux_builder_paths((image, f"{image}-copy"), log)
+        jobs._pin_linux_builder_paths((image, f"{image}-copy"), log, _budget())
     monkeypatch.setenv("RUNNER_ARCH", "ARM64")
     monkeypatch.setenv("TEST_CACHE_EXIT", "1")
     with pytest.raises(jobs.CachixFlushError, match="cachix pin of linux-builder"):
-        jobs._pin_linux_builder_paths((image,), log)
+        jobs._pin_linux_builder_paths((image,), log, _budget())
     assert jobs._store_path_exists(str(tmp_path))
     assert not jobs._store_path_exists(str(tmp_path / "missing"))
 
@@ -1572,13 +1681,13 @@ def test_linux_builder_pin_helpers_fail_closed(
         return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
     monkeypatch.setattr(jobs, "_run", run)
-    assert jobs._realized_root_path_in_cachix(image)
+    assert jobs._realized_root_path_in_cachix(image, _budget())
     monkeypatch.setattr(
         jobs,
         "_run",
         lambda *args, **_kwargs: subprocess.CompletedProcess(args, 1, "", "404"),
     )
-    assert not jobs._realized_root_path_in_cachix(image)
+    assert not jobs._realized_root_path_in_cachix(image, _budget())
 
 
 def test_darwin_root_pin_names_are_stable_per_wrapper() -> None:
@@ -1603,10 +1712,10 @@ def test_pin_realized_darwin_roots_fail_closed(native_job, monkeypatch) -> None:
     monkeypatch.chdir(checkout)
     store = "/nix/store/98bwk8gpzhmr12navdg9knjscv09k2nm-darwin-system-26.11.57a3171"
     log = StringIO()
-    jobs._pin_realized_darwin_roots(("/nix/store/other-not-a-root",), log)
+    jobs._pin_realized_darwin_roots(("/nix/store/other-not-a-root",), log, _budget())
     monkeypatch.setenv("TEST_CACHE_EXIT", "1")
     with pytest.raises(jobs.CachixFlushError, match="cachix pin of darwin-system"):
-        jobs._pin_realized_darwin_roots((store,), log)
+        jobs._pin_realized_darwin_roots((store,), log, _budget())
 
 
 def test_record_runner_storage_writes_df_inodes_and_store_bytes(
@@ -2372,6 +2481,31 @@ def test_cachix_flush_proof_requires_partial_presence_after_designed_failure() -
         if str(step.get("uses", "")).startswith("actions/upload-artifact@")
     )
     assert "proof-path-after.txt" in upload["with"]["path"]
+    assert "proof-path-wedged.txt" in upload["with"]["path"]
+    wedge = next(
+        step
+        for step in fail["steps"]
+        if step.get("name") == "Wedge the daemon and realize a queued path"
+    )
+    assert wedge["if"] == "always()"
+    stopped = [
+        node.attr
+        for node in ast.walk(ast.parse(wedge["run"]))
+        if isinstance(node, ast.Attribute)
+    ]
+    assert "SIGSTOP" in stopped
+    assert names.index(wedge["name"]) < names.index("Flush Cachix daemon")
+    flush = fail["steps"][-1]
+    assert flush["env"]["NIXCFG_CACHIX_STOP_TIMEOUT_SECONDS"] == "30"
+    required = {
+        node.value
+        for node in ast.walk(ast.parse(flush["run"]))
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+    assert {
+        "cachix daemon stop returncode=124",
+        "wedged Cachix daemon pid=",
+    } <= required
     assert workflow["jobs"]["assert-partial"]["if"] == "always()"
     proof_if = " ".join(workflow["jobs"]["proof"]["if"].split())
     assert "always() && !cancelled()" in proof_if
@@ -2382,6 +2516,7 @@ def test_cachix_flush_proof_requires_partial_presence_after_designed_failure() -
     )["run"]
     assert "proof-path-after.txt" in assert_source
     assert "after-failure" in assert_source
+    assert "proof-path-wedged.txt" in assert_source
     assert workflow["jobs"]["assert-partial"]["steps"][-1]["name"] == (
         "Flush Cachix daemon"
     )

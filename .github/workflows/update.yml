@@ -696,6 +696,7 @@ jobs:
         shell: python
       - name: Flush Cachix daemon
         if: always()
+        timeout-minutes: 45
         env:
           NIXCFG_CI_STAGE: flush-cachix
         run: |
@@ -804,6 +805,7 @@ jobs:
         shell: python
       - name: Flush Cachix daemon
         if: always()
+        timeout-minutes: 45
         env:
           NIXCFG_CI_STAGE: flush-cachix
         run: |

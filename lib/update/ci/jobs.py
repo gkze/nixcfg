@@ -16,7 +16,10 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TextIO
 
@@ -47,13 +50,40 @@ _CACHIX_DAEMON_SOCKET_NAME = "daemon.sock"
 _CACHIX_DAEMON_READY_SECONDS = 60.0
 _CACHIX_DAEMON_READY_POLL_SECONDS = 0.1
 _CACHIX_DAEMON_READY_SECONDS_ENV = "NIXCFG_CACHIX_DAEMON_READY_SECONDS"
-# cachix daemon stop waits 60s then DaemonPushFailure / exit 3
-# ("Failed to push some store paths"). 38577749898 canary-warm-rust:
-# rust_litemap-0.8.0 logged Pushing at 16:40:35 and never Pushed;
-# drain timed out at 17:15:19. A direct `cachix push` recovers leftovers.
-_CACHIX_PUSH_FAILURE = "Failed to push some store paths"
-_CACHIX_DRAIN_TIMEOUT = "drain timed out"
-_CACHIX_STUCK_JOBS = "stuck jobs after drain timeout"
+# cachix (1.11.1 on the runners, unchanged through 1.13.0) builds its HTTP
+# manager with ``responseTimeoutNone``: a stalled upload or narinfo query
+# never times out. 40048292663 warm-rust (4): from 06:05:45 no path the
+# post-build hook queued reached gkze (81 consecutive cargo-package outputs
+# 404 on gkze and cache.nixos.org), and flush's ``cachix daemon stop`` then
+# sat 3h until the 360-minute job cap. Daemon shutdown waits for the wedged
+# narinfo processor before it replies, while each client handler still
+# answers keep-alive pings, so the stop client never times out by itself.
+# Every Cachix call in flush is therefore bounded here, and a stop that does
+# not confirm a clean drain republishes every locally built path.
+_CACHIX_STOP_TIMEOUT_SECONDS = 300.0
+_CACHIX_STOP_TIMEOUT_SECONDS_ENV = "NIXCFG_CACHIX_STOP_TIMEOUT_SECONDS"
+# The longest healthy flush in 25 Update runs was 405s (39375722862
+# plan-darwin-closures pushing 1727 FODs). Retries resume: cachix push skips
+# whatever an earlier attempt already uploaded.
+_CACHIX_PUSH_TIMEOUT_SECONDS = 1200.0
+_CACHIX_PUSH_ATTEMPTS = 3
+_CACHIX_PUSH_CHUNK = 1000
+_CACHIX_QUERY_TIMEOUT_SECONDS = 120.0
+_STORE_QUERY_TIMEOUT_SECONDS = 600.0
+# Shards stop building at 5 of the job's 6 hours; the workflow step's
+# timeout-minutes (45) is the backstop behind this in-process budget.
+_CACHIX_FLUSH_BUDGET_SECONDS = 2400.0
+_CACHIX_DAEMON_EXIT_GRACE_SECONDS = 10.0
+_DAEMON_LOG_TAIL_LINES = 20
+_TIMEOUT_RETURNCODE = 124
+# cachix push omits paths its upstream (cache.nixos.org) already serves, so
+# a recovered path is proven by a narinfo on either cache.
+_RECOVERY_SUBSTITUTERS = ("https://gkze.cachix.org", "https://cache.nixos.org")
+_NARINFO_TIMEOUT_SECONDS = 30.0
+_NARINFO_ATTEMPTS = 3
+_NARINFO_WORKERS = 16
+# The Cachix edge answers 403 to urllib's default Python-urllib agent.
+_NARINFO_USER_AGENT = "nixcfg-cachix-flush"
 _STORE_PATH_RE = re.compile(r"/nix/store/[0-9a-z]{32}-[^\s]+")
 # 38821223775: each Darwin root shard built darwin-system-26.11.57a3171
 # locally, then `cachix daemon stop` returned 0. assert-coverage still
@@ -129,14 +159,60 @@ _UNUSED_IMAGE_PATHS = {
 
 
 def _run(
-    *args: str, capture: bool = False, check: bool = True
+    *args: str,
+    capture: bool = False,
+    check: bool = True,
+    timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # noqa: S603 -- argv boundaries, never a shell
-        args,
-        text=True,
-        capture_output=capture,
-        check=check,
-    )
+    """Run *args*; a *timeout* kills the child and reports ``_TIMEOUT_RETURNCODE``."""
+    try:
+        return subprocess.run(  # noqa: S603 -- argv boundaries, never a shell
+            args,
+            text=True,
+            capture_output=capture,
+            check=check,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as error:
+        result = subprocess.CompletedProcess(
+            args,
+            _TIMEOUT_RETURNCODE,
+            stdout=_timeout_text(error.stdout),
+            stderr=f"{_timeout_text(error.stderr)}timed out after {timeout:.0f}s",
+        )
+    if check:
+        raise subprocess.CalledProcessError(
+            result.returncode, args, result.stdout, result.stderr
+        )
+    return result
+
+
+def _timeout_text(value: str | bytes | None) -> str:
+    """Return partial output from a killed child as text."""
+    if isinstance(value, bytes):
+        return value.decode(errors="replace")
+    return value or ""
+
+
+class _FlushBudget:
+    """Wall-clock allowance that keeps one Cachix flush inside the job's slack."""
+
+    def __init__(
+        self, seconds: float, *, clock: Callable[[], float] = time.monotonic
+    ) -> None:
+        self._clock = clock
+        self._deadline = clock() + seconds
+
+    def timeout(self, limit: float) -> float:
+        """Return *limit* capped by the remaining budget; fail once it is spent."""
+        remaining = self._deadline - self._clock()
+        if remaining <= 0:
+            msg = (
+                "Cachix flush budget exhausted; cannot confirm that every "
+                "built path reached gkze before the job deadline"
+            )
+            raise CachixFlushError(msg)
+        return min(limit, remaining)
 
 
 def _temp() -> Path:
@@ -280,6 +356,17 @@ def _cachix_daemon_ready_wait_seconds() -> float:
     if raw:
         return max(0.0, float(raw))
     return _CACHIX_DAEMON_READY_SECONDS
+
+
+def _cachix_stop_timeout_seconds() -> float:
+    """Seconds ``cachix daemon stop`` may take before flush treats it as wedged.
+
+    The proof workflow lowers this to exercise the wedged-daemon recovery.
+    """
+    raw = os.environ.get(_CACHIX_STOP_TIMEOUT_SECONDS_ENV, "").strip()
+    if raw:
+        return max(1.0, float(raw))
+    return _CACHIX_STOP_TIMEOUT_SECONDS
 
 
 def cachix_daemon_socket() -> Path | None:
@@ -928,8 +1015,17 @@ def _wait_for_diagnostics(
     return returncode
 
 
-def _push_prefetched_paths(paths: list[str], log: TextIO, artifacts: Path) -> None:
-    """Publish raw imports while retaining liveness evidence for quiet Cachix uploads."""
+def _push_prefetched_paths(
+    paths: list[str],
+    log: TextIO,
+    artifacts: Path,
+    timeout: float | None = None,
+) -> None:
+    """Publish raw imports while retaining liveness evidence for quiet Cachix uploads.
+
+    A *timeout* kills a stalled push (see ``_CACHIX_STOP_TIMEOUT_SECONDS``)
+    and reports it as ``_TIMEOUT_RETURNCODE``.
+    """
     args = ["cachix", "push", _BINARY_CACHE, *paths]
     started = time.monotonic()
     _write_diagnostic(
@@ -939,8 +1035,21 @@ def _push_prefetched_paths(paths: list[str], log: TextIO, artifacts: Path) -> No
     )
     with subprocess.Popen(args) as process:  # noqa: S603 -- fixed Cachix invocation.
         while True:
+            wait = _HEARTBEAT_INTERVAL_SECONDS
+            if timeout is not None:
+                remaining = timeout - (time.monotonic() - started)
+                if remaining <= 0:
+                    process.kill()
+                    process.wait()
+                    _write_diagnostic(
+                        log,
+                        f"Cachix publication timed out pid={process.pid} "
+                        f"after {timeout:.0f}s paths={len(paths)}",
+                    )
+                    raise subprocess.CalledProcessError(_TIMEOUT_RETURNCODE, args)
+                wait = min(wait, remaining)
             try:
-                returncode = process.wait(timeout=_HEARTBEAT_INTERVAL_SECONDS)
+                returncode = process.wait(timeout=wait)
             except subprocess.TimeoutExpired:
                 _write_diagnostic(
                     log,
@@ -1023,7 +1132,11 @@ def _append_validation_scope(args: list[str]) -> str:
 
 
 def _publish_prefetched_receipts(
-    receipts: Path, log: TextIO, artifacts: Path, returncode: int
+    receipts: Path,
+    log: TextIO,
+    artifacts: Path,
+    returncode: int,
+    timeout: float | None = None,
 ) -> int:
     """Push exact prefetch receipts on every exit path that produced them."""
     try:
@@ -1041,7 +1154,7 @@ def _publish_prefetched_receipts(
     if not paths:
         return returncode
     try:
-        _push_prefetched_paths(paths, log, artifacts)
+        _push_prefetched_paths(paths, log, artifacts, timeout)
     except subprocess.CalledProcessError as error:
         if returncode:
             _write_diagnostic(
@@ -1654,28 +1767,44 @@ def unfinished_cachix_daemon_paths(daemon_log: str) -> tuple[str, ...]:
     return tuple(path for path in dict.fromkeys(pushing) if path not in pushed)
 
 
-def _cachix_stop_left_unpushed_paths(*, stderr: str, daemon_log: str) -> bool:
-    """Return whether stop failed on Cachix's 60s drain timeout."""
-    combined = f"{stderr}\n{daemon_log}"
-    return (
-        _CACHIX_PUSH_FAILURE in combined
-        or _CACHIX_DRAIN_TIMEOUT in combined
-        or _CACHIX_STUCK_JOBS in combined
-    )
-
-
-def _push_unfinished_cachix_paths(
-    leftover: tuple[str, ...], log: TextIO
+def _cachix_push(
+    paths: tuple[str, ...], label: str, log: TextIO, budget: _FlushBudget
 ) -> subprocess.CompletedProcess[str]:
-    """Publish leftover paths after ``cachix daemon stop`` drain timeout."""
-    _write_diagnostic(
-        log,
-        f"retrying {len(leftover)} unpushed Cachix paths after drain timeout",
-    )
-    return _run("cachix", "push", _BINARY_CACHE, *leftover, check=False, capture=True)
+    """``cachix push`` *paths* in bounded, retried chunks.
+
+    Return the first chunk that failed every attempt, else the last success.
+    """
+    result = subprocess.CompletedProcess(["cachix", "push", _BINARY_CACHE], 0, "", "")
+    for start in range(0, len(paths), _CACHIX_PUSH_CHUNK):
+        chunk = paths[start : start + _CACHIX_PUSH_CHUNK]
+        for attempt in range(1, _CACHIX_PUSH_ATTEMPTS + 1):
+            started = time.monotonic()
+            result = _run(
+                "cachix",
+                "push",
+                _BINARY_CACHE,
+                *chunk,
+                check=False,
+                capture=True,
+                timeout=budget.timeout(_CACHIX_PUSH_TIMEOUT_SECONDS),
+            )
+            _write_diagnostic(
+                log,
+                f"cachix push {label} chunk={start // _CACHIX_PUSH_CHUNK} "
+                f"attempt={attempt}/{_CACHIX_PUSH_ATTEMPTS} paths={len(chunk)} "
+                f"returncode={result.returncode} "
+                f"elapsed={time.monotonic() - started:.0f}s",
+            )
+            if result.returncode == 0:
+                break
+        else:
+            return result
+    return result
 
 
-def _publish_unpushed_warm_paths(daemon_log: str, log: TextIO) -> bool:
+def _publish_unpushed_warm_paths(
+    daemon_log: str, log: TextIO, budget: _FlushBudget
+) -> None:
     """``cachix push`` leftovers and realized receipts after any job outcome.
 
     Failed cascade/rust-warmup jobs still built paths the post-build hook
@@ -1683,26 +1812,198 @@ def _publish_unpushed_warm_paths(daemon_log: str, log: TextIO) -> bool:
     so the action post logs ``Cachix Daemon not started. Skipping push``.
     Direct ``cachix push`` of leftovers plus ``realized-root-paths.json``
     keeps that warm work even when the daemon is already gone.
-
-    Return whether leftover recovery succeeded (or was unneeded).
     """
     leftover = unfinished_cachix_daemon_paths(daemon_log)
-    leftover_ok = True
     if leftover:
-        push = _push_unfinished_cachix_paths(leftover, log)
+        _write_diagnostic(
+            log,
+            f"retrying {len(leftover)} unpushed Cachix paths from daemon.log",
+        )
+        push = _cachix_push(leftover, "leftover", log, budget)
         _write_diagnostic(
             log,
             f"cachix push leftover returncode={push.returncode} "
             f"paths={' '.join(leftover)} stderr={push.stderr.strip()}",
         )
-        leftover_ok = push.returncode == 0
-        if not leftover_ok:
+        if push.returncode:
             _write_diagnostic(
                 log,
                 "leftover warmup push failed; continuing with recorded receipts",
             )
-    _push_realized_root_paths(log)
-    return leftover_ok
+    _push_realized_root_paths(log, budget)
+
+
+def _ultimate_store_paths(sigs_listing: str) -> tuple[str, ...]:
+    """Return locally built outputs from ``nix path-info --all --sigs``.
+
+    Nix marks each path this store built itself ``ultimate``; substituted
+    paths carry only signatures. The post-build hook never pushes ``.drv``s.
+    """
+    paths: list[str] = []
+    for line in sigs_listing.splitlines():
+        fields = line.split()
+        if (
+            len(fields) > 1
+            and "ultimate" in fields[1:]
+            and _STORE_PATH_RE.fullmatch(fields[0])
+            and not fields[0].endswith(".drv")
+        ):
+            paths.append(fields[0])
+    return tuple(dict.fromkeys(paths))
+
+
+def _locally_built_store_paths(budget: _FlushBudget) -> tuple[str, ...]:
+    """Return every non-derivation path this runner's store built itself."""
+    listing = _run(
+        "nix",
+        "path-info",
+        "--all",
+        "--sigs",
+        check=False,
+        capture=True,
+        timeout=budget.timeout(_STORE_QUERY_TIMEOUT_SECONDS),
+    )
+    if listing.returncode:
+        msg = (
+            "could not list locally built store paths "
+            f"returncode={listing.returncode} stderr={listing.stderr.strip()}"
+        )
+        raise CachixFlushError(msg)
+    return _ultimate_store_paths(listing.stdout)
+
+
+def _narinfo_status(url: str, timeout: float) -> int:
+    """Return the HTTP status of a binary-cache narinfo ``HEAD``."""
+    request = urllib.request.Request(  # noqa: S310 -- fixed https substituters
+        url, method="HEAD", headers={"User-Agent": _NARINFO_USER_AGENT}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 -- fixed https substituters
+            return int(response.status)
+    except urllib.error.HTTPError as error:
+        return error.code
+
+
+def _path_substitutable(
+    path: str,
+    budget: _FlushBudget,
+    status: Callable[[str, float], int],
+) -> bool:
+    """Return whether gkze or its upstream serves a narinfo for *path*.
+
+    Only 200 proves presence and only 404 proves absence; anything else is
+    retried and then counted as absent, so verification fails closed.
+    """
+    digest = path.removeprefix(f"{_STORE_PATH_PREFIX}/").split("-", 1)[0]
+    for cache in _RECOVERY_SUBSTITUTERS:
+        url = f"{cache}/{digest}.narinfo"
+        for attempt in range(1, _NARINFO_ATTEMPTS + 1):
+            try:
+                code = status(url, budget.timeout(_NARINFO_TIMEOUT_SECONDS))
+            except OSError:
+                code = 0
+            if code == 200:  # noqa: PLR2004 -- HTTP OK
+                return True
+            if code == 404:  # noqa: PLR2004 -- HTTP Not Found
+                break
+            if attempt < _NARINFO_ATTEMPTS:
+                time.sleep(attempt)
+    return False
+
+
+def _unsubstitutable_paths(
+    paths: tuple[str, ...],
+    budget: _FlushBudget,
+    status: Callable[[str, float], int] | None = None,
+) -> tuple[str, ...]:
+    """Return the *paths* that neither gkze nor cache.nixos.org can substitute."""
+    fetch = _narinfo_status if status is None else status
+    with ThreadPoolExecutor(max_workers=_NARINFO_WORKERS) as pool:
+        served = list(
+            pool.map(lambda path: _path_substitutable(path, budget, fetch), paths)
+        )
+    return tuple(path for path, ok in zip(paths, served, strict=True) if not ok)
+
+
+def _recover_undrained_daemon_paths(log: TextIO, budget: _FlushBudget) -> None:
+    """Republish and verify every locally built path after an unconfirmed drain.
+
+    The daemon logs a queued path only once a worker starts it, so neither
+    its log nor its exit status names what a wedged queue dropped. Nix marks
+    every output this runner built ``ultimate``; the daemon starts before any
+    build, so that set covers everything the post-build hook queued.
+    """
+    paths = _locally_built_store_paths(budget)
+    _write_diagnostic(
+        log,
+        f"republishing {len(paths)} locally built paths after an unconfirmed "
+        "Cachix daemon drain",
+    )
+    if not paths:
+        return
+    push = _cachix_push(paths, "locally-built", log, budget)
+    if push.returncode:
+        msg = (
+            "cachix push of locally built paths failed after an unconfirmed "
+            f"daemon drain returncode={push.returncode} "
+            f"stderr={push.stderr.strip()}"
+        )
+        raise CachixFlushError(msg)
+    missing = _unsubstitutable_paths(paths, budget)
+    if missing:
+        msg = (
+            f"{len(missing)} locally built paths are on neither gkze.cachix.org "
+            f"nor cache.nixos.org after push: {', '.join(missing[:20])}"
+        )
+        _write_diagnostic(log, msg)
+        raise CachixFlushError(msg)
+    _write_diagnostic(
+        log,
+        f"verified {len(paths)} locally built paths on gkze.cachix.org or "
+        "cache.nixos.org",
+    )
+
+
+def _terminate_cachix_daemon(log: TextIO) -> None:
+    """Stop a daemon that did not exit through ``cachix daemon stop``.
+
+    A wedged daemon keeps its socket and pid; cachix-action's post hook would
+    otherwise run a second unbounded stop against it.
+    """
+    daemon_dir = os.environ.get(_CACHIX_DAEMON_DIR_ENV, "").strip()
+    try:
+        pid = int((Path(daemon_dir) / "daemon.pid").read_text().strip())
+    except (OSError, ValueError):
+        _write_diagnostic(log, f"no readable daemon.pid under {daemon_dir!r}")
+        return
+    command = _run(
+        "ps",
+        "-ww",
+        "-p",
+        str(pid),
+        "-o",
+        "command=",
+        check=False,
+        capture=True,
+        timeout=_CACHIX_QUERY_TIMEOUT_SECONDS,
+    )
+    if command.returncode or "cachix" not in command.stdout:
+        _write_diagnostic(log, f"Cachix daemon pid={pid} already exited")
+        return
+    try:
+        # SIGCONT lets a stopped daemon act on SIGTERM.
+        os.kill(pid, signal.SIGTERM)
+        os.kill(pid, signal.SIGCONT)
+        deadline = time.monotonic() + _CACHIX_DAEMON_EXIT_GRACE_SECONDS
+        while time.monotonic() < deadline:
+            os.kill(pid, 0)
+            time.sleep(0.1)
+        os.kill(pid, signal.SIGKILL)
+        _write_diagnostic(log, f"killed wedged Cachix daemon pid={pid}")
+    except ProcessLookupError:
+        _write_diagnostic(log, f"terminated wedged Cachix daemon pid={pid}")
+    except PermissionError as error:
+        _write_diagnostic(log, f"cannot signal Cachix daemon pid={pid}: {error}")
 
 
 def _eval_installable_out_path(
@@ -1847,7 +2148,7 @@ def load_realized_root_paths(artifacts: Path | None = None) -> tuple[str, ...]:
     return tuple(item for item in raw if item.startswith("/nix/store/"))
 
 
-def _realized_root_path_in_cachix(store_path: str) -> bool:
+def _realized_root_path_in_cachix(store_path: str, budget: _FlushBudget) -> bool:
     """Return whether *store_path* is present on gkze.cachix.org."""
     result = _run(
         "nix",
@@ -1857,6 +2158,7 @@ def _realized_root_path_in_cachix(store_path: str) -> bool:
         store_path,
         check=False,
         capture=True,
+        timeout=budget.timeout(_CACHIX_QUERY_TIMEOUT_SECONDS),
     )
     return result.returncode == 0
 
@@ -1909,7 +2211,7 @@ def _coverage_critical_store_path(path: str) -> bool:
     return _darwin_root_pin_name(path) is not None
 
 
-def _cachix_pin(name: str, path: str, log: TextIO) -> None:
+def _cachix_pin(name: str, path: str, log: TextIO, budget: _FlushBudget) -> None:
     """Pin *path* on gkze for ``_CACHIX_PIN_KEEP_DAYS`` and fail closed."""
     pin = _run(
         "cachix",
@@ -1921,6 +2223,7 @@ def _cachix_pin(name: str, path: str, log: TextIO) -> None:
         str(_CACHIX_PIN_KEEP_DAYS),
         check=False,
         capture=True,
+        timeout=budget.timeout(_CACHIX_QUERY_TIMEOUT_SECONDS),
     )
     _write_diagnostic(
         log,
@@ -1935,7 +2238,9 @@ def _cachix_pin(name: str, path: str, log: TextIO) -> None:
         raise CachixFlushError(msg)
 
 
-def _pin_linux_builder_paths(paths: tuple[str, ...], log: TextIO) -> None:
+def _pin_linux_builder_paths(
+    paths: tuple[str, ...], log: TextIO, budget: _FlushBudget
+) -> None:
     """Pin the Rosetta VM so gkze LRU cannot drop a substituted recache.
 
     39006154683: cache-root-deps copied the image from gkze at 08:22 and
@@ -1949,10 +2254,12 @@ def _pin_linux_builder_paths(paths: tuple[str, ...], log: TextIO) -> None:
         msg = f"expected one linux-builder image to pin, got {len(images)}: {images}"
         _write_diagnostic(log, msg)
         raise CachixFlushError(msg)
-    _cachix_pin(_linux_builder_pin_name(), images[0], log)
+    _cachix_pin(_linux_builder_pin_name(), images[0], log, budget)
 
 
-def _pin_realized_darwin_roots(paths: tuple[str, ...], log: TextIO) -> None:
+def _pin_realized_darwin_roots(
+    paths: tuple[str, ...], log: TextIO, budget: _FlushBudget
+) -> None:
     """Pin Darwin-system and home-manager wrappers against gkze Starter LRU.
 
     39166099302 closures spent 40m after four green roots. If that was
@@ -1963,10 +2270,12 @@ def _pin_realized_darwin_roots(paths: tuple[str, ...], log: TextIO) -> None:
         name = _darwin_root_pin_name(path)
         if name is None:
             continue
-        _cachix_pin(name, path, log)
+        _cachix_pin(name, path, log, budget)
 
 
-def _push_warmup_leftovers(paths: tuple[str, ...], log: TextIO) -> None:
+def _push_warmup_leftovers(
+    paths: tuple[str, ...], log: TextIO, budget: _FlushBudget
+) -> None:
     """Best-effort ``cachix push`` of recorded warmup FODs; never fail-close."""
     present = tuple(path for path in paths if _store_path_exists(path))
     skipped = [path for path in paths if path not in present]
@@ -1981,7 +2290,7 @@ def _push_warmup_leftovers(paths: tuple[str, ...], log: TextIO) -> None:
         log,
         f"pushing {len(present)} warmup leftovers without gkze fail-close",
     )
-    push = _run("cachix", "push", _BINARY_CACHE, *present, check=False, capture=True)
+    push = _cachix_push(present, "warmup-leftovers", log, budget)
     _write_diagnostic(
         log,
         f"cachix push warmup-leftovers returncode={push.returncode} "
@@ -1995,7 +2304,7 @@ def _push_warmup_leftovers(paths: tuple[str, ...], log: TextIO) -> None:
         )
 
 
-def _push_realized_root_paths(log: TextIO) -> None:
+def _push_realized_root_paths(log: TextIO, budget: _FlushBudget) -> None:
     """Publish locally realized Darwin roots that the daemon hook missed."""
     recorded = load_realized_root_paths()
     if not recorded:
@@ -2005,7 +2314,7 @@ def _push_realized_root_paths(log: TextIO) -> None:
     )
     critical = tuple(path for path in recorded if _coverage_critical_store_path(path))
     if leftovers:
-        _push_warmup_leftovers(leftovers, log)
+        _push_warmup_leftovers(leftovers, log, budget)
     if not critical:
         return
     missing = [path for path in critical if not _store_path_exists(path)]
@@ -2017,7 +2326,7 @@ def _push_realized_root_paths(log: TextIO) -> None:
         log,
         f"pushing {len(critical)} realized root paths after daemon drain",
     )
-    push = _run("cachix", "push", _BINARY_CACHE, *critical, check=False, capture=True)
+    push = _cachix_push(critical, "realized-roots", log, budget)
     _write_diagnostic(
         log,
         f"cachix push realized-roots returncode={push.returncode} "
@@ -2029,12 +2338,12 @@ def _push_realized_root_paths(log: TextIO) -> None:
             f"returncode={push.returncode} stderr={push.stderr.strip()}"
         )
         raise CachixFlushError(msg)
-    _pin_linux_builder_paths(critical, log)
-    _pin_realized_darwin_roots(critical, log)
+    _pin_linux_builder_paths(critical, log, budget)
+    _pin_realized_darwin_roots(critical, log, budget)
     # 38934724529: cachix exit 0 + "Nothing to push" meant the *wrong*
     # stale path was already on gkze. Coverage still 404'd the eval path.
     missing_remote = [
-        path for path in critical if not _realized_root_path_in_cachix(path)
+        path for path in critical if not _realized_root_path_in_cachix(path, budget)
     ]
     if missing_remote:
         msg = (
@@ -2043,6 +2352,46 @@ def _push_realized_root_paths(log: TextIO) -> None:
         )
         _write_diagnostic(log, msg)
         raise CachixFlushError(msg)
+
+
+def _recover_unconfirmed_drain(
+    stop: subprocess.CompletedProcess[str],
+    socket: Path,
+    daemon_log: str,
+    log: TextIO,
+    budget: _FlushBudget,
+) -> None:
+    """Stop the daemon, then republish and verify what it may have dropped.
+
+    Raise ``CachixFlushError`` unless every locally built path is proven
+    substitutable; the daemon is hidden from cachix-action's post hook first.
+    """
+    tail = "\n".join(daemon_log.splitlines()[-_DAEMON_LOG_TAIL_LINES:])
+    _write_diagnostic(
+        log,
+        "Cachix daemon did not confirm a clean drain "
+        f"returncode={stop.returncode}; daemon.log tail:\n{tail}",
+    )
+    _terminate_cachix_daemon(log)
+    try:
+        _recover_undrained_daemon_paths(log, budget)
+    except CachixFlushError as error:
+        msg = (
+            "Cachix daemon stop failed; cannot confirm a clean drain "
+            f"socket={socket} returncode={stop.returncode} "
+            f"stderr={stop.stderr.strip()} recovery={error}"
+        )
+        _write_diagnostic(log, msg)
+        try:
+            _publish_unpushed_warm_paths(daemon_log, log, budget)
+        except CachixFlushError as cleanup:
+            _write_diagnostic(
+                log, f"receipt publication after failed recovery: {cleanup}"
+            )
+        # Hide the stopped daemon from cachix-action's post hook so a closed
+        # socket does not fail the job again (38577749898).
+        _clear_cachix_daemon_env()
+        raise CachixFlushError(msg) from error
 
 
 def flush_cachix() -> None:
@@ -2065,8 +2414,14 @@ def flush_cachix() -> None:
       cancel that kills the runner first.
     - Runner loss: only paths Cachix already acknowledged.
     - Drain timeout (38577749898): ``daemon stop`` exits 3 after 60s with
-      one stuck job. Recover identifiable ``Pushing`` leftovers with
-      ``cachix push``; fail closed if none can be named or the retry fails.
+      stuck jobs. Queued paths no worker started never appear in daemon.log,
+      so flush republishes every locally built (``ultimate``) path and fails
+      closed unless each one is then on gkze or cache.nixos.org.
+    - Wedged daemon (40048292663 warm-rust 4): a Cachix HTTP call with no
+      response timeout froze the queue at 06:05:45 and ``daemon stop`` never
+      returned, burning the job's last 3 hours. Every Cachix call here now
+      has a timeout inside ``_CACHIX_FLUSH_BUDGET_SECONDS``; a stop timeout
+      kills the daemon and takes the drain-timeout recovery above.
     - Silent hook miss (38821223775): ``daemon stop`` returned 0 after
       each Darwin root shard built ``darwin-system-26.11.57a3171``, but
       gkze.cachix.org 404'd those paths. Flush then ``cachix push``es
@@ -2094,6 +2449,7 @@ def flush_cachix() -> None:
     artifacts = _temp() / "update-artifacts"
     artifacts.mkdir(parents=True, exist_ok=True)
     receipts = artifacts / "prefetch-receipts.jsonl"
+    budget = _FlushBudget(_CACHIX_FLUSH_BUDGET_SECONDS)
     with (artifacts / "cachix-flush.log").open("a") as log:
         _write_diagnostic(log, "Flushing Cachix daemon and prefetch receipts")
         record_runner_storage("flush-start", log)
@@ -2108,7 +2464,13 @@ def flush_cachix() -> None:
             )
             return
         if receipts.exists():
-            _publish_prefetched_receipts(receipts, log, artifacts, 0)
+            _publish_prefetched_receipts(
+                receipts,
+                log,
+                artifacts,
+                0,
+                timeout=budget.timeout(_CACHIX_PUSH_TIMEOUT_SECONDS),
+            )
         daemon_log = artifacts / "cachix-daemon" / "daemon.log"
         daemon_log_text = (
             daemon_log.read_text(encoding="utf-8", errors="replace")
@@ -2123,12 +2485,12 @@ def flush_cachix() -> None:
                 "are unset. useDaemon wiring did not export the socket."
             )
             _write_diagnostic(log, msg)
-            _publish_unpushed_warm_paths(daemon_log_text, log)
+            _publish_unpushed_warm_paths(daemon_log_text, log, budget)
             raise CachixFlushError(msg)
         if not socket.exists():
             msg = f"Cachix daemon socket missing: {socket}"
             _write_diagnostic(log, msg)
-            _publish_unpushed_warm_paths(daemon_log_text, log)
+            _publish_unpushed_warm_paths(daemon_log_text, log, budget)
             raise CachixFlushError(msg)
         stop = _run(
             "cachix",
@@ -2138,6 +2500,7 @@ def flush_cachix() -> None:
             str(socket),
             check=False,
             capture=True,
+            timeout=budget.timeout(_cachix_stop_timeout_seconds()),
         )
         _write_diagnostic(
             log,
@@ -2152,38 +2515,8 @@ def flush_cachix() -> None:
             else daemon_log_text
         )
         if stop.returncode:
-            leftover = unfinished_cachix_daemon_paths(daemon_log_text)
-            if leftover and _cachix_stop_left_unpushed_paths(
-                stderr=stop.stderr, daemon_log=daemon_log_text
-            ):
-                if _publish_unpushed_warm_paths(daemon_log_text, log):
-                    _release_cachix_daemon_dir()
-                    _write_diagnostic(
-                        log,
-                        "cleared CACHIX_DAEMON_DIR so cachix-action "
-                        "post skips a second stop",
-                    )
-                    record_runner_storage("flush-end", log)
-                    return
-            else:
-                _write_diagnostic(
-                    log,
-                    "Cachix daemon stop failed; pushing recorded warmup paths "
-                    "before hiding the daemon from the action post hook",
-                )
-                _publish_unpushed_warm_paths(daemon_log_text, log)
-            msg = (
-                "Cachix daemon stop failed; cannot confirm a clean drain "
-                f"socket={socket} returncode={stop.returncode} "
-                f"stderr={stop.stderr.strip()}"
-            )
-            _write_diagnostic(log, msg)
-            # Stop already ran. Hide the dead daemon from cachix-action's
-            # post hook so a closed socket does not fail the job again
-            # (38577749898 post hook exit 1 after this flush).
-            _clear_cachix_daemon_env()
-            raise CachixFlushError(msg)
-        _publish_unpushed_warm_paths(daemon_log_text, log)
+            _recover_unconfirmed_drain(stop, socket, daemon_log_text, log, budget)
+        _publish_unpushed_warm_paths(daemon_log_text, log, budget)
         _release_cachix_daemon_dir()
         _write_diagnostic(
             log,

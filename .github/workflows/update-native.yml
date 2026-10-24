@@ -195,8 +195,10 @@ jobs:
           if-no-files-found: warn
           overwrite: true
           retention-days: 30
+      # Backstop for jobs.py's 40-minute flush budget (40048292663 sat 3h).
       - name: Flush Cachix daemon
         if: always()
+        timeout-minutes: 45
         env:
           NIXCFG_CI_STAGE: flush-cachix
         run: |
