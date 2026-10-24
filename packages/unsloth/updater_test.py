@@ -3104,7 +3104,7 @@ def test_unsloth_rejects_invalid_backend_upload_time(value: str) -> None:
         module._canonical_pypi_upload_time(value)
 
 
-@pytest.mark.parametrize("version", ["0.1.902-beta", "0.1.909-beta"])
+@pytest.mark.parametrize("version", ["0.1.902-beta", "0.1.909-beta", "0.1.910-beta"])
 def test_unsloth_build_toolchain_override_is_updater_owned(version: str) -> None:
     """A release whose own lockfile needs a newer compiler is recorded, not restated in Nix."""
     module = _load_updater_module()
@@ -4533,34 +4533,60 @@ def test_unsloth_rejects_mixed_studio_venv_contracts(tmp_path: Path) -> None:
             False,
         ),
         (24, ("model",), {}, []),
+        (
+            27,
+            (),
+            {},
+            {
+                "started": False,
+                "reason": "nix_managed",
+                "message": (
+                    "Cannot update package-owned helper binaries: "
+                    "this Unsloth installation is managed by Nix."
+                ),
+                "job": {"status": "idle"},
+            },
+        ),
     ],
 )
 def test_unsloth_current_backend_seams_preserve_managed_boundaries(
+    monkeypatch: pytest.MonkeyPatch,
     index: int,
     args: tuple[object, ...],
     kwargs: dict[str, object],
     managed_result: object,
     managed: bool,
 ) -> None:
-    """The locked 0.909 entry points stop before installer work in managed mode."""
+    """The locked 0.910 entry points stop before installer work in managed mode."""
     module = _load_patch_module()
     fixture = json.loads(
-        (_PACKAGE_DIR / "tests/fixtures/backend-0.1.909-seams.json").read_text()
+        (_PACKAGE_DIR / "tests/fixtures/backend-0.1.910-seams.json").read_text()
     )
     patch = module._BACKEND_PATCHES[index]
     original, replacement = patch.alternatives[-1]
     assert fixture["variants"][str(index)]["original"] == original
     prefix = "def ensure_ssm_runtime(model_name):\n" if index == 24 else ""
+    suffix = {17: "    )\n", 27: '        return "upstream"\n'}.get(index, "")
     source = (
         "from __future__ import annotations\n"
         + prefix
         + replacement
-        + ("    )\n" if index == 17 else "")
+        + suffix
         + '    return "upstream"\n'
     )
     tree = ast.parse(source)
     function = next(node for node in tree.body if isinstance(node, ast.FunctionDef))
     logger = SimpleNamespace(info=lambda *_: None, warning=lambda *_: None)
+    # 0.910 worker imports its import-block helpers from the runtime at call time.
+    runtime = ModuleType("utils.ssm_runtime")
+    runtime_helpers = {
+        "_unblock_import": lambda _: None,
+        "forget_imported_modules": lambda *_: None,
+    }
+    for name, helper in runtime_helpers.items():
+        setattr(runtime, name, helper)
+    monkeypatch.setitem(sys.modules, "utils", ModuleType("utils"))
+    monkeypatch.setitem(sys.modules, "utils.ssm_runtime", runtime)
     namespace: dict[str, object] = {
         "os": SimpleNamespace(environ={"UNSLOTH_NIX_MANAGED": "1"} if managed else {}),
         "logger": logger,
@@ -4569,6 +4595,14 @@ def test_unsloth_current_backend_seams_preserve_managed_boundaries(
         "_install_source": lambda value: value,
         "_sp": SimpleNamespace(run=lambda: None),
         "subprocess": SimpleNamespace(run=None),
+        **runtime_helpers,
+        "kernel_usable": lambda name, _extension: cast(
+            "Callable[[str], bool]", namespace["_is_importable"]
+        )(name),
+        "_job_lock": nullcontext(),
+        "_job": {"status": "idle"},
+        "_whisper_retry_owed": lambda: False,
+        "_claim_operation": lambda _: False,
     }
     exec(  # noqa: S102 -- exercises fixed source snippets with inert dependencies
         compile(tree, "<current-backend-policy>", "exec"), namespace

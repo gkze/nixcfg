@@ -105,6 +105,7 @@ _MAX_OXC_SOURCE_BYTES = 1024 * 1024
 _RUST_TOOLCHAIN_BUILD_OVERRIDES: dict[str, str] = {
     "0.1.902-beta": "1.90.0",
     "0.1.909-beta": "1.90.0",
+    "0.1.910-beta": "1.90.0",
 }
 _OXC_PACKAGE_PATH = "studio/backend/core/data_recipe/oxc-validator/package.json"
 _OXC_LOCK_PATH = "studio/backend/core/data_recipe/oxc-validator/package-lock.json"
