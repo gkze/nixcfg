@@ -66,9 +66,14 @@ def local_flake_url(root: os.PathLike[str] | str | None = None) -> str:
     ``.git`` implementation files.  Git fsmonitor creates a socket inside
     ``.git`` that Nix cannot copy, so update-time local flake evaluations should
     use ``git+file`` instead.
+
+    Actions checks out with ``fetch-depth: 1``. An explicit ``git+file`` URL to a
+    clean shallow clone fails under Determinate Nix with "shallow Git repository,
+    so 'revCount' is not available" unless it opts in with ``shallow=1``, which
+    the ``.`` flake reference adds implicitly. No consumer reads ``revCount``.
     """
     repo_root = get_repo_root() if root is None else Path(root).expanduser().resolve()
-    return f"git+file://{repo_root}?dirty=1"
+    return f"git+file://{repo_root}?dirty=1&shallow=1"
 
 
 class _RepoPathProxy(os.PathLike[str]):

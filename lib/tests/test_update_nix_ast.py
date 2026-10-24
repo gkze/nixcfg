@@ -47,7 +47,7 @@ from lib.update.nix import (
     _contextual_overlay_bindings,
 )
 from lib.update.nix_expr import identifier_attr_path, nix_str
-from lib.update.paths import REPO_ROOT
+from lib.update.paths import REPO_ROOT, local_flake_url
 from lib.update.sources import nix_source_names
 
 if TYPE_CHECKING:
@@ -1131,9 +1131,7 @@ def test_nix_source_names_uses_parseable_ast_expression(
                     name="flake",
                     value=FunctionCall(
                         name=identifier_attr_path("builtins", "getFlake"),
-                        argument=StringPrimitive(
-                            value=f"git+file://{REPO_ROOT}?dirty=1"
-                        ),
+                        argument=StringPrimitive(value=local_flake_url(REPO_ROOT)),
                     ),
                 ),
             ],
