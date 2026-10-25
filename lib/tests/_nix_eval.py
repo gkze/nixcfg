@@ -3,7 +3,7 @@
 import json
 import shutil
 import subprocess
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
@@ -25,7 +25,7 @@ _NIX_EVAL_REASON: ContextVar[str | None] = ContextVar("nix_eval_reason", default
 
 
 @contextmanager
-def allow_nix_evaluation(reason: str) -> Iterator[None]:
+def allow_nix_evaluation(reason: str) -> Generator[None]:
     """Scope a test's documented need for actual Nix semantics."""
     if not isinstance(reason, str) or not reason.strip():
         msg = "A real Nix evaluation requires a nonempty semantic justification"

@@ -5,7 +5,7 @@
   lib,
   nodejs,
   outputs,
-  pnpm_11,
+  pnpm_12,
   pnpmConfigHook,
   stdenv,
   sourceHashPackageName ? "t3code",
@@ -28,9 +28,21 @@ let
     ;
   baseVersion = serverPackageJson.version;
   revSuffix = builtins.substring 0 7 (outputs.lib.flakeLock.t3code.locked.rev or "unknown");
-  version = "${baseVersion}-main-${revSuffix}";
+  # Upstream publishes the nightly channel as immutable tags shaped
+  # ``v<base>-nightly.<yyyymmdd>.<run>``. The tag carries the release version,
+  # not package.json: a nightly cuts ``base`` before the stable release bumps the
+  # workspace versions. Building a tag therefore yields the exact version the
+  # desktop app uses to select its update channel, while a branch pin cannot.
+  inputRef = outputs.lib.flakeLock.t3code.original.ref or "";
+  nightlyVersionMatch = builtins.match "v?([0-9]+\\.[0-9]+\\.[0-9]+-nightly\\.[0-9]{8}\\.[0-9]+)" inputRef;
+  channel = if nightlyVersionMatch != null then "nightly" else "latest";
+  version =
+    if nightlyVersionMatch != null then
+      builtins.elemAt nightlyVersionMatch 0
+    else
+      "${baseVersion}-main-${revSuffix}";
   nodeModulesVersion = "deps";
-  pnpm = pnpm_11.override { nodejs-slim = nodejs; };
+  pnpm = pnpm_12.override { nodejs-slim = nodejs; };
 
   node_modules =
     let
@@ -41,7 +53,10 @@ let
         inherit pnpm;
         fetcherVersion = 4;
         pnpmInstallFlags = [
-          "--fetch-retries=5"
+          # pnpm 12 dropped the top-level --fetch-retries flag; retries are a
+          # config setting now. Keep both knobs so a large workspace fetch
+          # survives registry instability.
+          "--config.fetch-retries=5"
           "--network-concurrency=1"
         ];
         hash = outputs.lib.sourceHashForPlatform sourceHashPackageName "nodeModulesHash" system;
@@ -72,10 +87,6 @@ let
     postUnpack = ''
       chmod -R u+w source
     '';
-
-    # fff-node 0.9.4 exposes only an ESM import entry. These builds run under
-    # Node/Electron, not the upstream single-executable runtime.
-    patches = [ ./fff-node-esm.patch ];
 
     buildPhase = ''
       runHook preBuild
@@ -119,6 +130,7 @@ let
 in
 {
   inherit
+    channel
     node_modules
     pname
     pnpm

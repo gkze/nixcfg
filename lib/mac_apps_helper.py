@@ -9,7 +9,9 @@ kept in step with ``lib.json_utils.as_object_dict`` for that reason: dedup by
 importing the shared helper would pass the test suite and then fail activation.
 
 System applications are staged in a transaction directory on the target
-filesystem. Live bundles change only by rename after every install stages, and
+filesystem. Staging, bundle comparisons, and the post-commit LaunchServices
+refresh run in bounded pools because they are independent per bundle. Live
+bundles change only by rename after every install stages, and
 the ownership manifest is published only after current and stale promotions.
 A target-wide lock serializes managers, while a durable journal records the
 previous manifest and every rename. Activation recovers recognized incomplete
@@ -42,6 +44,7 @@ if TYPE_CHECKING:
 
 EXPECTED_ARGC = 3
 MAX_INSTALL_WORKERS = 8
+MAX_METADATA_WORKERS = 4
 LSREGISTER_PATH = Path(
     "/System/Library/Frameworks/CoreServices.framework/Frameworks/"
     "LaunchServices.framework/Support/lsregister",
@@ -61,6 +64,7 @@ APPLICATION_JOURNAL_VERSION = 1
 MAX_FILE_MODE = 0o7777
 APPLICATION_ACTIVE_PHASES = {"prepared", "publishing"}
 APPLICATION_FINISHED_PHASES = {"committed", "recovered"}
+MANIFEST_FIELD_SEPARATOR = "\t"
 
 
 class _ProfileBundleLeakAuditPayload(TypedDict):
@@ -204,6 +208,7 @@ class _ApplicationTransaction:
 
 
 type _BundleVersionMetadata = tuple[str | None, str | None, str | None]
+type _ManifestRecord = tuple[str, str | None]
 
 
 def _print_stderr(message: str) -> None:
@@ -212,10 +217,17 @@ def _print_stderr(message: str) -> None:
 
 def _write_managed_app_manifest(
     state_file: Path,
-    bundle_names: Sequence[str],
+    records: Sequence[tuple[str, str]],
 ) -> None:
-    """Atomically replace one manager's complete app-ownership manifest."""
-    contents = "".join(f"{bundle_name}\n" for bundle_name in bundle_names)
+    """Atomically replace one manager's complete app-ownership manifest.
+
+    Each record pairs the bundle name with the store path it was copied from, so
+    the next activation can tell unchanged bundles apart without reading them.
+    """
+    contents = "".join(
+        f"{bundle_name}{MANIFEST_FIELD_SEPARATOR}{source_path}\n"
+        for bundle_name, source_path in records
+    )
     _atomic_write_bytes(state_file, contents.encode("utf-8"))
 
 
@@ -448,10 +460,21 @@ def _make_tree_user_writable(path: Path) -> None:
             _chmod_user_writable(root_path / entry_name)
 
 
-def _read_manifest(path: Path) -> list[str]:
+def _read_manifest_records(path: Path) -> list[_ManifestRecord]:
+    """Read ownership records, tolerating legacy name-only manifest lines."""
     if not path.is_file():
         return []
-    return path.read_text(encoding="utf-8").splitlines()
+    records: list[_ManifestRecord] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line:
+            continue
+        bundle_name, _, source_path = line.partition(MANIFEST_FIELD_SEPARATOR)
+        records.append((bundle_name, source_path or None))
+    return records
+
+
+def _read_manifest(path: Path) -> list[str]:
+    return [bundle_name for bundle_name, _source in _read_manifest_records(path)]
 
 
 def _app_in_other_manifests(
@@ -586,8 +609,9 @@ def _acquire_application_lock(target_directory: Path) -> int:
     return descriptor
 
 
-def _rsync_copy(src: Path, dst: Path, *, rsync_path: str, writable: bool) -> None:
-    rsync_flags = [
+def _rsync_flags(*, writable: bool) -> list[str]:
+    """Share the copy semantics between the copy and the comparison."""
+    return [
         "--checksum",
         "--copy-unsafe-links",
         "--archive",
@@ -599,12 +623,47 @@ def _rsync_copy(src: Path, dst: Path, *, rsync_path: str, writable: bool) -> Non
         "--no-group",
         "--no-owner",
     ]
+
+
+def _rsync_copy(src: Path, dst: Path, *, rsync_path: str, writable: bool) -> None:
     result = subprocess.run(  # noqa: S603
-        [rsync_path, *rsync_flags, f"{src}/", str(dst)],
+        [rsync_path, *_rsync_flags(writable=writable), f"{src}/", str(dst)],
         check=False,
     )
     if result.returncode != 0:
         raise SystemExit(result.returncode)
+
+
+def _bundle_trees_match(
+    src: Path,
+    dst: Path,
+    *,
+    rsync_path: str,
+    writable: bool,
+) -> bool:
+    """Report whether an installed bundle already matches its store bundle.
+
+    This is a dry run with the same flags the copy uses, so the answer agrees
+    exactly with what a copy would change. It never writes to either side, which
+    matters because installed bundles may be protected from modification.
+    """
+    try:
+        result = subprocess.run(  # noqa: S603
+            [
+                rsync_path,
+                *_rsync_flags(writable=writable),
+                "--dry-run",
+                "--itemize-changes",
+                f"{src}/",
+                str(dst),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return False
+    return result.returncode == 0 and not result.stdout.strip()
 
 
 def _refresh_launch_services_registration(
@@ -626,6 +685,27 @@ def _refresh_launch_services_registration(
             "warning: could not refresh LaunchServices registration for "
             f"{app_path}: exit {result.returncode}",
         )
+
+
+def _register_application_bundles(app_paths: Sequence[Path]) -> None:
+    """Register promoted bundles with LaunchServices without serialising spawns.
+
+    Registration is one process per bundle. Running them in a bounded pool keeps
+    the post-commit phase proportional to bundles that actually changed instead
+    of to every managed bundle, and lets the independent processes overlap.
+    """
+    if not app_paths:
+        return
+
+    with ThreadPoolExecutor(
+        max_workers=min(len(app_paths), MAX_METADATA_WORKERS)
+    ) as executor:
+        futures = [
+            executor.submit(_refresh_launch_services_registration, app_path)
+            for app_path in app_paths
+        ]
+        for future in as_completed(futures):
+            future.result()
 
 
 def _spotlight_command_timeout(deadline: float) -> float | None:
@@ -1098,6 +1178,78 @@ def _remove_profile_copies(payload: Mapping[str, object]) -> None:
         _remove_path(target_path)
 
 
+def _bundle_is_current(
+    entry: _SystemApplicationEntryPayload,
+    target_path: Path,
+    *,
+    recorded_source: str | None,
+    rsync_path: str,
+    writable: bool,
+) -> bool:
+    """Report whether the live bundle already satisfies the declaration.
+
+    A recorded source that matches is authoritative because store paths are
+    content addressed. Legacy manifests carry no source, so fall back to one
+    read-only comparison against the declared bundle.
+    """
+    source_path = Path(entry["sourcePath"])
+    if not _path_exists(target_path):
+        return False
+    if entry["mode"] == "symlink":
+        return target_path.is_symlink() and target_path.readlink() == source_path
+    if target_path.is_symlink() or not target_path.is_dir():
+        return False
+    if recorded_source is not None:
+        return recorded_source == entry["sourcePath"]
+    return _bundle_trees_match(
+        source_path,
+        target_path,
+        rsync_path=rsync_path,
+        writable=writable,
+    )
+
+
+def _changed_application_entries(
+    entries: Sequence[_SystemApplicationEntryPayload],
+    *,
+    target_directory: Path,
+    recorded_sources: Mapping[str, str | None],
+    rsync_path: str,
+    writable: bool,
+) -> list[_SystemApplicationEntryPayload]:
+    """Return declared bundles the target directory does not already satisfy.
+
+    Each check is either a stat plus a manifest comparison or, for legacy
+    manifests, one rsync dry run. The dry runs are independent per bundle, so
+    they overlap in a bounded pool; results keep declaration order so the
+    transaction and its diagnostics stay deterministic.
+    """
+    if not entries:
+        return []
+
+    with ThreadPoolExecutor(
+        max_workers=min(len(entries), MAX_INSTALL_WORKERS)
+    ) as executor:
+        futures = [
+            executor.submit(
+                _bundle_is_current,
+                entry,
+                target_directory / entry["bundleName"],
+                recorded_source=recorded_sources.get(entry["bundleName"]),
+                rsync_path=rsync_path,
+                writable=writable,
+            )
+            for entry in entries
+        ]
+        current = [future.result() for future in futures]
+
+    return [
+        entry
+        for entry, is_current in zip(entries, current, strict=True)
+        if not is_current
+    ]
+
+
 def _stage_managed_apps(
     entries: Sequence[_SystemApplicationEntryPayload],
     *,
@@ -1382,6 +1534,7 @@ def _report_incomplete_rollback(
 def _reconcile_managed_apps(
     entries: Sequence[_SystemApplicationEntryPayload],
     *,
+    changed_entries: Sequence[_SystemApplicationEntryPayload],
     stale_apps: Sequence[str],
     state_file: Path,
     target_directory: Path,
@@ -1389,7 +1542,11 @@ def _reconcile_managed_apps(
     writable: bool,
 ) -> None:
     """Stage, promote, publish ownership, and clean up as one app transaction."""
-    current_apps = [entry["bundleName"] for entry in entries]
+    current_apps = [(entry["bundleName"], entry["sourcePath"]) for entry in entries]
+    if not changed_entries and not stale_apps:
+        _write_managed_app_manifest(state_file, current_apps)
+        return
+
     previous_manifest = state_file.read_bytes() if _path_exists(state_file) else None
     transaction_directory = Path(
         tempfile.mkdtemp(prefix=APPLICATION_TRANSACTION_PREFIX, dir=target_directory)
@@ -1399,7 +1556,7 @@ def _reconcile_managed_apps(
     transaction: _ApplicationTransaction | None = None
     try:
         _stage_managed_apps(
-            entries,
+            changed_entries,
             staging_directory=staging_directory,
             target_directory=target_directory,
             rsync_path=rsync_path,
@@ -1407,7 +1564,7 @@ def _reconcile_managed_apps(
         )
 
         changes: list[_ApplicationChange] = []
-        for index, entry in enumerate(entries):
+        for index, entry in enumerate(changed_entries):
             bundle_name = entry["bundleName"]
             changes.append(
                 _ApplicationChange(
@@ -1416,7 +1573,9 @@ def _reconcile_managed_apps(
                     replacement=staging_directory / str(index) / bundle_name,
                 )
             )
-        for stale_index, managed_app in enumerate(stale_apps, start=len(entries)):
+        for stale_index, managed_app in enumerate(
+            stale_apps, start=len(changed_entries)
+        ):
             changes.append(
                 _ApplicationChange(
                     target=target_directory / managed_app,
@@ -1477,11 +1636,14 @@ def _reconcile_managed_apps(
     _write_application_journal(transaction)
     _cleanup_application_transaction(transaction_directory)
 
-    for entry in entries:
-        _refresh_launch_services_registration(target_directory / entry["bundleName"])
-    _refresh_spotlight_metadata([
-        target_directory / entry["bundleName"] for entry in entries
-    ])
+    # Only promoted bundles need new OS registrations. Unchanged bundles keep the
+    # registration and Spotlight record they already had, so the cost of this
+    # phase follows what changed rather than the size of the managed set.
+    promoted_paths = [
+        target_directory / entry["bundleName"] for entry in changed_entries
+    ]
+    _register_application_bundles(promoted_paths)
+    _refresh_spotlight_metadata(promoted_paths)
 
 
 def _system_applications(payload: Mapping[str, object]) -> None:
@@ -1523,8 +1685,24 @@ def _system_applications(payload: Mapping[str, object]) -> None:
                 continue
             stale_apps.append(managed_app)
 
+        recorded_sources = dict(_read_manifest_records(state_file))
+        changed_entries = _changed_application_entries(
+            entries,
+            target_directory=target_directory,
+            recorded_sources=recorded_sources,
+            rsync_path=rsync_path,
+            writable=writable,
+        )
+        unchanged_count = len(entries) - len(changed_entries)
+        if unchanged_count:
+            _print_stderr(
+                f"keeping {unchanged_count} unchanged app bundle(s) in "
+                f"{target_directory}..."
+            )
+
         _reconcile_managed_apps(
             entries,
+            changed_entries=changed_entries,
             stale_apps=stale_apps,
             state_file=state_file,
             target_directory=target_directory,

@@ -168,6 +168,8 @@ These options are intended for override in a downstream repository:
 - `nixcfg.common.nix.trustedPublicKeys`
 - `nixcfg.darwin.homebrew.{user,taps,mutableTaps,enableRosetta}`
 - `darwinDefaults.appearance`: `"automatic"` (default) or `"dark"`
+- `darwinDefaults.spotlight.indexing`: `true` (default) leaves Spotlight alone;
+  `false` turns indexing off on every volume at each activation
 - `nix.gc.options`: retention for the daily garbage collection that
   `nixcfgCommon` schedules; the shared module sets none
 

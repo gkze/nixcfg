@@ -61,7 +61,7 @@ _TRANSACTION_JOURNAL = "nixcfg-update-transaction.json"
 _SHA256_HEX_LENGTH = 64
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Mapping
+    from collections.abc import Generator, Iterable, Mapping
 
     from lib.nix.models.sources import SourceEntry
     from lib.update.artifacts import GeneratedArtifact
@@ -227,7 +227,7 @@ def _stat_fingerprint(metadata: os.stat_result) -> tuple[int, ...]:
 def _open_parent_descriptor(
     root_descriptor: int,
     path: Path,
-) -> Iterator[int]:
+) -> Generator[int]:
     """Open a repository-relative parent without following any symlink."""
     descriptor = os.dup(root_descriptor)
     try:
@@ -428,7 +428,7 @@ def _snapshot_source_view(
 def _materialized_source_view(
     source_root: Path,
     source_view: Mapping[Path, _WorkspacePathState],
-) -> Iterator[Path]:
+) -> Generator[Path]:
     """Materialize one already-stable source view without rereading its source."""
     with tempfile.TemporaryDirectory(prefix="nixcfg-source-") as temporary:
         root = Path(temporary, "repo").resolve()
@@ -440,7 +440,7 @@ def _materialized_source_view(
 
 
 @contextmanager
-def visible_source_snapshot(repo_root: Path | None = None) -> Iterator[Path]:
+def visible_source_snapshot(repo_root: Path | None = None) -> Generator[Path]:
     """Yield an exact, ``.git``-free copy of the complete visible source view."""
     live_root = (
         get_repo_root() if repo_root is None else repo_root.expanduser().resolve()
@@ -1429,7 +1429,7 @@ class IsolatedUpdateWorkspace:
         return tuple(restored)
 
     @contextmanager
-    def validation_snapshot(self) -> Iterator[UpdateValidationSnapshot]:
+    def validation_snapshot(self) -> Generator[UpdateValidationSnapshot]:
         """Yield and remember the exact candidate source presented to validation."""
         root = self.root
         descriptor = cast("int", self._workspace_descriptor)

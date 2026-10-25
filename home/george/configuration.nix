@@ -353,7 +353,12 @@
           mole-app
         ];
       };
-      macApps.applications = managedMacAppProjection.applications;
+      macApps = {
+        inherit (managedMacAppProjection) applications;
+        # nix-darwin runs the user scope alongside the system scope in one
+        # activation, so Home Manager must not reconcile ~/Applications again.
+        activationScope = "nix-darwin";
+      };
       # OpenCode is installed from the fork's releases: Bun manages the CLI,
       # and the desktop app is installed separately. Keep live profiles intact.
       opencode = {
@@ -715,8 +720,12 @@
     bottom.enable = true;
     # Keep the standalone derivation available without adding it to any profile.
     codex.enable = false;
+    # Discord's settings.json lives inside the app's own data container. macOS
+    # now marks that directory with com.apple.macl, which refuses modification
+    # from anything but the granted client (root included), so Home Manager can
+    # no longer own the file. Discord stays installed via macApps.discord.
     discord = {
-      enable = true;
+      enable = false;
       package = null;
     };
     element-desktop = {

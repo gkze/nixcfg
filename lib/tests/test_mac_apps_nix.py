@@ -1944,31 +1944,25 @@ def test_manifest_cleanup_checks_other_mac_app_managers_first(tmp_path: Path) ->
 
     system_script = expect_instance(
         _mac_apps_fragment_expr(
-            "  applicationsScript =\n", "\n\n  systemApplicationsScript ="
+            "  applicationsScript =\n", "\n\n  # A scope owned by the primary user"
         ),
         FunctionDefinition,
     )
-    helper_entries = _mac_apps_fragment_expr(
-        "      helperEntries = ",
-        ";\n    in\n    callMacAppsHelper",
+    helper_entries = expect_instance(
+        _mac_apps_fragment_expr(
+            "  helperApplicationEntries =\n", "\n\n  applicationsScript ="
+        ),
+        FunctionDefinition,
     )
     assert_nix_ast_equal(
-        nix_let(
-            {
-                "bundleSourcePath": parse_nix_expr("entry: entry.sourcePath"),
-                "entries": nix_list([]),
-            },
-            helper_entries,
-        ),
+        helper_entries,
         """
-        let
-          bundleSourcePath = entry: entry.sourcePath;
-          entries = [];
-        in
+        entries:
           map (entry: {
             inherit (entry) bundleName mode;
             preventDowngrade = entry.preventDowngrade or false;
-            sourcePath = bundleSourcePath entry;
+            sourcePath =
+              entry.sourcePath or "${entry.package}/${requiredMacAppAttr entry.package "bundleRelPath"}";
           }) entries
         """,
     )
@@ -1992,7 +1986,7 @@ def test_manifest_cleanup_checks_other_mac_app_managers_first(tmp_path: Path) ->
         """
         {
           inherit stateDirectory stateName targetDirectory writable;
-          entries = helperEntries;
+          entries = helperApplicationEntries entries;
           rsyncPath = getExe pkgs.rsync;
         }
         """,
@@ -2023,9 +2017,7 @@ def test_manifest_cleanup_checks_other_mac_app_managers_first(tmp_path: Path) ->
     assert stale_app.is_dir()
     assert (target_directory / "Fake.app").is_symlink()
     assert (target_directory / "Fake.app").resolve() == fake_bundle.resolve()
-    assert (state_directory / "test-manager.txt").read_text(
-        encoding="utf-8"
-    ) == "Fake.app\n"
+    assert _manifest_names(state_directory / "test-manager.txt") == "Fake.app\n"
     assert (state_directory / "other-manager.txt").read_text(encoding="utf-8") == (
         "Cursor.app\n"
     )
@@ -2140,9 +2132,10 @@ def test_system_applications_installs_current_apps_concurrently(
     assert sorted(installed) == ["First.app", "Second.app"]
     assert (target_directory / "First.app").is_dir()
     assert (target_directory / "Second.app").is_dir()
-    assert (state_directory / "test-manager.txt").read_text(
-        encoding="utf-8"
-    ) == "First.app\nSecond.app\n"
+    assert (
+        _manifest_names(state_directory / "test-manager.txt")
+        == "First.app\nSecond.app\n"
+    )
 
 
 def test_system_applications_records_ownership_before_spotlight_interruption(
@@ -2193,9 +2186,10 @@ def test_system_applications_records_ownership_before_spotlight_interruption(
         mac_apps_helper.main(["prog", "system-applications", str(payload_path)])
 
     assert target_bundle.is_dir()
-    assert (tmp_path / ".nixcfg-mac-apps" / "test-manager.txt").read_text(
-        encoding="utf-8"
-    ) == "Example.app\n"
+    assert (
+        _manifest_names(tmp_path / ".nixcfg-mac-apps" / "test-manager.txt")
+        == "Example.app\n"
+    )
 
 
 def test_system_applications_creates_readable_ownership_manifest(
@@ -2269,19 +2263,32 @@ def test_system_applications_normalizes_existing_manifest_mode(
     assert stat.S_IMODE(state_file.stat().st_mode) == 0o644
 
 
+def _manifest_names(state_file: Path) -> str:
+    """Return the ownership manifest as name-only lines for assertions."""
+    return "".join(
+        f"{line.split(chr(9), 1)[0]}\n"
+        for line in state_file.read_text(encoding="utf-8").splitlines()
+    )
+
+
 def test_managed_app_manifest_replace_failure_preserves_previous_ownership(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     """A failed atomic promotion must retain the last complete ownership record."""
     state_file = tmp_path / "test-manager.txt"
-    state_file.write_text("Existing.app\n", encoding="utf-8")
+    state_file.write_text(
+        "Existing.app\t/nix/store/old-Existing.app\n", encoding="utf-8"
+    )
 
     def _replace(source: Path, destination: str | Path) -> Path:
         source_path = Path(source)
         assert Path(destination) == state_file
         assert source_path.parent == state_file.parent
-        assert source_path.read_text(encoding="utf-8") == "Replacement.app\n"
+        assert (
+            source_path.read_text(encoding="utf-8")
+            == "Replacement.app\t/nix/store/new-Replacement.app\n"
+        )
         raise OSError("simulated manifest promotion failure")
 
     monkeypatch.setattr(Path, "replace", _replace)
@@ -2289,10 +2296,13 @@ def test_managed_app_manifest_replace_failure_preserves_previous_ownership(
     with pytest.raises(OSError, match="simulated manifest promotion failure"):
         mac_apps_helper._write_managed_app_manifest(
             state_file,
-            ["Replacement.app"],
+            [("Replacement.app", "/nix/store/new-Replacement.app")],
         )
 
-    assert state_file.read_text(encoding="utf-8") == "Existing.app\n"
+    assert (
+        state_file.read_text(encoding="utf-8")
+        == "Existing.app\t/nix/store/old-Existing.app\n"
+    )
     assert list(tmp_path.glob(".test-manager.txt.*.tmp")) == []
 
 
@@ -2568,7 +2578,7 @@ def test_system_applications_cli_rejects_missing_source_before_cleanup(
 
     assert exc.value.code == 1
     assert stale_bundle.is_dir()
-    assert state_file.read_text(encoding="utf-8") == "Stale.app\n"
+    assert _manifest_names(state_file) == "Stale.app\n"
 
 
 @pytest.mark.parametrize(
@@ -2909,9 +2919,10 @@ def test_system_applications_cli_survives_spotlight_launch_errors(
     monkeypatch.setattr(mac_apps_helper, "SPOTLIGHT_VERIFY_INTERVAL_SECONDS", 1)
 
     assert mac_apps_helper.main(["prog", "system-applications", str(payload_path)]) == 0
-    assert (tmp_path / ".nixcfg-mac-apps" / "test-manager.txt").read_text(
-        encoding="utf-8"
-    ) == "Focus.app\n"
+    assert (
+        _manifest_names(tmp_path / ".nixcfg-mac-apps" / "test-manager.txt")
+        == "Focus.app\n"
+    )
     warning = capsys.readouterr().err
     assert warning.count("warning:") == 1
     assert "could not launch mdimport" in warning
@@ -3014,15 +3025,7 @@ def test_embedded_home_manager_defers_system_app_management_to_darwin() -> None:
     assert_nix_ast_equal(
         expect_binding(darwin_applications.values, "text").value,
         """
-        lib.mkAfter (
-          macApps.applicationsScript {
-            entries = activeMacAppEntries;
-            stateDirectory = "/Applications/.nixcfg-mac-apps";
-            stateName = "darwin-system";
-            targetDirectory = "/Applications";
-            writable = false;
-          }
-        )
+        lib.mkAfter (macApps.concurrentApplicationsScript macAppScopes)
         """,
     )
 
@@ -3068,7 +3071,7 @@ def test_embedded_home_manager_defers_system_app_management_to_darwin() -> None:
     assert_nix_ast_equal(
         expect_binding(home_activation.values, "nixcfgUserApplications").value,
         """
-        lib.mkIf (userEntries != [ ]) (
+        lib.mkIf (userEntries != [ ] && cfg.activationScope == "home-manager") (
           lib.hm.dag.entryAfter [ "nixcfgRemoveManagedApplicationProfileCopies" ] (
             macApps.applicationsScript {
               entries = userEntries;
@@ -3283,7 +3286,7 @@ def test_profile_bundle_leak_audit_script_reports_managed_bundle_exposure(
     leak_script = expect_instance(
         _mac_apps_fragment_expr(
             "  profileBundleLeakAuditScript =\n",
-            "\n\n  applicationsScript =",
+            "\n\n  systemApplicationsScript =",
         ),
         FunctionDefinition,
     )
@@ -5266,3 +5269,138 @@ def test_fresh_copy_does_not_create_custom_icon(
 
     assert (destination / "Contents" / "AppIcon.icns").read_bytes() == b"bundled logo"
     assert not (destination / "Icon\r").exists()
+
+
+@pytest.mark.nix_eval(
+    reason="The rendered activation shell is the concurrency contract, so parse real generator output."
+)
+def test_concurrent_applications_script_waits_for_every_scope() -> None:
+    """Scopes start together, keep their own identity, and all get awaited."""
+    script = _mac_apps_eval(
+        FunctionCall(
+            name=identifier_attr_path("macApps", "concurrentApplicationsScript"),
+            argument=nix_list([
+                {
+                    "entries": [],
+                    "stateDirectory": "/Applications/.nixcfg-mac-apps",
+                    "stateName": "darwin-system",
+                    "targetDirectory": "/Applications",
+                    "writable": False,
+                },
+                {
+                    "entries": [],
+                    "stateDirectory": "/Users/george/Applications/.nixcfg-mac-apps",
+                    "stateName": "home-manager-user",
+                    "targetDirectory": "/Users/george/Applications",
+                    "user": {"uid": 501, "name": "george"},
+                    "writable": True,
+                },
+            ]),
+        )
+    )
+    shell = parse_shell(script)
+
+    assignments = [
+        node_text(node, shell.sanitized)
+        for node in iter_nodes(shell.tree.root_node, "variable_assignment")
+        if node_text(node, shell.sanitized).startswith("nixcfg_app_pid_")
+    ]
+    assert assignments == ["nixcfg_app_pid_0=$!", "nixcfg_app_pid_1=$!"]
+    assert command_texts(shell, "wait") == [
+        'wait "$nixcfg_app_pid_0"',
+        'wait "$nixcfg_app_pid_1"',
+    ]
+    # The test stub renders escapeShellArg as JSON quoting, so labels stay quoted.
+    assert command_texts(shell, "nixcfg_app_failed") == [
+        'nixcfg_app_failed "darwin-system"',
+        'nixcfg_app_failed "home-manager-user"',
+    ]
+    assert command_texts(shell, "exit") == ["exit 1"]
+
+    # The test stub renders escapeShellArg as JSON quoting, so every escaped
+    # word (helper call and user name) stays double-quoted here.
+    system_commands = command_texts(shell, '"python3"')
+    user_commands = command_texts(shell, "launchctl")
+    assert len(system_commands) == 1
+    assert "system-applications" in system_commands[0]
+    assert len(user_commands) == 1
+    assert user_commands[0].startswith(
+        'launchctl asuser 501 sudo -u "george" --set-home "python3"'
+    )
+    assert "system-applications" in user_commands[0]
+
+
+@pytest.mark.nix_eval(
+    reason="An empty scope list must render no shell, which only evaluation proves."
+)
+def test_concurrent_applications_script_renders_nothing_without_scopes() -> None:
+    """A host without managed apps must not gain an empty activation body."""
+    assert (
+        _mac_apps_eval(
+            FunctionCall(
+                name=identifier_attr_path("macApps", "concurrentApplicationsScript"),
+                argument=nix_list([]),
+            )
+        )
+        == ""
+    )
+
+
+def test_darwin_runs_the_user_scope_only_on_an_explicit_handoff() -> None:
+    """~/Applications joins the concurrent runner only when Home Manager says so.
+
+    The system scope is unconditional: it must still run when the declaration is
+    emptied so the previous activation's bundles get removed.
+    """
+    ownership = nix_source_fragment_expr(
+        "modules/darwin/base.nix",
+        "  nixDarwinOwnsUserScope =\n",
+        "\n  activeMacAppEntries =",
+    )
+    assert_nix_ast_equal(
+        ownership,
+        """
+        attrByPath [ "home-manager" "users" primaryUser "nixcfg" "macApps" "activationScope" ]
+          "home-manager"
+          config
+        == "nix-darwin"
+        """,
+    )
+
+    assert_nix_ast_equal(
+        nix_source_fragment_expr(
+            "modules/darwin/base.nix",
+            "  macAppScopes = ",
+            ";\n",
+        ),
+        """
+        [ systemMacAppScope ]
+        ++ lib.optional (nixDarwinOwnsUserScope && userMacAppScope.entries != [ ]) userMacAppScope
+        """,
+    )
+
+    home_options = expect_instance(
+        expect_binding(
+            _module_output("modules/home/darwin.nix").values, "options"
+        ).value,
+        AttributeSet,
+    )
+    nixcfg_options = expect_instance(
+        expect_binding(home_options.values, "nixcfg").value,
+        AttributeSet,
+    )
+    mac_app_options = expect_instance(
+        expect_binding(nixcfg_options.values, "macApps").value,
+        AttributeSet,
+    )
+    activation_option = expect_instance(
+        expect_binding(mac_app_options.values, "activationScope").value,
+        FunctionCall,
+    )
+    assert_nix_ast_equal(
+        activation_option.name, identifier_attr_path("lib", "mkOption")
+    )
+    option_attrs = expect_instance(activation_option.argument, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(option_attrs.values, "default").value, '"home-manager"'
+    )

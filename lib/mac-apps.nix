@@ -581,6 +581,119 @@ let
       ${escapeShellArg pythonExe} ${escapeShellArg (toString macAppsHelper)} \
         ${escapeShellArg command} ${escapeShellArg (toString payloadFile)}
     '';
+
+  helperApplicationEntries =
+    entries:
+    map (entry: {
+      inherit (entry) bundleName mode;
+      preventDowngrade = entry.preventDowngrade or false;
+      sourcePath =
+        entry.sourcePath or "${entry.package}/${requiredMacAppAttr entry.package "bundleRelPath"}";
+    }) entries;
+
+  applicationsScript =
+    {
+      entries,
+      stateDirectory,
+      stateName,
+      writable,
+      targetDirectory ? "/Applications",
+    }:
+    callMacAppsHelper "system-applications" {
+      inherit
+        stateDirectory
+        stateName
+        targetDirectory
+        writable
+        ;
+      entries = helperApplicationEntries entries;
+      rsyncPath = getExe pkgs.rsync;
+    };
+
+  # A scope owned by the primary user runs as that user, so copies keep user
+  # ownership instead of becoming root-owned bundles in a user directory.
+  applicationScopeCommand =
+    {
+      entries,
+      stateDirectory,
+      stateName,
+      user ? null,
+      writable,
+      targetDirectory,
+    }:
+    let
+      helperCall = applicationsScript {
+        inherit
+          entries
+          stateDirectory
+          stateName
+          targetDirectory
+          writable
+          ;
+      };
+    in
+    if user == null then
+      helperCall
+    else
+      concatStringsSep " " [
+        "launchctl"
+        "asuser"
+        (toString user.uid)
+        "sudo"
+        "-u"
+        (escapeShellArg user.name)
+        "--set-home"
+        helperCall
+      ];
+
+  # One activation script for every application scope. Activation is a single
+  # shell script, so each scope is started as a background job and every scope is
+  # awaited before activation continues: the scopes write disjoint target
+  # directories under separate target locks, and any failing scope still fails
+  # activation.
+  concurrentApplicationsScript =
+    scopes:
+    let
+      commands = map (indexed: {
+        inherit (indexed) index;
+        inherit (indexed.value) stateName;
+        text = applicationScopeCommand indexed.value;
+      }) (indexedValues scopes);
+      starts = concatLists (
+        map (command: [
+          "{"
+          (lib.removeSuffix "\n" command.text)
+          "} &"
+          "nixcfg_app_pid_${toString command.index}=$!"
+        ]) commands
+      );
+      waits = map (
+        command:
+        "wait \"$nixcfg_app_pid_${toString command.index}\""
+        + " || nixcfg_app_failed ${escapeShellArg command.stateName}"
+      ) commands;
+    in
+    if commands == [ ] then
+      ""
+    else
+      concatStringsSep "\n" (
+        [
+          "nixcfg_app_status=0"
+          "nixcfg_app_failed() {"
+          "  echo \"nixcfg: macOS application activation failed for $1\" >&2"
+          "  nixcfg_app_status=1"
+          "}"
+        ]
+        ++ starts
+        ++ waits
+        ++ [
+          "if [ \"$nixcfg_app_status\" -ne 0 ]; then"
+          "  exit 1"
+          "fi"
+        ]
+      )
+      + "\n";
+
 in
 rec {
   inherit
@@ -588,8 +701,10 @@ rec {
     applicationEntryType
     applicationTargetPaths
     applicationsForScope
+    applicationsScript
     cliConfigError
     cliShimFiles
+    concurrentApplicationsScript
     managedMacAppRoutingProjection
     resolveApplications
     ;
@@ -666,34 +781,6 @@ rec {
     callMacAppsHelper "profile-bundle-leak-audit" {
       inherit label packagePaths;
       managedBundleNames = unique managedBundleNames;
-    };
-
-  applicationsScript =
-    {
-      entries,
-      stateDirectory,
-      stateName,
-      writable,
-      targetDirectory ? "/Applications",
-    }:
-    let
-      bundleSourcePath =
-        entry: entry.sourcePath or "${entry.package}/${requiredMacAppAttr entry.package "bundleRelPath"}";
-      helperEntries = map (entry: {
-        inherit (entry) bundleName mode;
-        preventDowngrade = entry.preventDowngrade or false;
-        sourcePath = bundleSourcePath entry;
-      }) entries;
-    in
-    callMacAppsHelper "system-applications" {
-      inherit
-        stateDirectory
-        stateName
-        targetDirectory
-        writable
-        ;
-      entries = helperEntries;
-      rsyncPath = getExe pkgs.rsync;
     };
 
   systemApplicationsScript = applicationsScript;

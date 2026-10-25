@@ -17,6 +17,20 @@ in
   options.nixcfg.macApps = {
     applications = macApps.applicationsOption;
     resolved = macApps.resolvedOption;
+
+    activationScope = lib.mkOption {
+      type = lib.types.enum [
+        "home-manager"
+        "nix-darwin"
+      ];
+      default = "home-manager";
+      description = ''
+        Which activation reconciles user-scoped application bundles.
+        "home-manager" runs this module's own activation step. "nix-darwin"
+        means system activation already runs the same entries alongside the
+        system scope, so this module must not repeat that work.
+      '';
+    };
   };
 
   config = {
@@ -66,19 +80,21 @@ in
       )
     );
 
-    home.activation.nixcfgUserApplications = lib.mkIf (userEntries != [ ]) (
-      lib.hm.dag.entryAfter [ "nixcfgRemoveManagedApplicationProfileCopies" ] (
-        macApps.applicationsScript {
-          entries = userEntries;
-          stateDirectory = "${config.home.homeDirectory}/Applications/.nixcfg-mac-apps";
-          stateName = "home-manager-user";
-          targetDirectory = "${config.home.homeDirectory}/Applications";
-          writable = true;
-        }
-      )
-    );
+    home.activation.nixcfgUserApplications =
+      lib.mkIf (userEntries != [ ] && cfg.activationScope == "home-manager")
+        (
+          lib.hm.dag.entryAfter [ "nixcfgRemoveManagedApplicationProfileCopies" ] (
+            macApps.applicationsScript {
+              entries = userEntries;
+              stateDirectory = "${config.home.homeDirectory}/Applications/.nixcfg-mac-apps";
+              stateName = "home-manager-user";
+              targetDirectory = "${config.home.homeDirectory}/Applications";
+              writable = true;
+            }
+          )
+        );
 
-    # Home Manager owns user-scoped apps in ~/Applications. System-scoped apps are
-    # left for nix-darwin system activation so /Applications has one owner.
+    # User-scoped apps in ~/Applications are owned either by this activation step
+    # or, when nix-darwin runs both scopes concurrently, by system activation.
   };
 }

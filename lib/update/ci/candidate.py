@@ -121,7 +121,7 @@ from lib.update.repair import check_applied_repair, propose_repair
 from lib.update.updaters import ensure_updaters_loaded
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Generator
 
 app = typer.Typer(
     help="Prepare portable candidates and validate them on native builders."
@@ -2034,7 +2034,7 @@ def matrix() -> None:
 
 
 @contextmanager
-def _plan_phase(name: str) -> Iterator[None]:
+def _plan_phase(name: str) -> Generator[None]:
     """Log one plan-shards phase's wall time so the tail is attributable."""
     start = time.monotonic()
     try:

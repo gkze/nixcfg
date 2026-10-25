@@ -273,7 +273,10 @@
       flake = false;
     };
     t3code = {
-      url = "github:pingdotgg/t3code/main";
+      # Nightly channel. Upstream publishes nightlies as immutable
+      # ``v<base>-nightly.<yyyymmdd>.<run>`` tags off main and uses the tag as the
+      # release version; the ref updater advances this input along that series.
+      url = "github:pingdotgg/t3code/v0.1.3-nightly.20261025.3655";
       flake = false;
     };
     pantsbuild-tap = {

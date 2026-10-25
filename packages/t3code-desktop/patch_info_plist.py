@@ -3,7 +3,10 @@
 import argparse
 import plistlib
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 PlistDict = dict[str, Any]
 
@@ -15,10 +18,19 @@ def patch_info_plist(
     bundle_id: str,
     version: str,
     icon_file: str,
-    url_scheme: str,
+    url_schemes: Sequence[str],
     category: str = "public.app-category.developer-tools",
 ) -> None:
-    """Apply app-specific metadata while preserving Electron's existing keys."""
+    """Apply app-specific metadata while preserving Electron's existing keys.
+
+    ``url_schemes`` carries every scheme the app answers on. Upstream registers
+    both ``t3code`` and ``t3code-dev``, and a missing scheme silently breaks the
+    deep-link and OAuth handoff that the running app performs.
+    """
+    schemes = list(url_schemes)
+    if not schemes:
+        msg = "at least one URL scheme is required"
+        raise ValueError(msg)
     with plist_path.open("rb") as handle:
         payload = plistlib.load(handle)
     if not isinstance(payload, dict):
@@ -34,12 +46,25 @@ def patch_info_plist(
     info["CFBundleIconFile"] = icon_file
     info["LSApplicationCategoryType"] = category
     info["NSHighResolutionCapable"] = True
+    # Keep other URL types Electron registered (its stock plist declares a
+    # Viewer entry for http/https) and replace only the ones that claim our
+    # schemes, so a rebuild cannot leave two owners for `t3code:`.
+    existing_types = info.get("CFBundleURLTypes")
+    entries = existing_types if isinstance(existing_types, list) else []
+    claimed = set(schemes)
+    preserved = [
+        entry
+        for entry in entries
+        if isinstance(entry, dict)
+        if not claimed.intersection(entry.get("CFBundleURLSchemes") or [])
+    ]
     info["CFBundleURLTypes"] = [
         {
             "CFBundleTypeRole": "Editor",
-            "CFBundleURLName": f"{bundle_id} {url_scheme}",
-            "CFBundleURLSchemes": [url_scheme],
-        }
+            "CFBundleURLName": f"{bundle_id} {schemes[0]}",
+            "CFBundleURLSchemes": schemes,
+        },
+        *preserved,
     ]
 
     with plist_path.open("wb") as handle:
@@ -60,7 +85,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--version", required=True, help="Bundle version.")
     parser.add_argument("--icon-file", required=True, help="Bundle icon file name.")
     parser.add_argument(
-        "--url-scheme", required=True, help="Custom URL scheme exposed by the app."
+        "--url-scheme",
+        required=True,
+        action="append",
+        dest="url_schemes",
+        help="Custom URL scheme exposed by the app; repeat for each scheme.",
     )
     parser.add_argument(
         "--category",
@@ -79,7 +108,7 @@ def main() -> None:
         bundle_id=args.bundle_id,
         version=args.version,
         icon_file=args.icon_file,
-        url_scheme=args.url_scheme,
+        url_schemes=args.url_schemes,
         category=args.category,
     )
 

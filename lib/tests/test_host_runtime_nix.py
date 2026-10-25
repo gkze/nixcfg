@@ -195,15 +195,32 @@ def test_zeus_preserves_the_town_workstation_contract() -> None:
     reason="Host files fold profiles into constructor arguments; only evaluation "
     "shows the composed result."
 )
-def test_argus_is_a_town_workstation_with_the_rocinante_substituter() -> None:
-    """Argus differs from zeus only by rocinante substituter and builder trust."""
+def test_argus_is_a_town_workstation_with_the_rocinante_builder() -> None:
+    """Argus adds rocinante as substituter and build machine, and drops Spotlight."""
     assert _host_arguments("argus") == {
         **_host_arguments("zeus"),
         "extraSystemModules": [
             *_GEORGE_BASE_SYSTEM_MODULES,
             "./darwin/george/work.nix",
             "<function>",
-            {"nix": {"settings": {"trusted-users": ["george"]}}},
+            {
+                "nix": {
+                    "buildMachines": [
+                        {
+                            "hostName": "rocinante",
+                            "maxJobs": 8,
+                            "protocol": "ssh-ng",
+                            "speedFactor": 2,
+                            "sshKey": "/Users/george/.ssh/rocinante-nix-substituter",
+                            "sshUser": "george",
+                            "supportedFeatures": ["benchmark", "big-parallel"],
+                            "systems": ["aarch64-darwin"],
+                        }
+                    ],
+                    "settings": {"max-jobs": 0, "trusted-users": ["george"]},
+                }
+            },
+            {"darwinDefaults": {"spotlight": {"indexing": False}}},
         ],
     }
 

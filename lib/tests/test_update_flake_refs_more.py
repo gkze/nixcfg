@@ -35,11 +35,13 @@ from lib.update.flake import (
 )
 from lib.update.paths import REPO_ROOT
 from lib.update.refs import (
+    ChannelTag,
     FlakeInputRef,
     RefTaskOptions,
     RefUpdateResult,
     _build_version_prefixes,
     _extract_version_prefix,
+    _fetch_channel_tag_names,
     _fetch_first_matching_tag,
     _format_git_ref_update,
     _is_version_ref,
@@ -55,6 +57,8 @@ from lib.update.refs import (
     check_flake_ref_update,
     fetch_github_latest_version_ref,
     get_flake_inputs_with_refs,
+    parse_channel_tag,
+    select_channel_tag,
     update_flake_ref,
     update_refs_task,
 )
@@ -1252,3 +1256,221 @@ def test_empty_flake_refresh_does_not_start_nix(
 
     monkeypatch.setattr(flake, "run_command", unexpected)
     asyncio.run(flake.update_flake_inputs((), source="test"))
+
+
+def test_parse_channel_tag_reads_the_release_series() -> None:
+    """Nightly refs encode their channel series instead of a PEP 440 version."""
+    assert parse_channel_tag("v0.1.3-nightly.20261025.3655") == ChannelTag(
+        prefix="v",
+        base=(0, 1, 3),
+        channel="nightly",
+        date=20261025,
+        run=3655,
+    )
+    assert parse_channel_tag("0.1.2-nightly.20261021.3457") == ChannelTag(
+        prefix="",
+        base=(0, 1, 2),
+        channel="nightly",
+        date=20261021,
+        run=3457,
+    )
+    assert parse_channel_tag("v0.1.2-preview.20261022.3511") is not None
+    assert parse_channel_tag("v0.1.2") is None
+    assert parse_channel_tag("main") is None
+
+
+def test_select_channel_tag_stays_on_its_own_series() -> None:
+    """A nightly pin must never resolve to that series' stable release."""
+    current = parse_channel_tag("v0.1.3-nightly.20261023.3592")
+    assert current is not None
+
+    assert (
+        select_channel_tag(
+            [
+                "v0.1.4",
+                "v0.1.3-nightly.20261024.3604",
+                "v0.1.3-nightly.20261025.3655",
+                "v0.1.3-nightly.20261023.3592",
+                "v0.1.2-preview.20261022.3511",
+            ],
+            current,
+        )
+        == "v0.1.3-nightly.20261025.3655"
+    )
+
+
+def test_select_channel_tag_follows_a_base_version_bump() -> None:
+    """A new upstream base version wins over a newer build of the old base."""
+    current = parse_channel_tag("v0.1.3-nightly.20261024.3630")
+    assert current is not None
+
+    assert (
+        select_channel_tag(
+            ["v0.1.3-nightly.20261025.3655", "v0.1.4-nightly.20261026.3700"],
+            current,
+        )
+        == "v0.1.4-nightly.20261026.3700"
+    )
+
+
+def test_check_flake_ref_update_advances_the_nightly_series(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nightly-pinned inputs follow nightly tags, not the newest stable tag."""
+    fetched: list[str] = []
+
+    async def _tags(
+        session: aiohttp.ClientSession,
+        owner: str,
+        repo: str,
+        *,
+        config: object,
+    ) -> list[str]:
+        _ = (session, config)
+        fetched.append(f"{owner}/{repo}")
+        return [
+            "v0.1.4",
+            "v0.1.3-nightly.20261025.3655",
+            "v0.1.3-nightly.20261024.3630",
+        ]
+
+    monkeypatch.setattr("lib.update.refs._fetch_channel_tag_names", _tags)
+
+    async def _run() -> RefUpdateResult:
+        async with aiohttp.ClientSession() as session:
+            return await check_flake_ref_update(
+                FlakeInputRef(
+                    "t3code",
+                    "pingdotgg",
+                    "t3code",
+                    "v0.1.3-nightly.20261024.3630",
+                    "github",
+                ),
+                session,
+            )
+
+    result = _run_async(_run())
+
+    assert result.latest_ref == "v0.1.3-nightly.20261025.3655"
+    assert fetched == ["pingdotgg/t3code"]
+
+
+def test_fetch_channel_tag_names_keeps_only_named_tags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The tag listing feeds the channel selector, so only names survive."""
+    calls: list[str] = []
+
+    async def _paginated(
+        session: aiohttp.ClientSession,
+        path: str,
+        *,
+        config: UpdateConfig,
+        per_page: int,
+        max_pages: int,
+        item_limit: int,
+    ) -> list[object]:
+        _ = (session, config)
+        calls.append(f"{path} {per_page} {max_pages} {item_limit}")
+        return [
+            {"name": "v0.1.3-nightly.20261025.3655"},
+            {"name": 3},
+            {"tag": "no-name"},
+            "not-a-mapping",
+        ]
+
+    monkeypatch.setattr("lib.update.refs.fetch_github_api_paginated", _paginated)
+
+    async def _run() -> list[str]:
+        async with aiohttp.ClientSession() as session:
+            return await _fetch_channel_tag_names(
+                session,
+                "pingdotgg",
+                "t3code",
+                config=resolve_config(),
+            )
+
+    assert _run_async(_run()) == ["v0.1.3-nightly.20261025.3655"]
+    assert calls == ["repos/pingdotgg/t3code/tags 100 5 500"]
+
+
+def test_check_flake_ref_update_advances_a_generic_git_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A git-pinned input takes the new tag without inventing a ref prefix."""
+
+    async def _tags(
+        session: aiohttp.ClientSession,
+        owner: str,
+        repo: str,
+        *,
+        config: object,
+    ) -> list[str]:
+        _ = (session, owner, repo, config)
+        return ["v0.1.3-nightly.20261025.3655"]
+
+    monkeypatch.setattr("lib.update.refs._fetch_channel_tag_names", _tags)
+
+    async def _run() -> RefUpdateResult:
+        async with aiohttp.ClientSession() as session:
+            return await check_flake_ref_update(
+                FlakeInputRef(
+                    "t3code",
+                    "pingdotgg",
+                    "t3code",
+                    "v0.1.3-nightly.20261024.3630",
+                    "git",
+                ),
+                session,
+            )
+
+    assert _run_async(_run()).latest_ref == "v0.1.3-nightly.20261025.3655"
+
+
+def test_check_flake_ref_update_reports_missing_nightly_tags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty or broken nightly listing is an error, never a downgrade."""
+
+    async def _empty(
+        session: aiohttp.ClientSession,
+        owner: str,
+        repo: str,
+        *,
+        config: object,
+    ) -> list[str]:
+        _ = (session, owner, repo, config)
+        return ["v0.1.4"]
+
+    async def _broken(
+        session: aiohttp.ClientSession,
+        owner: str,
+        repo: str,
+        *,
+        config: object,
+    ) -> list[str]:
+        _ = (session, owner, repo, config)
+        msg = "GitHub API lookup failed"
+        raise RuntimeError(msg)
+
+    ref = FlakeInputRef(
+        "t3code",
+        "pingdotgg",
+        "t3code",
+        "v0.1.3-nightly.20261024.3630",
+        "github",
+    )
+
+    async def _check() -> RefUpdateResult:
+        async with aiohttp.ClientSession() as session:
+            return await check_flake_ref_update(ref, session)
+
+    monkeypatch.setattr("lib.update.refs._fetch_channel_tag_names", _empty)
+    no_match = _run_async(_check())
+    assert no_match.latest_ref is None
+    assert "latest nightly release" in (no_match.error or "")
+
+    monkeypatch.setattr("lib.update.refs._fetch_channel_tag_names", _broken)
+    failed = _run_async(_check())
+    assert failed.latest_ref is None
+    assert "GitHub API lookup failed" in (failed.error or "")

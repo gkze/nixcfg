@@ -30,7 +30,7 @@ let
         name: hashType: system:
         "${name}:${hashType}:${system}";
     };
-    pnpm_11.override = value: value;
+    pnpm_12.override = value: value;
     pnpmConfigHook = null;
     sourceHashPackageName = "t3code-workspace";
     stdenv = {

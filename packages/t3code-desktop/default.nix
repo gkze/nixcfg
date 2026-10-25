@@ -10,7 +10,7 @@
   nodejs,
   outputs,
   pkgs,
-  pnpm_11,
+  pnpm_12,
   pnpmConfigHook,
   python3,
   selfSource,
@@ -20,10 +20,14 @@
 }:
 let
   pname = "t3code-desktop";
-  appName = "T3 Code (Alpha)";
-  appBundleName = "${appName}.app";
   appId = "com.t3tools.t3code";
-  appProtocolScheme = "t3";
+  # Upstream registers both schemes (scripts/build-desktop-artifact.ts): deep
+  # links and the OAuth handoff arrive as ``t3code://`` in packaged builds and
+  # ``t3code-dev://`` in development.
+  appProtocolSchemes = [
+    "t3code"
+    "t3code-dev"
+  ];
   # 26.8.1 launched package-manager collectors through a shell on every
   # platform, which can leave electron-builder waiting forever on Darwin.
   # 26.15.x executes them directly off Windows and uses a dedicated safe
@@ -39,7 +43,7 @@ let
       lib
       nodejs
       outputs
-      pnpm_11
+      pnpm_12
       pnpmConfigHook
       stdenv
       ;
@@ -47,6 +51,7 @@ let
     sourceHashPackageName = "t3code-workspace";
   };
   inherit (shared)
+    channel
     src
     version
     workspaceBuild
@@ -55,7 +60,15 @@ let
 
   serverPackageJson = builtins.fromJSON (builtins.readFile "${src}/apps/server/package.json");
   desktopPackageJson = builtins.fromJSON (builtins.readFile "${src}/apps/desktop/package.json");
-  appVersion = serverPackageJson.version;
+  # The desktop bundle version is the channel version, not the workspace
+  # package version: the app reads its own version at runtime to decide which
+  # update channel it belongs to, so a nightly build must report the nightly
+  # version recorded in the release tag.
+  appVersion = version;
+  # Mirrors resolveDesktopProductName in upstream's packaging script.
+  appName =
+    if channel == "nightly" then "T3 Code (Nightly)" else desktopPackageJson.productName or "T3 Code";
+  appBundleName = "${appName}.app";
   electronVersion = desktopPackageJson.dependencies.electron;
   electronBuild = nixcfgElectron.sourceBuildFor electronVersion;
   electronRuntime = electronBuild.runtime;
@@ -72,6 +85,26 @@ let
       '';
   t3codeCommitHash = outputs.lib.flakeLock.t3code.locked.rev or "";
   pythonForRuntimeManifest = python3.withPackages (ps: [ ps.pyyaml ]);
+  # Upstream stages the macOS icon from the channel's artwork with sips and
+  # iconutil (scripts/build-desktop-artifact.ts). Both need Xcode, so the
+  # artwork is scaled with ImageMagick and assembled here instead. Without a
+  # staged ``icon.icns`` the packager silently ships Electron's stock icon.
+  channelIconPng =
+    if channel == "nightly" then
+      src + "/assets/nightly/nightly-macos-1024.png"
+    else
+      src + "/assets/prod/black-macos-1024.png";
+  channelIcon =
+    pkgs.runCommand "t3code-${channel}-icon"
+      {
+        nativeBuildInputs = [
+          pkgs.imagemagick
+          pythonForRuntimeManifest
+        ];
+      }
+      ''
+        ${lib.getExe pythonForRuntimeManifest} ${./make_icns.py} render ${channelIconPng} "$out"
+      '';
   updateRuntimeLocks = pkgs.writeTextFile {
     name = "update-t3code-runtime-locks";
     destination = "/bin/update-t3code-runtime-locks";
@@ -225,16 +258,25 @@ stdenv.mkDerivation {
     if [ -d packages ]; then
       chmod -R u+w packages
     fi
+    # electron-builder reads mac.icon relative to buildResources, and the
+    # channel artwork has to be staged there for the app to ship a real icon.
+    # Copy it after the permissions fixup: the staged resources are read-only.
+    cp ${channelIcon} apps/desktop/resources/icon.icns
 
     patchShebangs node_modules
 
     # ffi-rs calls dlopen directly, outside Electron's virtual ASAR filesystem.
-    patch -p1 < ${./fff-native-asar.patch}
+    # Upstream ships an ESM and a CJS bundle and the packaged app loads the CJS
+    # one, so both entry points get the same rewrite.
+    ${lib.getExe python3} ${./patch_fff_asar.py} \
+      node_modules/@ff-labs/fff-node/dist/index.js \
+      node_modules/@ff-labs/fff-node/dist/index.cjs
 
     ${electronBuild.copyDist}
 
     T3CODE_APP_ID=${lib.escapeShellArg appId} \
     T3CODE_APP_NAME=${lib.escapeShellArg appName} \
+    T3CODE_APP_VERSION=${lib.escapeShellArg appVersion} \
     T3CODE_ELECTRON_DIST="$electronDistDir" \
     T3CODE_ELECTRON_VERSION=${lib.escapeShellArg electronRuntimeVersion} \
       ${lib.getExe nodejs} <<'NODE'
@@ -254,6 +296,13 @@ stdenv.mkDerivation {
       const config = {
         appId: requireEnv("T3CODE_APP_ID"),
         productName: requireEnv("T3CODE_APP_NAME"),
+        // The runtime install is pinned by bun.lock to the workspace package
+        // version, so the channel version is stamped here instead. The desktop
+        // app reads its own version to select an update channel.
+        extraMetadata: {
+          version: requireEnv("T3CODE_APP_VERSION"),
+          buildVersion: requireEnv("T3CODE_APP_VERSION"),
+        },
         directories: { buildResources: "apps/desktop/resources" },
         electronDist: requireEnv("T3CODE_ELECTRON_DIST"),
         electronVersion: requireEnv("T3CODE_ELECTRON_VERSION"),
@@ -385,7 +434,9 @@ stdenv.mkDerivation {
       --bundle-id ${lib.escapeShellArg appId} \
       --version ${lib.escapeShellArg appVersion} \
       --icon-file icon.icns \
-      --url-scheme ${lib.escapeShellArg appProtocolScheme}
+      ${lib.concatMapStringsSep " \\\n      " (
+        scheme: "--url-scheme ${lib.escapeShellArg scheme}"
+      ) appProtocolSchemes}
 
     makeWrapper \
       "$out/Applications/${appBundleName}/Contents/MacOS/${appName}" \
@@ -414,12 +465,36 @@ stdenv.mkDerivation {
       exit 1
     fi
 
+    appResources="$out/Applications/${appBundleName}/Contents/Resources"
+
+    # The packager silently falls back to Electron's stock icon when
+    # buildResources has no icon.icns, which is how this package shipped a
+    # generic icon before.
+    stockIcon="${electronDist}/Electron.app/Contents/Resources/electron.icns"
+    if [ ! -f "$stockIcon" ]; then
+      echo "missing Electron stock icon at $stockIcon" >&2
+      exit 1
+    fi
+    ${lib.getExe pythonForRuntimeManifest} ${./make_icns.py} verify \
+      "$appResources/icon.icns" \
+      --reference "$stockIcon"
+
+    ${lib.getExe python3} ${./verify_bundle_identity.py} \
+      "$out/Applications/${appBundleName}/Contents/Info.plist" \
+      --app-name ${lib.escapeShellArg appName} \
+      --bundle-id ${lib.escapeShellArg appId} \
+      --version ${lib.escapeShellArg appVersion} \
+      --icon-file icon.icns \
+      ${lib.concatMapStringsSep " \\\n      " (
+        scheme: "--url-scheme ${lib.escapeShellArg scheme}"
+      ) appProtocolSchemes}
+
     ${lib.getExe python3} ${../../lib/asar_integrity.py} \
       check-info-plist-hash \
       "$out/Applications/${appBundleName}/Contents/Info.plist" \
-      "$out/Applications/${appBundleName}/Contents/Resources/app.asar"
+      "$appResources/app.asar"
 
-    if [ ! -d "$out/Applications/${appBundleName}/Contents/Resources/app.asar.unpacked" ]; then
+    if [ ! -d "$appResources/app.asar.unpacked" ]; then
       echo "missing native module unpack directory for ${appBundleName} app.asar" >&2
       exit 1
     fi
@@ -433,30 +508,37 @@ stdenv.mkDerivation {
     const fs = require("node:fs");
     const os = require("node:os");
     const path = require("node:path");
-    const { pathToFileURL } = require("node:url");
+    const { createRequire } = require("node:module");
     const root = process.env.out + "/Applications/${appBundleName}/Contents/Resources/app.asar";
     const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "t3code-native-check-"));
-    (async () => {
-      try {
-        const { FileFinder } = await import(pathToFileURL(
-          root + "/node_modules/@ff-labs/fff-node/dist/src/index.js",
-        ).href);
-        const result = FileFinder.create({
-          basePath: temporary,
-          watch: false,
-          frecencyDbPath: path.join(temporary, "frecency"),
-          historyDbPath: path.join(temporary, "history"),
-        });
-        if (!result.ok) throw new Error(result.error);
-        result.value.destroy();
-        console.log("fff native library ok");
-      } finally {
-        fs.rmSync(temporary, { recursive: true, force: true });
-      }
-    })().catch((error) => {
-      console.error(error);
-      process.exitCode = 1;
-    });
+    // Resolve the way the packaged server does: through the app's own
+    // node_modules entry, which pairs the JS loader with its dylib.
+    const appRequire = createRequire(path.join(root, "package.json"));
+    const { FileFinder } = appRequire("@ff-labs/fff-node");
+    // The app selects its update channel from this value, so verify the channel
+    // version actually reached the packaged manifest.
+    const packagedVersion = JSON.parse(
+      fs.readFileSync(path.join(root, "package.json"), "utf8"),
+    ).version;
+    if (packagedVersion !== "${appVersion}") {
+      throw new Error(
+        "packaged app version " + packagedVersion + " is not ${appVersion}",
+      );
+    }
+    console.log("app version ok: " + packagedVersion);
+    try {
+      const result = FileFinder.create({
+        basePath: temporary,
+        watch: false,
+        frecencyDbPath: path.join(temporary, "frecency"),
+        historyDbPath: path.join(temporary, "history"),
+      });
+      if (!result.ok) throw new Error(result.error);
+      result.value.destroy();
+      console.log("fff native library ok");
+    } finally {
+      fs.rmSync(temporary, { recursive: true, force: true });
+    }
     NODE
 
     ELECTRON_RUN_AS_NODE=1 "$out/Applications/${appBundleName}/Contents/MacOS/${appName}" \

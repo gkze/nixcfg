@@ -201,31 +201,6 @@
       "platform": "44.3.0:x86_64-linux"
     },
     {
-      "hash": "sha256-Uvg1TqytHb5D7hI0Ww+p4fx94Tf3dXGrvhLvu8iWqtg=",
-      "hashType": "sha256",
-      "platform": "44.4.2:aarch64-darwin"
-    },
-    {
-      "hash": "sha256-jk23KTA2YNAY7X/ABLKJNi2oP/L/iIC9zNPet4qeoag=",
-      "hashType": "sha256",
-      "platform": "44.4.2:aarch64-linux"
-    },
-    {
-      "hash": "sha256-QPkX+99kArlQhhbgOZe+Hsk28G5cadkUy0G0cIDtEh8=",
-      "hashType": "sha256",
-      "platform": "44.4.2:headers"
-    },
-    {
-      "hash": "sha256-9u+Edycv4z5m7Kfi/CFSZqkl22QTIup/c4QYVNaSVYI=",
-      "hashType": "sha256",
-      "platform": "44.4.2:x86_64-darwin"
-    },
-    {
-      "hash": "sha256-rXEGPnfaKaZH+HKwkEePn6nM/9Z957KuYxVAnPHxNDY=",
-      "hashType": "sha256",
-      "platform": "44.4.2:x86_64-linux"
-    },
-    {
       "hash": "sha256-Ethzpa6YplmOcwQC6SeMXRMul+oaRAWncTvsKj6Dkh8=",
       "hashType": "sha256",
       "platform": "44.9.0:aarch64-darwin"
@@ -249,6 +224,31 @@
       "hash": "sha256-7M7X7LVWl/ksqHCTnFmIVX+qis2MIiwjLK5ZE9MYyLk=",
       "hashType": "sha256",
       "platform": "44.9.0:x86_64-linux"
+    },
+    {
+      "hash": "sha256-SvUTgieNACkd/NomXt3ZurbpjOuwn0aq3IQ4v2Bt4WI=",
+      "hashType": "sha256",
+      "platform": "44.9.3:aarch64-darwin"
+    },
+    {
+      "hash": "sha256-jnDVPZINhNuGkCMoDlofvaguzFj+pEQ3SOWDCaPIAjg=",
+      "hashType": "sha256",
+      "platform": "44.9.3:aarch64-linux"
+    },
+    {
+      "hash": "sha256-I/TkhXZCO1swdHBCVFp4M30cc1k4v+VQUaSab+1YYmA=",
+      "hashType": "sha256",
+      "platform": "44.9.3:headers"
+    },
+    {
+      "hash": "sha256-RRNjtZu30sHJ4MS6qZEGAE6qvnJKohoMa0yHRpKTUxo=",
+      "hashType": "sha256",
+      "platform": "44.9.3:x86_64-darwin"
+    },
+    {
+      "hash": "sha256-bn/S1FDUQlB7hGrOSubivRfhsWU+hqAztSMav8I+bfQ=",
+      "hashType": "sha256",
+      "platform": "44.9.3:x86_64-linux"
     }
   ],
   "urls": {
@@ -292,16 +292,16 @@
     "44.3.0:headers": "https://artifacts.electronjs.org/headers/dist/v44.3.0/node-v44.3.0-headers.tar.gz",
     "44.3.0:x86_64-darwin": "https://github.com/electron/electron/releases/download/v44.3.0/electron-v44.3.0-darwin-x64.zip",
     "44.3.0:x86_64-linux": "https://github.com/electron/electron/releases/download/v44.3.0/electron-v44.3.0-linux-x64.zip",
-    "44.4.2:aarch64-darwin": "https://github.com/electron/electron/releases/download/v44.4.2/electron-v44.4.2-darwin-arm64.zip",
-    "44.4.2:aarch64-linux": "https://github.com/electron/electron/releases/download/v44.4.2/electron-v44.4.2-linux-arm64.zip",
-    "44.4.2:headers": "https://artifacts.electronjs.org/headers/dist/v44.4.2/node-v44.4.2-headers.tar.gz",
-    "44.4.2:x86_64-darwin": "https://github.com/electron/electron/releases/download/v44.4.2/electron-v44.4.2-darwin-x64.zip",
-    "44.4.2:x86_64-linux": "https://github.com/electron/electron/releases/download/v44.4.2/electron-v44.4.2-linux-x64.zip",
     "44.9.0:aarch64-darwin": "https://github.com/electron/electron/releases/download/v44.9.0/electron-v44.9.0-darwin-arm64.zip",
     "44.9.0:aarch64-linux": "https://github.com/electron/electron/releases/download/v44.9.0/electron-v44.9.0-linux-arm64.zip",
     "44.9.0:headers": "https://artifacts.electronjs.org/headers/dist/v44.9.0/node-v44.9.0-headers.tar.gz",
     "44.9.0:x86_64-darwin": "https://github.com/electron/electron/releases/download/v44.9.0/electron-v44.9.0-darwin-x64.zip",
-    "44.9.0:x86_64-linux": "https://github.com/electron/electron/releases/download/v44.9.0/electron-v44.9.0-linux-x64.zip"
+    "44.9.0:x86_64-linux": "https://github.com/electron/electron/releases/download/v44.9.0/electron-v44.9.0-linux-x64.zip",
+    "44.9.3:aarch64-darwin": "https://github.com/electron/electron/releases/download/v44.9.3/electron-v44.9.3-darwin-arm64.zip",
+    "44.9.3:aarch64-linux": "https://github.com/electron/electron/releases/download/v44.9.3/electron-v44.9.3-linux-arm64.zip",
+    "44.9.3:headers": "https://artifacts.electronjs.org/headers/dist/v44.9.3/node-v44.9.3-headers.tar.gz",
+    "44.9.3:x86_64-darwin": "https://github.com/electron/electron/releases/download/v44.9.3/electron-v44.9.3-darwin-x64.zip",
+    "44.9.3:x86_64-linux": "https://github.com/electron/electron/releases/download/v44.9.3/electron-v44.9.3-linux-x64.zip"
   },
   "version": "inventory-v1"
 }

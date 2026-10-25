@@ -406,6 +406,21 @@ def test_codegen_utils_import_optional_reports_missing_extra(
     assert isinstance(exc.value.__cause__, ModuleNotFoundError)
 
 
+def test_codegen_utils_rewrites_constr_type_hints() -> None:
+    """A single-argument ``constr(pattern=...)`` becomes an Annotated type."""
+    rewritten = codegen_utils.rewrite_constr_type_hints(
+        "from pydantic import constr\n\nname: constr(pattern='a')\n"
+    )
+
+    compact = rewritten.replace(" ", "").replace("\n", "")
+    assert "Annotated[str,StringConstraints(pattern='a')]" in compact
+    assert "fromtypingimportAnnotated" in compact.replace("\n", "")
+    assert "constr(" not in rewritten
+
+    # Code without a constr constraint must round-trip untouched.
+    assert codegen_utils.rewrite_constr_type_hints("name: str\n") == "name: str\n"
+
+
 def test_codegen_utils_defensive_transform_branches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -443,6 +458,10 @@ def test_codegen_utils_defensive_transform_branches(
         codegen_utils.normalize_pydantic_imports(
             "from pydantic import StringConstraints, constr\n"
         )
+        == "from pydantic import StringConstraints"
+    )
+    assert (
+        codegen_utils.normalize_pydantic_imports("from pydantic import constr\n")
         == "from pydantic import StringConstraints"
     )
 
@@ -944,7 +963,7 @@ def test_mac_apps_helper_additional_paths(  # noqa: PLR0915
         "writable": False,
     })
     assert not stale_target.exists()
-    assert (state_dir2 / "lane.txt").read_text(encoding="utf-8") == "Managed.app\n"
+    assert _manifest_names(state_dir2 / "lane.txt") == "Managed.app\n"
 
     system_payload = tmp_path / "system.json"
     system_payload.write_text(
@@ -1091,3 +1110,11 @@ def test_mac_apps_helper_module_main_guard_executes(
     finally:
         if imported is not None:
             sys.modules["lib.mac_apps_helper"] = imported
+
+
+def _manifest_names(path: Path) -> str:
+    """Return the ownership manifest as name-only lines for assertions."""
+    return "".join(
+        f"{line.split(chr(9), 1)[0]}\n"
+        for line in path.read_text(encoding="utf-8").splitlines()
+    )

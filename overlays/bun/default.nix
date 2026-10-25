@@ -6,7 +6,7 @@
 }:
 let
   inherit (prev) lib;
-  version = selfSource.version;
+  inherit (selfSource) version;
   # Official release zips. The nixpkgs Bun derivation unpacks these layouts;
   # its sourceRoot is only special-cased for aarch64-darwin, so the pin stays
   # on the systems that derivation already knows how to install.

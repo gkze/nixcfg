@@ -123,6 +123,37 @@ Use the shared Darwin app pattern for a macOS GUI app:
 Do not add a bespoke activation hack for `/Applications` unless the shared
 pattern genuinely cannot express the need.
 
+### Application activation
+
+`lib/mac-apps.nix` builds the activation body. `concurrentApplicationsScript`
+takes every declared scope and runs them as background jobs in the one
+nix-darwin activation shell, then waits for all of them before activation
+continues. Scopes write disjoint target directories under separate target locks,
+so `/Applications` and `~/Applications` overlap safely, and a failing scope still
+fails activation.
+
+Inside the helper, `_stage_managed_apps` copies changed bundles through a bounded
+pool, `_changed_application_entries` compares bundles concurrently, and the
+post-commit LaunchServices and Spotlight refresh covers only the bundles that
+were actually promoted. Promotion renames stay sequential on purpose: the
+durable journal, not the copy, defines the crash-recovery order.
+
+The user scope runs as the primary user, so `~/Applications` keeps user
+ownership. `nixcfg.macApps.activationScope` decides who runs it:
+
+- `"home-manager"` (default) keeps the dedicated Home Manager activation step.
+- `"nix-darwin"` means system activation already ran the same entries
+  concurrently, so the Home Manager step is skipped.
+
+A host that enables the handoff declares it next to its apps:
+
+```nix
+macApps = {
+  applications = routing;
+  activationScope = "nix-darwin";
+};
+```
+
 ### Command-line executables bundled inside an application
 
 Declare `cli` on the routing entry to put a bundled executable on PATH. The path
@@ -174,6 +205,27 @@ bespoke activation that created such links, remove them first, as
 This mechanism covers executables that ship *inside* the bundle. A standalone
 store binary, such as GitButler's `but`, stays a plain `home.file` link to
 `${pkgs.gitbutler}/bin/but`.
+
+### Release channels
+
+Some upstreams publish a nightly channel beside their stable one, using tags a
+version parser cannot read, for example T3 Code's
+`v0.1.3-nightly.20261025.3655`. Pin such an input to the channel tag, not the
+branch: the tag is immutable, and it carries the release version the app uses to
+select its update channel. `lib/update/refs.py` advances these refs within their
+own series, so a nightly pin never resolves back to the newest stable release.
+
+The channel then has to reach the packaged bundle, or the app identifies itself
+as stable:
+
+- package name, icon, and bundle identifier come from the channel, mirroring the
+  upstream packaging script
+- the version reaches `Info.plist`, the app manifest, and any CLI shim
+- URL schemes stay the ones the shipped app actually answers on
+
+`packages/t3code-desktop` demonstrates the whole path, including staged channel
+artwork and `verify_bundle_identity.py`, which fails the build when the bundle
+metadata drifts.
 
 ## Related
 

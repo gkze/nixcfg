@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Literal, cast
 from lib.diagnostics import redact_urls
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Sequence
     from threading import Event
 
     from lib.update.config import UpdateConfig
@@ -116,7 +116,7 @@ def active_runtime() -> UpdateRuntime | None:
 @asynccontextmanager
 async def runtime_scope(
     config: UpdateConfig, *, existing: UpdateRuntime | None = None
-) -> AsyncIterator[UpdateRuntime]:
+) -> AsyncGenerator[UpdateRuntime]:
     """Share nested scopes and reap memoized work before disposing run state."""
     if (shared := existing or active_runtime()) is not None:
         token = _ACTIVE_RUNTIME.set(shared)
@@ -175,7 +175,7 @@ async def await_cleanup[T](future: asyncio.Future[T]) -> T:
 
 
 @contextmanager
-def measure(source: str, operation: str) -> Iterator[OperationTiming]:
+def measure(source: str, operation: str) -> Generator[OperationTiming]:
     """Measure active time and failures, including synchronous validation work."""
     runtime = active_runtime()
     timing = OperationTiming() if runtime is None else runtime.timing(source, operation)
@@ -196,7 +196,7 @@ def measure(source: str, operation: str) -> Iterator[OperationTiming]:
 @asynccontextmanager
 async def resource_slot(
     kind: Resource, *, source: str, config: UpdateConfig
-) -> AsyncIterator[OperationTiming]:
+) -> AsyncGenerator[OperationTiming]:
     """Separate admission waiting from active resource use."""
     async with runtime_scope(config) as runtime:
         timing = runtime.timing(source, kind)
@@ -222,7 +222,7 @@ def thread_resource_slot(
     source: str,
     config: UpdateConfig,
     cancel_event: Event | None = None,
-) -> Iterator[OperationTiming]:
+) -> Generator[OperationTiming]:
     """Admit a joined worker's command through its owning event loop's budget.
 
     The caller already owns any required workspace access until the worker joins.
@@ -313,7 +313,7 @@ def _wait_for_thread_resource(
 
 
 @asynccontextmanager
-async def workspace_access(*, write: bool = False) -> AsyncIterator[None]:
+async def workspace_access(*, write: bool = False) -> AsyncGenerator[None]:
     """Keep temporary artifact mutations invisible to unrelated evaluations.
 
     Reentrancy belongs to the current task, so a spawned shared producer cannot

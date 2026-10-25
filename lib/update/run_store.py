@@ -14,7 +14,7 @@ from dbos import DBOSClient
 from pydantic import TypeAdapter
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Generator, Mapping
     from pathlib import Path
 
 type Snapshot = dict[str, tuple[bytes, int, bool] | None]
@@ -50,7 +50,7 @@ class RunStore:
         self.path.chmod(0o600)
 
     @contextmanager
-    def connect(self) -> Iterator[sqlite3.Connection]:
+    def connect(self) -> Generator[sqlite3.Connection]:
         """Commit complete writes and close promptly, including on failure."""
         connection = sqlite3.connect(
             f"{self.path.as_uri()}?mode=ro" if self.readonly else str(self.path),

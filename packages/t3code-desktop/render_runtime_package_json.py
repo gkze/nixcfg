@@ -266,6 +266,18 @@ def resolve_catalog_dependencies(
     return resolved
 
 
+def _runtime_entry_point(desktop_package: JsonObject) -> str:
+    """Return the packaged Electron entry point inside the build root.
+
+    Upstream moves this between ``main.cjs`` and ``boot.cjs`` across releases, so
+    the value comes from ``apps/desktop/package.json`` instead of being assumed.
+    """
+    main = desktop_package.get("main")
+    if not isinstance(main, str) or not main:
+        main = "dist-electron/main.cjs"
+    return f"apps/desktop/{main}"
+
+
 def build_runtime_manifest(
     source_root: Path,
     *,
@@ -326,18 +338,18 @@ def build_runtime_manifest(
         label="workspace overrides",
     )
 
-    version = _require_string(
+    resolved_version = _require_string(
         server_package, "version", context="apps/server/package.json"
     )
 
     payload: JsonObject = {
         "name": "t3code",
-        "version": version,
-        "buildVersion": version,
+        "version": resolved_version,
+        "buildVersion": resolved_version,
         "private": True,
         "description": "T3 Code desktop runtime",
         "author": "T3 Tools",
-        "main": "apps/desktop/dist-electron/main.cjs",
+        "main": _runtime_entry_point(desktop_package),
         "dependencies": runtime_dependencies,
         "overrides": overrides,
     }

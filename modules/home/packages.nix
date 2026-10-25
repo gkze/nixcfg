@@ -43,12 +43,13 @@ let
     }
     {
       name = "nixTooling";
-      description = "Nix development tools (cachix, nil, nixfmt, etc.)";
+      description = "Nix development tools (cachix, nil, nixd, nixfmt, etc.)";
       packages = [
         cachix
         nil
         nix-output-monitor
         nix-tree
+        nixd
         nixfmt
       ];
     }

@@ -34,7 +34,7 @@ from lib.update.updaters import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
     import aiohttp
 
@@ -132,7 +132,7 @@ class GooseDesktopUpdater(HashEntryUpdater):
     def _cargo_nix_path(
         cls,
         context: UpdateContext,
-    ) -> Iterator[Path]:
+    ) -> Generator[Path]:
         resolved_context = context
         generated = resolved_context.generated_artifacts.get(cls._GOOSE_CARGO_NIX_PATH)
         if generated is None:
@@ -149,7 +149,7 @@ class GooseDesktopUpdater(HashEntryUpdater):
     def _crate_sources_path(
         cls,
         context: UpdateContext,
-    ) -> Iterator[Path]:
+    ) -> Generator[Path]:
         resolved_context = context
         generated = resolved_context.generated_artifacts.get(
             cls._GOOSE_CRATE_SOURCES_PATH

@@ -22,7 +22,7 @@ from types import FunctionType
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
 _ARCHIVE = b"complete archive contents\n" * 100
 _UTILITY = Path(sys.argv.pop())
@@ -35,7 +35,7 @@ class _ServerState:
 
 
 @contextmanager
-def _serve(mode: str) -> Iterator[tuple[str, _ServerState]]:
+def _serve(mode: str) -> Generator[tuple[str, _ServerState]]:
     state = _ServerState(mode)
 
     class Handler(BaseHTTPRequestHandler):

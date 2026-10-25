@@ -42,6 +42,19 @@ let
     mkOption = value: value;
     nameValuePair = name: value: { inherit name value; };
     optionalString = cond: value: if cond then value else "";
+    removeSuffix =
+      suffix: text:
+      let
+        suffixLength = builtins.stringLength suffix;
+        textLength = builtins.stringLength text;
+      in
+      if
+        suffixLength <= textLength
+        && builtins.substring (textLength - suffixLength) suffixLength text == suffix
+      then
+        builtins.substring 0 (textLength - suffixLength) text
+      else
+        text;
     types = rec {
       bool = "bool";
       package = "package";

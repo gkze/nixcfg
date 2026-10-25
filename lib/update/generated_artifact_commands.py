@@ -24,7 +24,7 @@ from lib.update.process import RunCommandOptions
 from lib.update.process import run_command as _run_command
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable, Mapping
 
     from lib.update.config import UpdateConfig
 
@@ -60,7 +60,7 @@ async def _artifact_locks(
     artifact_paths: Iterable[str | Path],
     *,
     repo_root: Path,
-) -> AsyncIterator[None]:
+) -> AsyncGenerator[None]:
     loop = asyncio.get_running_loop()
     resolved_paths = sorted({
         _artifact_path(path, repo_root=repo_root) for path in artifact_paths

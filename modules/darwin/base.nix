@@ -26,10 +26,59 @@ let
   ] null config;
   macApps = import ../../lib/mac-apps.nix { inherit lib pkgs; };
   systemMacAppEntries = macApps.applicationsForScope "system" config.nixcfg.macApps.resolved;
-  homeMacAppEntries = macApps.applicationsForScope "system" (
-    attrByPath [ "home-manager" "users" primaryUser "nixcfg" "macApps" "resolved" ] { } config
-  );
+  homeManagerResolved = attrByPath [
+    "home-manager"
+    "users"
+    primaryUser
+    "nixcfg"
+    "macApps"
+    "resolved"
+  ] { } config;
+  homeMacAppEntries = macApps.applicationsForScope "system" homeManagerResolved;
+  userMacAppEntries = macApps.applicationsForScope "user" homeManagerResolved;
+  # Home Manager declares which activation owns the user scope. Reading that
+  # option instead of writing it keeps this module free of an evaluation cycle
+  # through the embedded home-manager configuration.
+  nixDarwinOwnsUserScope =
+    attrByPath [
+      "home-manager"
+      "users"
+      primaryUser
+      "nixcfg"
+      "macApps"
+      "activationScope"
+    ] "home-manager" config == "nix-darwin";
   activeMacAppEntries = systemMacAppEntries ++ homeMacAppEntries;
+  primaryUserHome = "/Users/${primaryUser}";
+  # System and user application scopes are declared with different option trees
+  # but managed by one activation script, so both run concurrently under their
+  # own target directory lock.
+  systemMacAppScope = {
+    entries = activeMacAppEntries;
+    stateDirectory = "/Applications/.nixcfg-mac-apps";
+    stateName = "darwin-system";
+    targetDirectory = "/Applications";
+    writable = false;
+  };
+  userMacAppScope = {
+    entries = userMacAppEntries;
+    stateDirectory = "${primaryUserHome}/Applications/.nixcfg-mac-apps";
+    stateName = "home-manager-user";
+    targetDirectory = "${primaryUserHome}/Applications";
+    user = {
+      inherit (cfg.user) uid;
+      name = primaryUser;
+    };
+    writable = true;
+  };
+  # The system scope runs unconditionally: emptying the declaration must still
+  # remove the bundles the previous activation owned, which only the helper's
+  # manifest can identify. The user scope joins only when Home Manager hands it
+  # over, mirroring that module's own empty-set rule.
+  macAppScopes = [
+    systemMacAppScope
+  ]
+  ++ lib.optional (nixDarwinOwnsUserScope && userMacAppScope.entries != [ ]) userMacAppScope;
 in
 {
   options.nixcfg.macApps = {
@@ -91,6 +140,15 @@ in
         default = 1000000;
         description = "Maximum processes (launchd limit).";
       };
+    };
+    spotlight.indexing = mkOption {
+      type = types.bool;
+      default = true;
+      description = ''
+        Leave Spotlight indexing under macOS control. When false, activation
+        turns indexing off on every volume. Setting it back to true does not
+        turn indexing back on; run `sudo mdutil -a -i on` to do that.
+      '';
     };
     zsh.deferCompletionInitToHomeManager = mkOption {
       type = types.bool;
@@ -173,14 +231,16 @@ in
       stateVersion = 6;
 
       activationScripts.applications.text = lib.mkAfter (
-        macApps.applicationsScript {
-          entries = activeMacAppEntries;
-          stateDirectory = "/Applications/.nixcfg-mac-apps";
-          stateName = "darwin-system";
-          targetDirectory = "/Applications";
-          writable = false;
-        }
+        macApps.concurrentApplicationsScript macAppScopes
       );
+
+      # Runs on every activation because macOS updates can turn indexing back
+      # on. A failure only warns, so Spotlight state never blocks a switch.
+      activationScripts.postActivation.text = lib.mkIf (!cfg.spotlight.indexing) ''
+        echo "disabling Spotlight indexing..." >&2
+        /usr/bin/mdutil -a -i off >/dev/null \
+          || echo "warning: mdutil could not disable Spotlight indexing" >&2
+      '';
     };
 
     environment.shells = [ pkgs.zsh ];

@@ -5,7 +5,7 @@
   lib,
   nodejs,
   outputs,
-  pnpm_11,
+  pnpm_12,
   pnpmConfigHook,
   stdenv,
   t3codeWorkspaceSource ? null,
@@ -19,7 +19,7 @@
     lib
     nodejs
     outputs
-    pnpm_11
+    pnpm_12
     pnpmConfigHook
     stdenv
     ;

@@ -161,7 +161,7 @@ def test_public_enum_values_follow_the_wire_schema(
     ("annotation", "schema_name"), [(NixHash, "hash-v1"), (StorePath, "store-path-v1")]
 )
 def test_scalar_validation_constraints_follow_the_wire_schema(
-    annotation: object, schema_name: str
+    annotation: type[str], schema_name: str
 ) -> None:
     wire = _schema(schema_name)
     runtime = TypeAdapter(annotation).json_schema()

@@ -107,6 +107,7 @@ in
       default = [
         ".DS_Store"
         ".direnv"
+        ".metadata_never_index"
       ];
       description = "Global git ignore entries.";
     };

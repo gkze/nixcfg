@@ -3917,6 +3917,17 @@ def test_entrypoint_bounds_reported_stderr_and_preserves_exit_status(
     assert jobs.entrypoint("bootstrap", log) == 3
     assert log.getvalue() == "::error::Command failed with exit status 3: sudo true\n"
 
+    # A short stderr has nothing to omit, so it is reported in full.
+    short_stderr = b"only line\n"
+
+    def short_failure(*args: str, **_kwargs: object):
+        raise subprocess.CalledProcessError(5, args, stderr=short_stderr)
+
+    monkeypatch.setattr(jobs, "_run", short_failure)
+    log = StringIO()
+    assert jobs.entrypoint("bootstrap", log) == 5
+    assert log.getvalue().splitlines()[1:] == ["only line"]
+
     monkeypatch.setattr(jobs, "main", lambda stage: len(stage))
     assert jobs.entrypoint("quality") == len("quality")
 

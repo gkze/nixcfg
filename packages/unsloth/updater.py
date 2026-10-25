@@ -4,7 +4,7 @@ import ast
 import asyncio
 import base64
 import binascii
-import datetime
+import datetime as dt
 import gzip
 import hashlib
 import io
@@ -288,12 +288,12 @@ def _require_sha512_sri(
     return value
 
 
-def _calver_date(version: str, *, label: str) -> datetime.date:
+def _calver_date(version: str, *, label: str) -> dt.date:
     if _PYPI_VERSION_PATTERN.fullmatch(version) is None:
         msg = f"Unsloth release metadata has invalid {label} version {version!r}"
         raise RuntimeError(msg)
     try:
-        return datetime.date(*(int(part) for part in version.split(".")))
+        return dt.date(*(int(part) for part in version.split(".")))
     except ValueError as exc:
         msg = f"Unsloth release metadata has invalid {label} version {version!r}"
         raise RuntimeError(msg) from exc
@@ -728,7 +728,7 @@ def _canonical_pypi_upload_time(value: str) -> str:
         msg = f"Unsloth backend sdist has invalid upload time {value!r}"
         raise RuntimeError(msg)
     try:
-        datetime.datetime.fromisoformat(value.removesuffix("Z") + "+00:00")
+        dt.datetime.fromisoformat(value.removesuffix("Z") + "+00:00")
     except ValueError as exc:
         msg = f"Unsloth backend sdist has invalid upload time {value!r}"
         raise RuntimeError(msg) from exc

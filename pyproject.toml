@@ -245,6 +245,12 @@ missing-override-decorator = "ignore"
 missing-type-argument = "ignore"
 unsound-assignment = "ignore"
 unsound-return-statement = "ignore"
+# These override and truthiness strictness families arrived with Ty 0.0.91. They
+# stay opted out under the same policy above until the affected class hierarchies
+# and optionality checks are migrated deliberately.
+invalid-attribute-override = "ignore"
+invalid-mutable-override = "ignore"
+truthiness-test-of-none-union = "ignore"
 
 [[tool.ty.overrides]]
 # Dynamic mocks and deliberately invalid fixtures exercise runtime failure

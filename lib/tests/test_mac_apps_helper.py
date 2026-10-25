@@ -45,6 +45,213 @@ def _marker(app: Path) -> str:
     return (app / "marker.txt").read_text(encoding="utf-8")
 
 
+def _manifest_names(state_file: Path) -> str:
+    """Return the ownership manifest as name-only lines for assertions."""
+    return "".join(
+        f"{line.split(chr(9), 1)[0]}\n"
+        for line in state_file.read_text(encoding="utf-8").splitlines()
+    )
+
+
+def _manifest_records(state_file: Path) -> list[tuple[str, str]]:
+    """Return the raw ownership records exactly as the manifest stores them."""
+    records: list[tuple[str, str]] = []
+    for line in state_file.read_text(encoding="utf-8").splitlines():
+        bundle_name, _, source_path = line.partition(chr(9))
+        records.append((bundle_name, source_path))
+    return records
+
+
+def test_system_applications_skips_bundle_whose_recorded_source_is_current(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A matching recorded store path must leave the live bundle untouched."""
+    source = _app(tmp_path / "source", "Good.app", "current")
+    payload, target_directory, state_file = _payload(
+        tmp_path,
+        entries=[_entry(source)],
+        previous_manifest=[],
+    )
+    live = _app(target_directory, "Good.app", "current")
+    state_file.write_text(f"Good.app\t{source}\n", encoding="utf-8")
+    inode_before = live.stat().st_ino
+
+    def _unexpected_copy(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("an unchanged bundle must never be staged")
+
+    monkeypatch.setattr(helper, "_rsync_copy", _unexpected_copy)
+
+    helper._system_applications(payload)
+
+    assert live.stat().st_ino == inode_before
+    assert _transaction_directories(target_directory) == []
+    assert _manifest_records(state_file) == [("Good.app", str(source))]
+
+
+def test_system_applications_replaces_bundle_whose_recorded_source_moved(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A different recorded store path means the bundle changed and is replaced."""
+    previous_source = _app(tmp_path / "previous", "Good.app", "stale")
+    source = _app(tmp_path / "source", "Good.app", "fresh")
+    payload, target_directory, state_file = _payload(
+        tmp_path,
+        entries=[_entry(source)],
+        previous_manifest=[],
+    )
+    live = _app(target_directory, "Good.app", "stale")
+    state_file.write_text(f"Good.app\t{previous_source}\n", encoding="utf-8")
+
+    monkeypatch.setattr(helper, "_rsync_copy", _copy_rsync)
+
+    helper._system_applications(payload)
+
+    assert _marker(live) == "fresh"
+    assert _manifest_records(state_file) == [("Good.app", str(source))]
+
+
+@pytest.mark.parametrize(
+    ("trees_match", "expected_marker"),
+    [(True, "stale"), (False, "fresh")],
+)
+def test_system_applications_compares_content_for_legacy_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    trees_match: bool,
+    expected_marker: str,
+) -> None:
+    """A manifest without sources falls back to one content comparison."""
+    source = _app(tmp_path / "source", "Good.app", "fresh")
+    payload, target_directory, _state_file = _payload(
+        tmp_path,
+        entries=[_entry(source)],
+        previous_manifest=["Good.app"],
+    )
+    live = _app(target_directory, "Good.app", "stale")
+
+    monkeypatch.setattr(
+        helper,
+        "_bundle_trees_match",
+        lambda *_args, **_kwargs: trees_match,
+    )
+    monkeypatch.setattr(helper, "_rsync_copy", _copy_rsync)
+
+    helper._system_applications(payload)
+
+    assert _marker(live) == expected_marker
+
+
+def test_system_applications_skips_symlink_bundle_that_already_points_at_source(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A symlink bundle is current only while it still points at the source."""
+    source = _app(tmp_path / "source", "Link.app", "linked")
+    payload, target_directory, state_file = _payload(
+        tmp_path,
+        entries=[_entry(source, mode="symlink")],
+        previous_manifest=[],
+    )
+    target_directory.mkdir(parents=True, exist_ok=True)
+    live = target_directory / "Link.app"
+    live.symlink_to(source)
+
+    def _unexpected_copy(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("a current symlink bundle must never be staged")
+
+    monkeypatch.setattr(helper, "_rsync_copy", _unexpected_copy)
+
+    helper._system_applications(payload)
+
+    assert live.is_symlink()
+    assert _transaction_directories(target_directory) == []
+    assert _manifest_records(state_file) == [("Link.app", str(source))]
+
+
+def test_bundle_trees_match_reports_identical_for_a_quiet_dry_run(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Rsync lists nothing when the installed bundle already matches."""
+    source = tmp_path / "source"
+    live = tmp_path / "live"
+    source.mkdir()
+    live.mkdir()
+    monkeypatch.setattr(
+        helper.subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="",
+            stderr="",
+        ),
+    )
+
+    assert (
+        helper._bundle_trees_match(
+            source,
+            live,
+            rsync_path="/rsync",
+            writable=False,
+        )
+        is True
+    )
+
+
+def test_bundle_trees_match_reports_change_for_an_itemised_dry_run(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Any itemised transfer or a failing rsync means the bundle changed."""
+    source = tmp_path / "source"
+    live = tmp_path / "live"
+    source.mkdir()
+    live.mkdir()
+    monkeypatch.setattr(
+        helper.subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=">f+++++++++ marker.txt\n",
+            stderr="",
+        ),
+    )
+
+    assert (
+        helper._bundle_trees_match(
+            source,
+            live,
+            rsync_path="/rsync",
+            writable=False,
+        )
+        is False
+    )
+
+
+def test_bundle_trees_match_reports_change_when_rsync_cannot_run(
+    tmp_path: Path,
+) -> None:
+    """An unusable rsync path must fail closed by asking for a fresh copy."""
+    source = tmp_path / "source"
+    live = tmp_path / "live"
+    source.mkdir()
+    live.mkdir()
+
+    assert (
+        helper._bundle_trees_match(
+            source,
+            live,
+            rsync_path=str(tmp_path / "missing-rsync"),
+            writable=False,
+        )
+        is False
+    )
+
+
 def _entry(source: Path, *, mode: str = "copy") -> dict[str, object]:
     return {
         "bundleName": source.name,
@@ -272,7 +479,7 @@ def test_successful_activation_promotes_current_apps_before_manifest(
     assert link.resolve() == link_source.resolve()
     assert _marker(target_directory / "New.app") == "new-app"
     assert not stale.exists()
-    assert state_file.read_text(encoding="utf-8") == ("First.app\nLink.app\nNew.app\n")
+    assert _manifest_names(state_file) == ("First.app\nLink.app\nNew.app\n")
     assert _transaction_directories(target_directory) == []
 
 
@@ -335,7 +542,7 @@ def test_rsync_failure_preserves_live_apps_stale_apps_and_manifest(
     assert _marker(good) == "old-good"
     assert _marker(bad) == "old-bad"
     assert _marker(stale) == "old-stale"
-    assert state_file.read_text(encoding="utf-8") == ("Good.app\nBad.app\nStale.app\n")
+    assert _manifest_names(state_file) == ("Good.app\nBad.app\nStale.app\n")
     transactions = _transaction_directories(target_directory)
     if cleanup_fails:
         assert len(transactions) == 1
@@ -388,7 +595,7 @@ def test_symlink_failure_preserves_previous_link_current_apps_and_stale_apps(
     assert link.is_symlink()
     assert link.resolve() == old_link_source.resolve()
     assert _marker(stale) == "old-stale"
-    assert state_file.read_text(encoding="utf-8") == ("Good.app\nLink.app\nStale.app\n")
+    assert _manifest_names(state_file) == ("Good.app\nLink.app\nStale.app\n")
     assert _transaction_directories(target_directory) == []
 
 
@@ -428,7 +635,7 @@ def test_promotion_failure_rolls_back_every_earlier_promotion(
     assert _marker(good) == "old-good"
     assert _marker(bad) == "old-bad"
     assert _marker(stale) == "old-stale"
-    assert state_file.read_text(encoding="utf-8") == ("Good.app\nBad.app\nStale.app\n")
+    assert _manifest_names(state_file) == ("Good.app\nBad.app\nStale.app\n")
     assert _transaction_directories(target_directory) == []
 
 
@@ -475,7 +682,7 @@ def test_incomplete_rollback_preserves_primary_error_and_recovery_artifacts(
     assert not good.exists()
     assert _marker(bad) == "old-bad"
     assert _marker(stale) == "old-stale"
-    assert state_file.read_text(encoding="utf-8") == ("Good.app\nBad.app\nStale.app\n")
+    assert _manifest_names(state_file) == ("Good.app\nBad.app\nStale.app\n")
     (transaction,) = _transaction_directories(target_directory)
     assert _marker(transaction / "backups" / "0" / "Good.app") == "old-good"
     assert _marker(transaction / "staged" / "0" / "Good.app") == "new-good"
@@ -514,7 +721,7 @@ def test_stale_deletion_failure_restores_current_apps_and_keeps_stale_bundle(
 
     assert _marker(good) == "old-good"
     assert _marker(stale) == "old-stale"
-    assert state_file.read_text(encoding="utf-8") == "Good.app\nStale.app\n"
+    assert _manifest_names(state_file) == "Good.app\nStale.app\n"
     assert _transaction_directories(target_directory) == []
 
 
@@ -547,7 +754,7 @@ def test_manifest_publication_failure_restores_current_and_stale_apps(
     assert _marker(stale) == "old-stale"
     assert stat.S_IMODE(good.stat().st_mode) == 0o555
     assert stat.S_IMODE(stale.stat().st_mode) == 0o555
-    assert state_file.read_text(encoding="utf-8") == "Good.app\nStale.app\n"
+    assert _manifest_names(state_file) == "Good.app\nStale.app\n"
     assert _transaction_directories(target_directory) == []
 
 
@@ -578,7 +785,7 @@ def test_post_commit_cleanup_failure_is_explicit_and_retains_backups(
 
     assert _marker(good) == "new-good"
     assert not stale.exists()
-    assert state_file.read_text(encoding="utf-8") == "Good.app\n"
+    assert _manifest_names(state_file) == "Good.app\n"
     (transaction,) = _transaction_directories(target_directory)
     assert _marker(transaction / "backups" / "0" / "Good.app") == "old-good"
     assert _marker(transaction / "backups" / "1" / "Stale.app") == "old-stale"
@@ -672,7 +879,7 @@ def test_incomplete_rollback_reports_manifest_restoration_failure(
 
     assert _marker(good) == "old-good"
     assert _marker(stale) == "old-stale"
-    assert state_file.read_text(encoding="utf-8") == "Good.app\n"
+    assert _manifest_names(state_file) == "Good.app\n"
     (transaction,) = _transaction_directories(target_directory)
     output = capsys.readouterr().err
     assert "KeyboardInterrupt" in output
@@ -754,8 +961,8 @@ def test_target_lock_serializes_two_managers_across_processes(
 
     assert _marker(target_directory / "First.app") == "new-first"
     assert _marker(target_directory / "Second.app") == "new-second"
-    assert first_state.read_text(encoding="utf-8") == "First.app\n"
-    assert second_state.read_text(encoding="utf-8") == "Second.app\n"
+    assert _manifest_names(first_state) == "First.app\n"
+    assert _manifest_names(second_state) == "Second.app\n"
 
 
 def _crash_in_child(payload: dict[str, object], crash_point: str) -> None:
@@ -817,7 +1024,7 @@ def _assert_crash_state(
     if crash_point == "stale-backup-journal":
         assert stale_record["originalMoved"] is True
     if crash_point == "manifest-publication":
-        assert state_file.read_text(encoding="utf-8") == "Good.app\n"
+        assert _manifest_names(state_file) == "Good.app\n"
 
 
 @pytest.mark.parametrize(
@@ -879,7 +1086,10 @@ def test_next_activation_recovers_each_crash_boundary_under_lock(
     ) -> None:
         recovered["good"] = _marker(good) if good.exists() else None
         recovered["stale"] = _marker(stale) if stale.exists() else None
-        recovered["manifest"] = state_file.read_bytes()
+        recovered["manifest"] = [
+            line.split(chr(9), 1)[0]
+            for line in state_file.read_text(encoding="utf-8").splitlines()
+        ]
         real_preflight(entries, observed_target)
 
     monkeypatch.setattr(helper, "_preflight_managed_apps", _observe_recovered_state)
@@ -889,11 +1099,11 @@ def test_next_activation_recovers_each_crash_boundary_under_lock(
     assert recovered == {
         "good": "new-good" if committed else "old-good",
         "stale": None if committed else "old-stale",
-        "manifest": b"Good.app\n" if committed else b"Good.app\nStale.app\n",
+        "manifest": ["Good.app"] if committed else ["Good.app", "Stale.app"],
     }
     assert _marker(good) == "new-good"
     assert not stale.exists()
-    assert state_file.read_text(encoding="utf-8") == "Good.app\n"
+    assert _manifest_names(state_file) == "Good.app\n"
     assert not transaction.exists()
     assert (legacy / "keep.txt").read_text(encoding="utf-8") == "unknown data"
     assert _transaction_directories(target_directory) == [legacy]
@@ -925,7 +1135,7 @@ def test_unrecoverable_crash_state_stops_with_explicit_instructions(
     assert "rerun activation" in message
     assert transaction.is_dir()
     assert not good.exists()
-    assert state_file.read_text(encoding="utf-8") == "Good.app\nStale.app\n"
+    assert _manifest_names(state_file) == "Good.app\nStale.app\n"
 
 
 def _active_test_transaction(
@@ -1257,7 +1467,7 @@ def test_commit_record_failure_never_rolls_back_published_apps(
     with pytest.raises(OSError, match="injected commit-record failure"):
         helper._system_applications(payload)
     assert _marker(good) == "new-good"
-    assert state_file.read_text(encoding="utf-8") == "Good.app\n"
+    assert _manifest_names(state_file) == "Good.app\n"
     assert len(_transaction_directories(target_directory)) == 1
 
 
@@ -1479,3 +1689,125 @@ def test_recovery_preserves_nondirectory_legacy_candidates(tmp_path: Path) -> No
 
     assert plain_file.read_text(encoding="utf-8") == "unknown"
     assert link.is_symlink()
+
+
+def test_register_application_bundles_covers_every_promoted_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Registration fans out through a pool without dropping or repeating a bundle."""
+    registered: list[Path] = []
+
+    def _record(app_path: Path) -> None:
+        registered.append(app_path)
+
+    monkeypatch.setattr(helper, "_refresh_launch_services_registration", _record)
+    bundles = [tmp_path / name for name in ("A.app", "B.app", "C.app")]
+
+    helper._register_application_bundles(bundles)
+
+    assert sorted(registered) == sorted(bundles)
+
+
+def test_register_application_bundles_does_nothing_without_bundles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A no-op activation must not spawn any registration process."""
+
+    def _unexpected(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("registration must not run for an empty bundle list")
+
+    monkeypatch.setattr(helper, "_refresh_launch_services_registration", _unexpected)
+
+    helper._register_application_bundles([])
+
+
+def test_changed_application_entries_reports_only_unsatisfied_bundles(
+    tmp_path: Path,
+) -> None:
+    """Current bundles are skipped and changed bundles keep declaration order."""
+    sources = tmp_path / "source"
+    first_missing = _app(sources, "First.app", "fresh")
+    current = _app(sources, "Current.app", "same")
+    second_missing = _app(sources, "Second.app", "fresh")
+    target_directory = tmp_path / "Applications"
+    _app(target_directory, "Current.app", "same")
+    recorded_sources = {"Current.app": str(current)}
+
+    changed = helper._changed_application_entries(
+        [_entry(first_missing), _entry(current), _entry(second_missing)],
+        target_directory=target_directory,
+        recorded_sources=recorded_sources,
+        rsync_path="/rsync",
+        writable=False,
+    )
+
+    assert changed == [_entry(first_missing), _entry(second_missing)]
+
+
+def test_changed_application_entries_is_empty_for_no_entries(
+    tmp_path: Path,
+) -> None:
+    """An empty declaration needs no comparison work."""
+    assert (
+        helper._changed_application_entries(
+            [],
+            target_directory=tmp_path,
+            recorded_sources={},
+            rsync_path="/rsync",
+            writable=False,
+        )
+        == []
+    )
+
+
+def test_post_commit_metadata_covers_only_promoted_bundles(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """LaunchServices and Spotlight work follows what changed, not the managed set."""
+    current_source = _app(tmp_path / "source-current", "Kept.app", "same")
+    promoted_source = _app(tmp_path / "source-new", "Fresh.app", "new")
+    payload, target_directory, state_file = _payload(
+        tmp_path,
+        entries=[_entry(current_source), _entry(promoted_source)],
+        previous_manifest=["Kept.app"],
+    )
+    _app(target_directory, "Kept.app", "same")
+    state_file.write_text(f"Kept.app\t{current_source}\n", encoding="utf-8")
+    registered: list[Path] = []
+    refreshed: list[list[Path]] = []
+
+    monkeypatch.setattr(helper, "_rsync_copy", _copy_rsync)
+    monkeypatch.setattr(
+        helper,
+        "_register_application_bundles",
+        lambda paths, **_kwargs: registered.extend(paths),
+    )
+    monkeypatch.setattr(
+        helper,
+        "_refresh_spotlight_metadata",
+        lambda paths, **_kwargs: refreshed.append(list(paths)),
+    )
+
+    helper._system_applications(payload)
+
+    promoted = target_directory / "Fresh.app"
+    assert registered == [promoted]
+    assert refreshed == [[promoted]]
+
+
+def test_bundle_is_current_rejects_a_symlink_for_copy_mode(tmp_path: Path) -> None:
+    """A copied declaration never accepts a symlinked live bundle as current."""
+    source = _app(tmp_path / "source", "Good.app", "fresh")
+    target_directory = tmp_path / "Applications"
+    target_directory.mkdir()
+    (target_directory / "Good.app").symlink_to(source)
+
+    assert not helper._bundle_is_current(
+        _entry(source),
+        target_directory / "Good.app",
+        recorded_source=str(source),
+        rsync_path="/rsync",
+        writable=False,
+    )

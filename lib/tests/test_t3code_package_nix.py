@@ -45,21 +45,21 @@ def test_t3code_workspace_pnpm_fetch_is_resilient() -> None:
     assert_nix_ast_equal(
         expect_binding(args.values, "pnpmInstallFlags").value,
         """[
-          "--fetch-retries=5"
+          "--config.fetch-retries=5"
           "--network-concurrency=1"
         ]""",
     )
 
 
 def test_t3code_workspace_uses_nix_pnpm_without_global_config() -> None:
-    """Pnpm 11 should use the Nix-pinned executable without mutating global config."""
+    """Pnpm 12 should use the Nix-pinned executable without mutating global config."""
     package = expect_instance(
         nix_file_expr("packages/t3code/_shared.nix"),
         FunctionDefinition,
     )
     assert_nix_ast_equal(
         expect_binding(package.output.scope, "pnpm").value,
-        "pnpm_11.override { nodejs-slim = nodejs; }",
+        "pnpm_12.override { nodejs-slim = nodejs; }",
     )
     workspace_build = expect_instance(
         expect_binding(package.output.scope, "workspaceBuild").value,
@@ -135,7 +135,8 @@ exports.build = async (options) => {
     env.update({
         "NODE_PATH": str(tmp_path / "node_modules"),
         "T3CODE_APP_ID": "com.t3tools.t3code",
-        "T3CODE_APP_NAME": "T3 Code (Alpha)",
+        "T3CODE_APP_NAME": "T3 Code (Nightly)",
+        "T3CODE_APP_VERSION": "0.1.3-nightly.20261025.3655",
         "T3CODE_ELECTRON_DIST": "/tmp/electron-dist",
         "T3CODE_ELECTRON_VERSION": "41.5.0",
         "T3CODE_TEST_REJECT": "1" if reject_build else "0",
@@ -163,6 +164,11 @@ exports.build = async (options) => {
     assert options["publish"] == "never"
     assert options["config"]["electronDist"] == "/tmp/electron-dist"
     assert options["config"]["electronVersion"] == "41.5.0"
+    assert options["config"]["productName"] == "T3 Code (Nightly)"
+    assert options["config"]["extraMetadata"] == {
+        "version": "0.1.3-nightly.20261025.3655",
+        "buildVersion": "0.1.3-nightly.20261025.3655",
+    }
     if reject_build:
         assert stdout_lines == [stdout_lines[0]]
         assert "synthetic build failure" in result.stderr

@@ -7,7 +7,7 @@
   makeWrapper,
   nodejs,
   outputs,
-  pnpm_11,
+  pnpm_12,
   pnpmConfigHook,
   python3,
   stdenv,
@@ -24,7 +24,7 @@ let
       lib
       nodejs
       outputs
-      pnpm_11
+      pnpm_12
       pnpmConfigHook
       stdenv
       ;
@@ -79,6 +79,18 @@ let
       if [ -d node_modules/.bun ]; then
         find node_modules/.bun -path '*/node_modules/.bin' -type d -prune -exec rm -rf {} +
       fi
+
+      # Bun links every workspace member so the install can resolve their
+      # manifests; the server bundle already contains their code. Drop links
+      # that leave node_modules, or the shipped tree dangles because the
+      # workspace itself is not part of the runtime.
+      find node_modules -type l | while IFS= read -r link; do
+        resolved=$(cd "$(dirname "$link")" && readlink -f "$(basename "$link")" || true)
+        case "$resolved" in
+          "$PWD/node_modules"|"$PWD/node_modules"/*) continue ;;
+        esac
+        rm -f "$link"
+      done
 
       runHook postBuild
     '';

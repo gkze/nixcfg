@@ -13,7 +13,7 @@ from lib.update.events import EventSink, ignore_event
 
 if TYPE_CHECKING:
     import asyncio
-    from collections.abc import AsyncIterator, Callable, Iterable, Mapping
+    from collections.abc import AsyncGenerator, Callable, Iterable, Mapping
 
     import aiohttp
 
@@ -71,6 +71,46 @@ def _is_version_ref(ref: str) -> bool:
     if re.fullmatch(r"[0-9a-f]+", ref) and len(ref) >= _MIN_COMMIT_HEX_LEN:
         return False
     return re.search(r"\d", ref) is not None
+
+
+# A channel tag is a release series that ``packaging.version`` cannot parse,
+# such as T3 Code's ``v0.1.3-nightly.20261025.3655``. Such a ref must be advanced
+# within its own series: the generic prefix search treats every unparseable tag
+# as a non-candidate and would silently fall back to the newest stable release.
+_CHANNEL_TAG_RE = re.compile(
+    r"^(?P<prefix>[A-Za-z_+-]*)(?P<base>\d+(?:\.\d+)*)"
+    r"-(?P<channel>[A-Za-z]+)\.(?P<date>\d{8})\.(?P<run>\d+)$"
+)
+
+
+@dataclass(frozen=True)
+class ChannelTag:
+    """A version-like release tag carrying its own channel series."""
+
+    prefix: str
+    base: tuple[int, ...]
+    channel: str
+    date: int
+    run: int
+
+    @property
+    def order_key(self) -> tuple[tuple[int, ...], int, int]:
+        """Return the sort key covering version bumps and newer builds."""
+        return (self.base, self.date, self.run)
+
+
+def parse_channel_tag(ref: str) -> ChannelTag | None:
+    """Return the channel series encoded in *ref*, when it carries one."""
+    match = _CHANNEL_TAG_RE.match(ref)
+    if match is None:
+        return None
+    return ChannelTag(
+        prefix=match.group("prefix"),
+        base=tuple(int(part) for part in match.group("base").split(".")),
+        channel=match.group("channel").lower(),
+        date=int(match.group("date")),
+        run=int(match.group("run")),
+    )
 
 
 @dataclass(frozen=True)
@@ -341,6 +381,53 @@ async def fetch_github_latest_version_ref(
     return None
 
 
+async def _fetch_channel_tag_names(
+    session: aiohttp.ClientSession,
+    owner: str,
+    repo: str,
+    *,
+    config: UpdateConfig,
+) -> list[str]:
+    """Return repository tag names, newest first as GitHub lists them."""
+    payload_raw = await fetch_github_api_paginated(
+        session,
+        f"repos/{owner}/{repo}/tags",
+        config=config,
+        per_page=100,
+        max_pages=5,
+        item_limit=500,
+    )
+    return [
+        name
+        for item in payload_raw
+        if isinstance(item, dict)
+        if isinstance(name := item.get("name"), str)
+    ]
+
+
+def select_channel_tag(tags: Iterable[str], current: ChannelTag) -> str | None:
+    """Return the newest tag in *current*'s channel, including base bumps.
+
+    A nightly channel keeps its name while the base version moves (0.1.3 to
+    0.1.4), so the series is the channel plus the tag prefix, not the base.
+    """
+    best: tuple[tuple[int, ...], int, int] | None = None
+    best_tag: str | None = None
+    for tag in tags:
+        parsed = parse_channel_tag(tag)
+        if (
+            parsed is None
+            or parsed.channel != current.channel
+            or parsed.prefix != current.prefix
+        ):
+            continue
+        key = parsed.order_key
+        if best is None or key > best:
+            best = key
+            best_tag = tag
+    return best_tag
+
+
 @dataclass(frozen=True)
 class RefUpdateResult:
     """Result of checking whether a flake input ref has a newer tag."""
@@ -397,6 +484,40 @@ async def check_flake_ref_update(
 ) -> RefUpdateResult:
     """Check a flake input ref against the latest matching upstream tag."""
     config = resolve_active_config(config)
+    channel_tag = parse_channel_tag(input_ref.ref)
+    if channel_tag is not None:
+        try:
+            tags = await _fetch_channel_tag_names(
+                session,
+                input_ref.owner,
+                input_ref.repo,
+                config=config,
+            )
+        except RuntimeError as exc:
+            return RefUpdateResult(
+                name=input_ref.name,
+                current_ref=input_ref.ref,
+                latest_ref=None,
+                error=str(exc),
+            )
+        latest_channel_tag = select_channel_tag(tags, channel_tag)
+        if latest_channel_tag is None:
+            return RefUpdateResult(
+                name=input_ref.name,
+                current_ref=input_ref.ref,
+                latest_ref=None,
+                error=f"Could not determine the latest {channel_tag.channel} release",
+            )
+        if input_ref.input_type == "git":
+            latest_channel_tag = _format_git_ref_update(
+                input_ref.ref, latest_channel_tag
+            )
+        return RefUpdateResult(
+            name=input_ref.name,
+            current_ref=input_ref.ref,
+            latest_ref=latest_channel_tag,
+        )
+
     prefix = _extract_version_prefix(input_ref.ref)
     current_version = _parse_tag_version(
         input_ref.ref,
@@ -563,7 +684,7 @@ async def update_refs_task(
         source = input_ref.name
 
         @asynccontextmanager
-        async def edit_lock() -> AsyncIterator[None]:
+        async def edit_lock() -> AsyncGenerator[None]:
             """Serialize flake edits and receipt capture across ref tasks."""
             if task_options.flake_edit_lock is None:
                 yield
