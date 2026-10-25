@@ -6,6 +6,7 @@ profiles.mkHost [
   profiles.georgeBase
   profiles.townWorkstation
   {
+    extraHomeModules = [ ./george/build-volume.nix ];
     extraSystemModules = [
       (
         { lib, ... }:
@@ -60,9 +61,8 @@ profiles.mkHost [
           max-jobs = 0;
         };
       }
-      {
-        darwinDefaults.spotlight.indexing = false;
-      }
+      ./argus/spotlight.nix
+      ./george/build-volume-launchd.nix
     ];
   }
 ]

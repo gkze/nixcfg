@@ -170,6 +170,14 @@ These options are intended for override in a downstream repository:
 - `darwinDefaults.appearance`: `"automatic"` (default) or `"dark"`
 - `darwinDefaults.spotlight.indexing`: `true` (default) leaves Spotlight alone;
   `false` turns indexing off on every volume at each activation
+- `darwinDefaults.spotlight.unindexedVolumes`: volume basenames under `/Volumes`
+  that activation keeps out of the index while `spotlight.indexing` is true.
+  Activation disables indexing and search only when the path is the exact root
+  of a mounted volume; other paths are skipped. Neither this option nor
+  `spotlight.indexing = true` re-enables indexing that was previously disabled.
+  App Store tooling discovers installed apps through Spotlight metadata, so
+  turning indexing off globally also hides every installed App Store app from
+  `mas` and Homebrew Bundle.
 - `nix.gc.options`: retention for the daily garbage collection that
   `nixcfgCommon` schedules; the shared module sets none
 

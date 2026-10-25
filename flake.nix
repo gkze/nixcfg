@@ -1029,6 +1029,11 @@
                 test = _: import ./tests/nix/gpg-session { inherit self; };
               };
 
+              "test-nix-build-volume-session" = {
+                when = isConfigurationSystem;
+                test = _: import ./tests/nix/build-volume-session { inherit self; };
+              };
+
               "test-nix-nvim-keymaps" = {
                 when = isConfigurationSystem;
                 test =

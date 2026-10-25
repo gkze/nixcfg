@@ -150,6 +150,27 @@ in
         turn indexing back on; run `sudo mdutil -a -i on` to do that.
       '';
     };
+    spotlight.unindexedVolumes = mkOption {
+      type = types.listOf (
+        (types.addCheck types.str (
+          volume: volume != "." && volume != ".." && builtins.match "[^/]+" volume != null
+        ))
+        // {
+          description = "volume basename (nonempty, without `/`, and not `.` or `..`)";
+        }
+      );
+      default = [ ];
+      description = ''
+        Volume names under `/Volumes` that stay out of the Spotlight index while
+        `spotlight.indexing` is true. Activation disables indexing and search
+        for each name that is the root of a mounted volume and skips every other
+        path, so a build or scratch volume can stay unindexed without disabling
+        Spotlight metadata for App Store tooling. Neither this option nor
+        `spotlight.indexing = true` re-enables indexing that was previously
+        disabled.
+      '';
+      example = [ "Build" ];
+    };
     zsh.deferCompletionInitToHomeManager = mkOption {
       type = types.bool;
       default = false;
@@ -236,11 +257,34 @@ in
 
       # Runs on every activation because macOS updates can turn indexing back
       # on. A failure only warns, so Spotlight state never blocks a switch.
-      activationScripts.postActivation.text = lib.mkIf (!cfg.spotlight.indexing) ''
-        echo "disabling Spotlight indexing..." >&2
-        /usr/bin/mdutil -a -i off >/dev/null \
-          || echo "warning: mdutil could not disable Spotlight indexing" >&2
-      '';
+      # Volume exclusions are scoped instead of global: a host can keep the
+      # index that App Store tooling reads while leaving build volumes out.
+      activationScripts.postActivation.text = lib.mkMerge [
+        (lib.mkIf (!cfg.spotlight.indexing) ''
+          echo "disabling Spotlight indexing..." >&2
+          /usr/bin/mdutil -a -i off >/dev/null \
+            || echo "warning: mdutil could not disable Spotlight indexing" >&2
+        '')
+        # Do not gate this on mdutil's human-readable status: indexing-only and
+        # full disablement differ, and the volume path itself can contain the
+        # word "disabled". Reapplying the state is safe and never erases an index.
+        (lib.mkIf (cfg.spotlight.indexing && cfg.spotlight.unindexedVolumes != [ ]) (
+          lib.concatMapStringsSep "\n" (volume: ''
+            volumePath=${lib.escapeShellArg "/Volumes/${volume}"}
+            currentMountPoint="$(
+              /usr/sbin/diskutil info -plist "$volumePath" 2>/dev/null |
+                /usr/bin/plutil -extract MountPoint raw -o - - 2>/dev/null || true
+            )"
+            if [ "$currentMountPoint" = "$volumePath" ]; then
+              echo "disabling Spotlight indexing for $volumePath..." >&2
+              /usr/bin/mdutil -i off -d "$volumePath" >/dev/null \
+                || echo "warning: mdutil could not disable Spotlight indexing for $volumePath" >&2
+            else
+              echo "skipping Spotlight exclusion for path that is not a mounted volume: $volumePath" >&2
+            fi
+          '') cfg.spotlight.unindexedVolumes
+        ))
+      ];
     };
 
     environment.shells = [ pkgs.zsh ];
