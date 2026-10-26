@@ -623,6 +623,14 @@
         # `.git` directories.
         git.repos = [ "~/${slib.srcDirBase system}/*/*/*" ];
         git.pull_predefined = false;
+        # Topgrade always runs `git pull --ff-only --recurse-submodules` and
+        # never passes --autostash itself. With `pull.rebase = true` set
+        # globally, git's rebase pre-check aborts on any modified tracked file
+        # ("cannot pull with rebase: Your index contains uncommitted changes")
+        # even when the repo is already up to date. --autostash lets those
+        # pulls fast-forward and re-applies the local edits afterwards. It does
+        # not help diverged branches, which still fail under --ff-only.
+        git.arguments = "--autostash";
         misc = {
           assume_yes = true;
           cleanup = true;
