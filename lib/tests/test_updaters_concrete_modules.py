@@ -1,6 +1,7 @@
 """Tests for concrete updater modules in overlays/packages."""
 
 import asyncio
+import json
 from contextlib import nullcontext
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -511,9 +512,12 @@ def test_code_cursor_updater_paths(
 ) -> None:
     """Exercise Code Cursor platform URL and checksum helpers."""
     updater = code_cursor_module.CodeCursorUpdater()
+    expected_api_url = (
+        "https://api2.cursor.sh/updates/api/update/darwin-arm64/cursor/"
+        f"0.0.0/{updater.DISCOVERY_HASH}/{updater.TRACK}"
+    )
     assert (
-        object.__getattribute__(updater, "_api_url")("darwin-arm64")
-        == "https://api2.cursor.sh/updates/download/golden/darwin-arm64/cursor/3.9"
+        object.__getattribute__(updater, "_api_url")("darwin-arm64") == expected_api_url
     )
     platform_info = {
         nix_plat: {"downloadUrl": f"https://example.com/{api_plat}.zip"}
@@ -544,72 +548,42 @@ def test_code_cursor_updater_paths(
     assert all(v == HASH_A for v in checksums.values())
 
 
-def test_code_cursor_fetch_latest_from_download_page(
+def _cursor_channel_entry(api_platform: str, version: str, commit: str) -> str:
+    """Render the entry the tracked channel answers with for one platform."""
+    base = f"https://downloads.cursor.com/production/{commit}"
+    if api_platform.startswith("darwin"):
+        arch = "arm64" if api_platform.endswith("arm64") else "x64"
+        url = f"{base}/darwin/{arch}/Cursor-darwin-{arch}.zip"
+        return json.dumps({"name": version, "url": url})
+    arch = "arm64" if api_platform.endswith("arm64") else "x64"
+    abi = "aarch64" if arch == "arm64" else "x86_64"
+    url = f"{base}/linux/{arch}/Cursor-{version}-{abi}.AppImage.zsync"
+    return json.dumps({"version": version, "productVersion": version, "url": url})
+
+
+def test_code_cursor_fetch_latest_from_track(
     code_cursor_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Cursor should derive the full version and commit from redirect targets."""
+    """Cursor should read version, commit, and artifacts from the tracked channel."""
     updater = code_cursor_module.CodeCursorUpdater()
-    api_urls = {
-        api_platform: updater._api_url(api_platform)
-        for api_platform in updater.PLATFORMS.values()
-    }
-    page = "".join(
-        f'{{\\"downloadUrl\\":\\"{api_url}\\"}}' for api_url in api_urls.values()
-    )
     commit = "042b3c1a4c53f2c3808067f519fbfc67b72cad8b"
-    resolved_urls = {
-        "darwin-arm64": (
-            f"https://downloads.cursor.com/production/{commit}/darwin/arm64/"
-            "Cursor-darwin-arm64.dmg"
-        ),
-        "darwin-x64": (
-            f"https://downloads.cursor.com/production/{commit}/darwin/x64/"
-            "Cursor-darwin-x64.dmg"
-        ),
-        "linux-arm64": (
-            f"https://downloads.cursor.com/production/{commit}/linux/arm64/"
-            "Cursor-3.9.16-aarch64.AppImage"
-        ),
-        "linux-x64": (
-            f"https://downloads.cursor.com/production/{commit}/linux/x64/"
-            "Cursor-3.9.16-x86_64.AppImage"
-        ),
-    }
 
-    async def _fetch_url(_session: object, url: str, **_kwargs: object) -> bytes:
-        assert url == updater.DOWNLOAD_PAGE
-        return page.encode()
+    async def _request(_session: object, url: str, **_kwargs: object) -> object:
+        api_platform = url.split("/update/", 1)[1].split("/", 1)[0]
+        entry = _cursor_channel_entry(api_platform, "3.9.16", commit)
+        return SimpleNamespace(status=200, body=entry.encode())
 
-    async def _resolve_download_url(
-        _session: object, api_url: str, **_kwargs: object
-    ) -> str:
-        api_platform = api_url.rsplit("/cursor/", maxsplit=1)[0].rsplit("/", 1)[1]
-        return resolved_urls[api_platform]
-
-    monkeypatch.setattr(code_cursor_module, "fetch_url", _fetch_url)
-    monkeypatch.setattr(
-        code_cursor_module, "fetch_redirect_location", _resolve_download_url
-    )
+    monkeypatch.setattr(code_cursor_module, "request", _request)
 
     latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     assert latest.version == "3.9.16"
     assert latest.commit == commit
     assert latest.metadata["commitSha"] == commit
-    assert (
-        latest.metadata["platform_info"]["aarch64-linux"]["downloadUrl"]
-        == (resolved_urls["linux-arm64"])
-    )
-
-
-def _cursor_download_page(updater: object) -> str:
-    api_urls = {
-        api_platform: updater._api_url(api_platform)
-        for api_platform in updater.PLATFORMS.values()
-    }
-    return "".join(
-        f'{{\\"downloadUrl\\":\\"{api_url}\\"}}' for api_url in api_urls.values()
+    assert latest.metadata["platform_info"]["aarch64-linux"]["downloadUrl"] == (
+        f"https://downloads.cursor.com/production/{commit}/linux/arm64/"
+        "Cursor-3.9.16-aarch64.AppImage"
     )
 
 
@@ -621,51 +595,27 @@ def test_code_cursor_keeps_pin_when_platforms_stage_different_commits(
     updater = code_cursor_module.CodeCursorUpdater()
     darwin_commit = "3a92974361033b2051526321308c2740fe5912c5"
     linux_commit = "983d341a4889c3126325a403b8af55a649fd0122"
-    resolved_urls = {
-        "darwin-arm64": (
-            f"https://downloads.cursor.com/production/{darwin_commit}/darwin/arm64/"
-            "Cursor-darwin-arm64.dmg"
-        ),
-        "darwin-x64": (
-            f"https://downloads.cursor.com/production/{darwin_commit}/darwin/x64/"
-            "Cursor-darwin-x64.dmg"
-        ),
-        "linux-arm64": (
-            f"https://downloads.cursor.com/production/{linux_commit}/linux/arm64/"
-            "Cursor-3.22.15-aarch64.AppImage"
-        ),
-        "linux-x64": (
-            f"https://downloads.cursor.com/production/{linux_commit}/linux/x64/"
-            "Cursor-3.22.15-x86_64.AppImage"
-        ),
-    }
+    darwin_prefix = f"https://downloads.cursor.com/production/{darwin_commit}"
+    linux_prefix = f"https://downloads.cursor.com/production/{linux_commit}"
     pinned_urls = {
-        "aarch64-darwin": resolved_urls["darwin-arm64"],
-        "x86_64-darwin": resolved_urls["darwin-x64"],
+        "aarch64-darwin": f"{darwin_prefix}/darwin/arm64/Cursor-darwin-arm64.dmg",
+        "x86_64-darwin": f"{darwin_prefix}/darwin/x64/Cursor-darwin-x64.dmg",
         "aarch64-linux": (
-            f"https://downloads.cursor.com/production/{darwin_commit}/linux/arm64/"
-            "Cursor-3.22.12-aarch64.AppImage"
+            f"{darwin_prefix}/linux/arm64/Cursor-3.22.12-aarch64.AppImage"
         ),
-        "x86_64-linux": (
-            f"https://downloads.cursor.com/production/{darwin_commit}/linux/x64/"
-            "Cursor-3.22.12-x86_64.AppImage"
-        ),
+        "x86_64-linux": (f"{darwin_prefix}/linux/x64/Cursor-3.22.12-x86_64.AppImage"),
     }
+    assert linux_prefix != darwin_prefix
 
-    async def _fetch_url(_session: object, url: str, **_kwargs: object) -> bytes:
-        assert url == updater.DOWNLOAD_PAGE
-        return _cursor_download_page(updater).encode()
+    async def _request(_session: object, url: str, **_kwargs: object) -> object:
+        api_platform = url.split("/update/", 1)[1].split("/", 1)[0]
+        if api_platform.startswith("darwin"):
+            entry = _cursor_channel_entry(api_platform, "3.22.12", darwin_commit)
+        else:
+            entry = _cursor_channel_entry(api_platform, "3.22.15", linux_commit)
+        return SimpleNamespace(status=200, body=entry.encode())
 
-    async def _resolve_download_url(
-        _session: object, api_url: str, **_kwargs: object
-    ) -> str:
-        api_platform = api_url.rsplit("/cursor/", maxsplit=1)[0].rsplit("/", 1)[1]
-        return resolved_urls[api_platform]
-
-    monkeypatch.setattr(code_cursor_module, "fetch_url", _fetch_url)
-    monkeypatch.setattr(
-        code_cursor_module, "fetch_redirect_location", _resolve_download_url
-    )
+    monkeypatch.setattr(code_cursor_module, "request", _request)
 
     current = SourceEntry.model_validate({
         "version": "3.22.12",
@@ -1132,45 +1082,3 @@ def test_neutils_updater_emits_generated_artifact_and_src_hash(
     assert hashes == [HashEntry.create("srcHash", HASH_A)]
     assert updater.materialize_when_current is True
     assert updater.generated_artifact_files == ("build.zig.zon.nix",)
-
-
-def test_code_cursor_download_page_requires_all_platform_links(
-    code_cursor_module: ModuleType,
-) -> None:
-    """Reject download pages that omit expected platforms, skipping unknown ones."""
-    updater = code_cursor_module.CodeCursorUpdater()
-    partial_page = '"'.join((
-        updater._api_url("darwin-arm64"),
-        # Unknown platforms in the page are skipped, not collected.
-        updater._api_url("windows-x64"),
-    ))
-    with pytest.raises(RuntimeError, match="missing platform links"):
-        updater._extract_download_api_urls(partial_page)
-
-
-def test_code_cursor_require_uniform_regex_value_rejects_mixed_urls(
-    code_cursor_module: ModuleType,
-) -> None:
-    """Reject resolved URL sets that disagree on the extracted value."""
-    import re
-
-    updater = code_cursor_module.CodeCursorUpdater()
-    pattern = re.compile(r"/(?P<commit>[0-9a-f]{3})/")
-    urls = {
-        "darwin-arm64": "https://d/abc/x.dmg",
-        "darwin-x64": "https://d/def/y.dmg",
-    }
-    with pytest.raises(RuntimeError, match="Unable to resolve one Cursor commit"):
-        updater._require_uniform_regex_value(urls, pattern, "commit", context="commit")
-    assert (
-        updater._require_uniform_regex_value(
-            {
-                "darwin-arm64": "https://d/abc/x.dmg",
-                "darwin-x64": "https://d/abc/y.dmg",
-            },
-            pattern,
-            "commit",
-            context="commit",
-        )
-        == "abc"
-    )

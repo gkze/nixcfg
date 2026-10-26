@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from packaging.version import Version
 
-from lib.update.net import fetch_redirect_location, fetch_url
+from lib.update.net import decode_json, request
 from lib.update.updaters import VersionInfo, register_updater
 from lib.update.updaters.metadata import PlatformAPIMetadata
 from lib.update.updaters.platform_api import DownloadingPlatformAPIUpdater
@@ -14,24 +14,35 @@ from lib.update.updaters.platform_api import DownloadingPlatformAPIUpdater
 if TYPE_CHECKING:
     import aiohttp
 
+    from lib.json_utils import JsonObject
     from lib.update.updaters.core import UpdateContext
 
-_CURSOR_API_URL_RE = re.compile(
-    r"https://api2\.cursor\.sh/updates/download/golden/"
-    r"(?P<api_platform>[^/\\\"']+)/cursor/(?P<version>[^\\\"']+)"
-)
-# Match the complete production path segment; never truncate a malformed commit.
+_HTTP_NO_CONTENT = 204
 _CURSOR_PRODUCTION_COMMIT_RE = re.compile(r"/production/(?P<commit>[0-9a-f]{40})/")
 _CURSOR_APPIMAGE_VERSION_RE = re.compile(r"Cursor-(?P<version>\d+\.\d+\.\d+)-")
+# The channel serves the in-app updater archives. Package the same artifacts the
+# download page publishes: a disk image on Darwin, the plain AppImage on Linux.
+_CURSOR_DARWIN_ARCHIVE_SUFFIX = ".zip"
+_CURSOR_DARWIN_ARTIFACT_SUFFIX = ".dmg"
+_CURSOR_ZSYNC_SUFFIX = ".zsync"
 
 
 @register_updater
 class CodeCursorUpdater(DownloadingPlatformAPIUpdater):
-    """Resolve Cursor versions and platform-specific download URLs."""
+    """Resolve Cursor versions and platform downloads from a release track."""
 
     name = "code-cursor"
-    DOWNLOAD_PAGE = "https://cursor.com/download"
-    API_BASE = "https://api2.cursor.sh/updates/download/golden"
+    API_BASE = "https://api2.cursor.sh/updates/api/update"
+    # Cursor stages builds per track. These hosts track dev because the installed
+    # app follows the dev track and self-updates in place: a production pin cannot
+    # clear `preventDowngrade` against a dev build the app already runs.
+    TRACK = "dev"
+    # The channel answers 204 when the version asked about is current or newer,
+    # and only names a build for an older version. Discovery therefore always
+    # asks about a floor version, so the answer is the track's newest build
+    # instead of "you are up to date".
+    DISCOVERY_VERSION = "0.0.0"
+    DISCOVERY_HASH = "0" * 64
     VERSION_KEY = "version"
     EXTRA_EQUALITY_KEYS = ("commitSha",)
     COMMIT_METADATA_KEY = "commitSha"
@@ -43,21 +54,18 @@ class CodeCursorUpdater(DownloadingPlatformAPIUpdater):
         "x86_64-linux": "linux-x64",
     }
 
-    def _api_url(self, _api_platform: str, version: str = "3.9") -> str:
-        return f"{self.API_BASE}/{_api_platform}/cursor/{version}"
+    def _api_url(self, _api_platform: str) -> str:
+        return (
+            f"{self.API_BASE}/{_api_platform}/cursor/"
+            f"{self.DISCOVERY_VERSION}/{self.DISCOVERY_HASH}/{self.TRACK}"
+        )
 
-    def _extract_download_api_urls(self, payload: str) -> dict[str, str]:
-        expected = set(self.PLATFORMS.values())
-        urls: dict[str, str] = {}
-        for match in _CURSOR_API_URL_RE.finditer(payload):
-            api_platform = match.group("api_platform")
-            if api_platform in expected:
-                urls.setdefault(api_platform, match.group(0))
-        missing = expected - set(urls)
-        if missing:
-            msg = f"Cursor download page missing platform links: {sorted(missing)}"
-            raise RuntimeError(msg)
-        return urls
+    @staticmethod
+    def _uniform_str_value(values: dict[str, str]) -> str | None:
+        unique = set(values.values())
+        if len(unique) != 1:
+            return None
+        return unique.pop()
 
     @staticmethod
     def _uniform_regex_value(
@@ -75,20 +83,77 @@ class CodeCursorUpdater(DownloadingPlatformAPIUpdater):
             return None
         return values.pop()
 
-    @classmethod
-    def _require_uniform_regex_value(
-        cls,
-        urls: dict[str, str],
-        pattern: re.Pattern[str],
-        group: str,
-        *,
-        context: str,
-    ) -> str:
-        value = cls._uniform_regex_value(urls, pattern, group)
-        if value is None:
-            msg = f"Unable to resolve one Cursor {context} from URLs: {urls}"
+    @staticmethod
+    def _artifact_url(api_platform: str, url: str) -> str:
+        """Map the channel's updater archive onto the packaged artifact."""
+        if api_platform.startswith("darwin"):
+            if not url.endswith(_CURSOR_DARWIN_ARCHIVE_SUFFIX):
+                msg = f"Unexpected Cursor {api_platform} artifact: {url}"
+                raise RuntimeError(msg)
+            return (
+                url[: -len(_CURSOR_DARWIN_ARCHIVE_SUFFIX)]
+                + _CURSOR_DARWIN_ARTIFACT_SUFFIX
+            )
+        if not url.endswith(_CURSOR_ZSYNC_SUFFIX):
+            msg = f"Unexpected Cursor {api_platform} artifact: {url}"
             raise RuntimeError(msg)
-        return value
+        return url[: -len(_CURSOR_ZSYNC_SUFFIX)]
+
+    @staticmethod
+    def _payload_version(
+        api_platform: str,
+        payload: JsonObject,
+        url: str,
+    ) -> str:
+        named = next(
+            (
+                payload[key]
+                for key in ("productVersion", "version", "name")
+                if isinstance(payload.get(key), str)
+            ),
+            None,
+        )
+        if not isinstance(named, str):
+            msg = f"Cursor {api_platform} channel entry named no version"
+            raise TypeError(msg)
+        # Linux AppImage names carry the version, so a staged roll-out shows up
+        # as a payload the filename contradicts.
+        if api_platform.startswith("linux"):
+            match = _CURSOR_APPIMAGE_VERSION_RE.search(url)
+            if match is None or match.group("version") != named:
+                msg = f"Cursor {api_platform} channel named {named} but published {url}"
+                raise RuntimeError(msg)
+        return named
+
+    async def _fetch_track_entry(
+        self,
+        session: aiohttp.ClientSession,
+        api_platform: str,
+    ) -> tuple[str, str]:
+        url = self._api_url(api_platform)
+        response = await request(session, url, config=self.config)
+        if response.status == _HTTP_NO_CONTENT:
+            msg = (
+                f"Cursor {self.TRACK} channel reported no build newer than "
+                f"{self.DISCOVERY_VERSION} for {api_platform}"
+            )
+            raise RuntimeError(msg)
+        payload = decode_json(
+            response.body,
+            context=f"Cursor {self.TRACK} channel for {api_platform}",
+        )
+        if not isinstance(payload, dict):
+            msg = (
+                f"Expected a JSON object from the Cursor {self.TRACK} channel "
+                f"for {api_platform}"
+            )
+            raise TypeError(msg)
+        artifact = payload.get("url")
+        if not isinstance(artifact, str):
+            msg = f"Cursor {self.TRACK} channel named no artifact for {api_platform}"
+            raise TypeError(msg)
+        resolved = self._artifact_url(api_platform, artifact)
+        return self._payload_version(api_platform, payload, resolved), resolved
 
     def _retain_verified_pin(
         self,
@@ -137,76 +202,39 @@ class CodeCursorUpdater(DownloadingPlatformAPIUpdater):
     async def fetch_latest(
         self, session: aiohttp.ClientSession, *, context: UpdateContext
     ) -> VersionInfo:
-        """Fetch Cursor release metadata from the download page redirect targets."""
-        page = (
-            await fetch_url(session, self.DOWNLOAD_PAGE, config=self.config)
-        ).decode(errors="replace")
-        api_urls = self._extract_download_api_urls(page)
-        # The download page can lag an already deployed stable series. Keep
-        # checking that series rather than reinstalling the page's older one.
-        if context.current is not None and context.current.version is not None:
-            current_series = Version(context.current.version).release[:2]
-            for api_platform, api_url in api_urls.items():
-                advertised = api_url.rsplit("/", maxsplit=1)[1]
-                if current_series > Version(advertised).release[:2]:
-                    series = ".".join(map(str, current_series))
-                    api_urls[api_platform] = self._api_url(api_platform, series)
-        resolved_by_api_platform = dict(
-            zip(
-                api_urls,
-                await asyncio.gather(
-                    *(
-                        fetch_redirect_location(session, url, config=self.config)
-                        for url in api_urls.values()
-                    )
-                ),
-                strict=True,
+        """Fetch the newest build on the tracked channel for every platform."""
+        entries = await asyncio.gather(
+            *(
+                self._fetch_track_entry(session, api_platform)
+                for api_platform in self.PLATFORMS.values()
             )
         )
-        resolved_urls = {
-            nix_platform: resolved_by_api_platform[api_platform]
-            for nix_platform, api_platform in self.PLATFORMS.items()
-        }
-        version = self._uniform_regex_value(
-            {
-                platform: url
-                for platform, url in resolved_urls.items()
-                if platform.endswith("-linux")
-            },
-            _CURSOR_APPIMAGE_VERSION_RE,
-            "version",
-        )
+        resolved = dict(zip(self.PLATFORMS, entries, strict=True))
+        versions = {platform: version for platform, (version, _url) in resolved.items()}
+        urls = {platform: url for platform, (_version, url) in resolved.items()}
+        version = self._uniform_str_value(versions)
         commit = self._uniform_regex_value(
-            resolved_urls,
+            urls,
             _CURSOR_PRODUCTION_COMMIT_RE,
             "commit",
         )
-        # Cursor stages Linux and Darwin independently. Update 37415412232
-        # failed prepare because Linux was 3.22.15 / 983d341a while Darwin
-        # was still 3.22.12 / 3a929743. Keep the complete pin until every
-        # platform names one version and commit.
+        # Cursor stages platforms independently: keep the complete pin until
+        # every platform names one version and commit.
         if version is None or commit is None:
-            return self._retain_verified_pin(
-                context,
-                resolved_urls=resolved_urls,
-            )
-        # Golden can lag a release already delivered through the in-app stable
-        # cohort. Keep that verified source pin, not the feed's older artifacts.
+            return self._retain_verified_pin(context, resolved_urls=urls)
+        # A channel can lag a build already pinned; keep the verified source pin
+        # instead of stepping backwards.
         if (
             context.current is not None
             and context.current.version is not None
             and Version(version) < Version(context.current.version)
         ):
-            return self._retain_verified_pin(
-                context,
-                resolved_urls=resolved_urls,
-            )
+            return self._retain_verified_pin(context, resolved_urls=urls)
         return VersionInfo(
             version=version,
             metadata=PlatformAPIMetadata(
                 platform_info={
-                    platform: {"downloadUrl": url}
-                    for platform, url in resolved_urls.items()
+                    platform: {"downloadUrl": url} for platform, url in urls.items()
                 },
                 equality_fields={"commitSha": commit},
                 commit=commit,

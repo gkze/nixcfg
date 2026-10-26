@@ -1,6 +1,6 @@
 """Release discovery must respect already deployed vendor release cohorts."""
 
-from types import ModuleType
+import json
 from typing import TYPE_CHECKING
 
 import pytest
@@ -33,45 +33,12 @@ def test_figma_requests_current_release_cohort(monkeypatch: pytest.MonkeyPatch) 
     assert all(url.endswith("?localVersion=126.10.11") for url in requested)
 
 
-@pytest.mark.parametrize("current_version", ["3.26.16", "3.8.9"])
-def test_cursor_resolves_newer_of_page_and_current_series(
-    monkeypatch: pytest.MonkeyPatch, current_version: str
-) -> None:
-    module: ModuleType = load_repo_module_for_test(
-        "overlays/code-cursor/updater.py", prefix="floor"
-    )
-    updater = module.CodeCursorUpdater()
-    requested = []
-    expected_series = "3.26" if current_version == "3.26.16" else "3.24"
-    expected_version = expected_series + ".16"
-    commit = "a" * 40
-    page = " ".join(
-        f'"{updater._api_url(p, "3.24")}"' for p in updater.PLATFORMS.values()
-    )
+class _TrackResponse:
+    """Minimal transfer response; the channel client reads only status and body."""
 
-    async def fetch(_session: object, _url: str, **_kwargs: object) -> bytes:
-        return page.encode()
-
-    async def resolve(_session: object, url: str, **_kwargs: object) -> str:
-        requested.append(url)
-        platform = url.split("/golden/", 1)[1].split("/", 1)[0]
-        file = (
-            f"Cursor-{expected_version}-x86_64.AppImage"
-            if "linux" in platform
-            else "Cursor.dmg"
-        )
-        return f"https://downloads.cursor.com/production/{commit}/{platform}/{file}"
-
-    monkeypatch.setattr(module, "fetch_url", fetch)
-    monkeypatch.setattr(module, "fetch_redirect_location", resolve)
-    current = SourceEntry.model_validate({"version": current_version, "hashes": {}})
-    info = run_async(
-        updater.fetch_latest(object(), context=UpdateContext(current=current))
-    )
-    assert info.version == expected_version
-    assert info.commit == commit
-    assert len(requested) == 4
-    assert all(url.endswith("/cursor/" + expected_series) for url in requested)
+    def __init__(self, status: int, body: bytes = b"") -> None:
+        self.status = status
+        self.body = body
 
 
 def _cursor_urls(version: str, commit: str) -> dict[str, str]:
@@ -84,33 +51,73 @@ def _cursor_urls(version: str, commit: str) -> dict[str, str]:
     }
 
 
+def _channel_payload(api_platform: str, version: str, artifact: str) -> bytes:
+    """Render the channel entry that publishes ``artifact`` for one platform."""
+    if api_platform.startswith("darwin"):
+        archive = artifact.removesuffix(".dmg") + ".zip"
+        return json.dumps({"name": version, "url": archive}).encode()
+    zsync = artifact + ".zsync"
+    return json.dumps({
+        "version": version,
+        "productVersion": version,
+        "url": zsync,
+    }).encode()
+
+
+def _nix_platform(updater: DownloadingPlatformAPIUpdater, api_platform: str) -> str:
+    return next(p for p, a in updater.PLATFORMS.items() if a == api_platform)
+
+
 def _cursor_feed(
     monkeypatch: pytest.MonkeyPatch,
     version: str,
     *,
     urls: dict[str, str] | None = None,
-) -> DownloadingPlatformAPIUpdater:
+    payloads: dict[str, bytes] | None = None,
+    statuses: dict[str, int] | None = None,
+) -> tuple[DownloadingPlatformAPIUpdater, list[str]]:
+    """Serve one release track, with overrides keyed by nix platform."""
     module = load_repo_module_for_test(
         "overlays/code-cursor/updater.py", prefix="floor"
     )
     updater = module.CodeCursorUpdater()
-    urls = _cursor_urls(version, "b" * 40) if urls is None else urls
+    artifacts = _cursor_urls(version, "b" * 40) if urls is None else urls
+    requested: list[str] = []
 
-    async def fetch(_session: object, _url: str, **_kwargs: object) -> bytes:
-        return " ".join(
-            f'"{updater._api_url(p)}"' for p in updater.PLATFORMS.values()
-        ).encode()
-
-    async def resolve(_session: object, url: str, **_kwargs: object) -> str:
-        api_platform = url.split("/golden/", 1)[1].split("/", 1)[0]
-        platform = next(
-            p for p, api in updater.PLATFORMS.items() if api == api_platform
+    async def fetch(_session: object, url: str, **_kwargs: object) -> _TrackResponse:
+        api_platform = url.split("/update/", 1)[1].split("/", 1)[0]
+        requested.append(url)
+        platform = _nix_platform(updater, api_platform)
+        if statuses is not None and platform in statuses:
+            return _TrackResponse(statuses[platform])
+        if payloads is not None and platform in payloads:
+            return _TrackResponse(200, payloads[platform])
+        return _TrackResponse(
+            200, _channel_payload(api_platform, version, artifacts[platform])
         )
-        return urls[platform]
 
-    monkeypatch.setattr(module, "fetch_url", fetch)
-    monkeypatch.setattr(module, "fetch_redirect_location", resolve)
-    return updater
+    monkeypatch.setattr(module, "request", fetch)
+    return updater, requested
+
+
+def test_cursor_discovers_newest_build_from_track(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    updater, requested = _cursor_feed(monkeypatch, "3.27.18")
+    info = run_async(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
+    assert info.version == "3.27.18"
+    assert info.commit == "b" * 40
+    assert info.metadata["commitSha"] == "b" * 40
+    assert len(requested) == 4
+    # The channel answers 204 for a current version, so discovery asks about a floor.
+    assert all("/cursor/0.0.0/" in url for url in requested)
+    assert all(url.endswith("/dev") for url in requested)
+    assert {
+        platform: data["downloadUrl"]
+        for platform, data in updater._metadata(info).platform_info.items()
+    } == _cursor_urls("3.27.18", "b" * 40)
 
 
 def test_cursor_accepts_complete_40_character_production_commit(
@@ -120,7 +127,7 @@ def test_cursor_accepts_complete_40_character_production_commit(
     commit = "f7119520544accb8dcf6d27119b9f1963d8ee5ae"
     assert len(commit) == 40
     urls = _cursor_urls("3.27.6", commit)
-    updater = _cursor_feed(monkeypatch, "3.27.6", urls=urls)
+    updater, _requested = _cursor_feed(monkeypatch, "3.27.6", urls=urls)
     current = SourceEntry.model_validate({"version": "3.26.16", "hashes": {}})
     info = run_async(
         updater.fetch_latest(object(), context=UpdateContext(current=current))
@@ -148,7 +155,7 @@ def test_cursor_rejects_true_41_character_production_commit(
         urls = invalid
     else:
         urls[malformed_platform] = invalid[malformed_platform]
-    updater = _cursor_feed(monkeypatch, "3.27.6", urls=urls)
+    updater, _requested = _cursor_feed(monkeypatch, "3.27.6", urls=urls)
     current = SourceEntry.model_validate({"version": "3.26.16", "hashes": {}})
     with pytest.raises(RuntimeError, match="Unable to resolve one Cursor"):
         run_async(
@@ -176,7 +183,7 @@ def test_cursor_rejects_true_41_character_production_commit(
 def test_cursor_lagging_feed_retains_verified_cohort(
     monkeypatch: pytest.MonkeyPatch, feed_version: str
 ) -> None:
-    updater = _cursor_feed(monkeypatch, feed_version)
+    updater, _requested = _cursor_feed(monkeypatch, feed_version)
     pinned_urls = _cursor_urls("3.27.6", "a" * 40)
     current = SourceEntry.model_validate({
         "version": "3.27.6",
@@ -203,7 +210,7 @@ def test_cursor_lagging_feed_retains_verified_cohort(
 def test_cursor_cannot_retain_incoherent_source_pin(
     monkeypatch: pytest.MonkeyPatch, fault: str
 ) -> None:
-    updater = _cursor_feed(monkeypatch, "3.26.16")
+    updater, _requested = _cursor_feed(monkeypatch, "3.26.16")
     pinned_urls = _cursor_urls("3.27.6", "a" * 40)
     if fault == "missing_platform":
         del pinned_urls["x86_64-darwin"]
@@ -234,7 +241,7 @@ def test_cursor_cannot_retain_incoherent_source_pin(
 def test_cursor_retained_artifact_download_failure_is_not_hidden(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    updater = _cursor_feed(monkeypatch, "3.26.16")
+    updater, _requested = _cursor_feed(monkeypatch, "3.26.16")
     pinned_urls = _cursor_urls("3.27.6", "a" * 40)
     current = SourceEntry.model_validate({
         "version": "3.27.6",
@@ -256,3 +263,108 @@ def test_cursor_retained_artifact_download_failure_is_not_hidden(
     )
     with pytest.raises(RuntimeError, match="publisher artifact unavailable"):
         run_async(updater.fetch_checksums(info, object()))
+
+
+def test_cursor_retains_when_platform_versions_disagree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ahead = _channel_payload(
+        "darwin-arm64",
+        "3.27.19",
+        _cursor_urls("3.27.19", "b" * 40)["aarch64-darwin"],
+    )
+    updater, _requested = _cursor_feed(
+        monkeypatch, "3.27.18", payloads={"aarch64-darwin": ahead}
+    )
+    with pytest.raises(RuntimeError, match="Unable to resolve one Cursor"):
+        run_async(updater.fetch_latest(object(), context=UpdateContext(current=None)))
+
+
+def test_cursor_reports_channel_with_no_newer_build(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    updater, _requested = _cursor_feed(
+        monkeypatch, "3.27.18", statuses={"aarch64-darwin": 204}
+    )
+    with pytest.raises(RuntimeError, match="reported no build newer"):
+        run_async(updater.fetch_latest(object(), context=UpdateContext(current=None)))
+
+
+def test_cursor_rejects_non_object_channel_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    updater, _requested = _cursor_feed(
+        monkeypatch, "3.27.18", payloads={"aarch64-darwin": b"[]"}
+    )
+    with pytest.raises(TypeError, match="Expected a JSON object"):
+        run_async(updater.fetch_latest(object(), context=UpdateContext(current=None)))
+
+
+def test_cursor_rejects_entry_without_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = json.dumps({"name": "3.27.18"}).encode()
+    updater, _requested = _cursor_feed(
+        monkeypatch, "3.27.18", payloads={"aarch64-darwin": payload}
+    )
+    with pytest.raises(TypeError, match="named no artifact"):
+        run_async(updater.fetch_latest(object(), context=UpdateContext(current=None)))
+
+
+def test_cursor_rejects_entry_without_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commit = "b" * 40
+    payload = json.dumps({
+        "url": (
+            f"https://downloads.cursor.com/production/{commit}/darwin/arm64/"
+            "Cursor-darwin-arm64.zip"
+        )
+    }).encode()
+    updater, _requested = _cursor_feed(
+        monkeypatch, "3.27.18", payloads={"aarch64-darwin": payload}
+    )
+    with pytest.raises(TypeError, match="named no version"):
+        run_async(updater.fetch_latest(object(), context=UpdateContext(current=None)))
+
+
+@pytest.mark.parametrize(
+    ("platform", "artifact"),
+    [
+        ("aarch64-darwin", "darwin/arm64/Cursor-darwin-arm64.dmg"),
+        ("aarch64-linux", "linux/arm64/Cursor-3.27.18-aarch64.AppImage"),
+    ],
+)
+def test_cursor_rejects_unexpected_artifact_shape(
+    monkeypatch: pytest.MonkeyPatch, platform: str, artifact: str
+) -> None:
+    commit = "b" * 40
+    payload = json.dumps({
+        "name": "3.27.18",
+        "version": "3.27.18",
+        "url": f"https://downloads.cursor.com/production/{commit}/{artifact}",
+    }).encode()
+    updater, _requested = _cursor_feed(
+        monkeypatch, "3.27.18", payloads={platform: payload}
+    )
+    with pytest.raises(RuntimeError, match="Unexpected Cursor"):
+        run_async(updater.fetch_latest(object(), context=UpdateContext(current=None)))
+
+
+def test_cursor_rejects_staged_linux_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commit = "b" * 40
+    staged = json.dumps({
+        "version": "3.27.18",
+        "productVersion": "3.27.18",
+        "url": (
+            f"https://downloads.cursor.com/production/{commit}/linux/arm64/"
+            "Cursor-3.27.17-aarch64.AppImage.zsync"
+        ),
+    }).encode()
+    updater, _requested = _cursor_feed(
+        monkeypatch, "3.27.18", payloads={"aarch64-linux": staged}
+    )
+    with pytest.raises(RuntimeError, match="channel named 3.27.18 but published"):
+        run_async(updater.fetch_latest(object(), context=UpdateContext(current=None)))
