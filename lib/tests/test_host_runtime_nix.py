@@ -202,32 +202,15 @@ def test_zeus_preserves_the_town_workstation_contract() -> None:
     reason="Host files fold profiles into constructor arguments; only evaluation "
     "shows the composed result."
 )
-def test_argus_is_a_town_workstation_with_the_rocinante_builder() -> None:
-    """Argus adds rocinante as substituter and build machine, and caches on Build."""
+def test_argus_is_a_town_workstation_that_builds_locally() -> None:
+    """Argus keeps local build slots and no rocinante builder while it is offline."""
     assert _host_arguments("argus") == {
         **_host_arguments("zeus"),
         "extraHomeModules": [*_TOWN_HOME_MODULES, "./darwin/george/build-volume.nix"],
         "extraSystemModules": [
             *_GEORGE_BASE_SYSTEM_MODULES,
             "./darwin/george/work.nix",
-            "<function>",
-            {
-                "nix": {
-                    "buildMachines": [
-                        {
-                            "hostName": "rocinante",
-                            "maxJobs": 8,
-                            "protocol": "ssh-ng",
-                            "speedFactor": 2,
-                            "sshKey": "/Users/george/.ssh/rocinante-nix-substituter",
-                            "sshUser": "george",
-                            "supportedFeatures": ["benchmark", "big-parallel"],
-                            "systems": ["aarch64-darwin"],
-                        }
-                    ],
-                    "settings": {"max-jobs": 0, "trusted-users": ["george"]},
-                }
-            },
+            {"nix": {"settings": {"max-jobs": "auto", "trusted-users": ["george"]}}},
             "./darwin/argus/spotlight.nix",
             "./darwin/george/build-volume-launchd.nix",
         ],
