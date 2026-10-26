@@ -108,8 +108,10 @@ platform-specific drift.
 Each host file composes profiles from `darwin/george/profiles.nix` with
 `profiles.mkHost` and lists only its own differences:
 
-- `darwin/argus.nix`: `georgeBase` and `townWorkstation`, plus the rocinante
-  substituter
+- `darwin/argus.nix`: `georgeBase` and `townWorkstation`, plus the Spotlight
+  indexing switch, the build-volume launchd job, and local-only build slots
+  (the rocinante build machine and substituter are disabled while it is
+  offline)
 - `darwin/rocinante.nix`: `georgeBase`, plus the personal Dock
 - `darwin/zeus.nix`: `georgeBase` and `townWorkstation`, plus the computer name
 
