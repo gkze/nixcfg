@@ -35,6 +35,9 @@ let
   nodejs = builtins.getAttr toolchain.nodejsAttr pkgs;
   pnpmPackage = builtins.getAttr toolchain.pnpmAttr pkgs;
   pnpm = pnpmPackage.override { nodejs-slim = nodejs; };
+  # nixpkgs rejects fetcherVersion 3 for pnpm 11 and newer. The pnpm 10 pin
+  # still recorded in sources.json keeps hashing with version 3.
+  pnpmFetcherVersion = if lib.versionAtLeast pnpm.version "11.0.0" then 4 else 3;
 
   pnpmDeps =
     if fetchPnpmDeps != null then
@@ -45,7 +48,7 @@ let
           src
           pnpm
           ;
-        fetcherVersion = 3;
+        fetcherVersion = pnpmFetcherVersion;
         hash = slib.sourceHash pname "npmDepsHash";
       }
     else
@@ -55,7 +58,7 @@ let
           version
           src
           ;
-        fetcherVersion = 3;
+        fetcherVersion = pnpmFetcherVersion;
         hash = slib.sourceHash pname "npmDepsHash";
       };
 
