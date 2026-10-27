@@ -38,3 +38,4 @@ canary-slots: 0
 2026-10-24T11:46:00Z one Update run after 40086686747 prepare-x86 fix (opencode/opencode-desktop node_modules: fork d5ea4ab relocked bun.lock with its packageManager bun@1.4.4, nixpkgs bun 1.4.2 rejected it under --frozen-lockfile; install with lib/exact-bun.nix at the input's packageManager, desktop probes read opencode's in-run pin)
 2026-10-27T11:12:02Z one Update run after b8891834 (unsloth 0.1.911 ownership anchors and rustc 1.90)
 2026-10-27T15:28:34Z one Update run after 274e167e (drop a source hash URL the incoming entry replaced)
+2026-10-27T20:21:00Z one Update run after 9386ce48 (neutils zon2nix cold-fetch budget)
