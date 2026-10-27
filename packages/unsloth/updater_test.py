@@ -2839,7 +2839,10 @@ def test_unsloth_rejects_invalid_backend_upload_time(value: str) -> None:
         module._canonical_pypi_upload_time(value)
 
 
-@pytest.mark.parametrize("version", ["0.1.902-beta", "0.1.909-beta", "0.1.910-beta"])
+@pytest.mark.parametrize(
+    "version",
+    ["0.1.902-beta", "0.1.909-beta", "0.1.910-beta", "0.1.911-beta"],
+)
 def test_unsloth_build_toolchain_override_is_updater_owned(version: str) -> None:
     """A release whose own lockfile needs a newer compiler is recorded, not restated in Nix."""
     module = _load_updater_module()
@@ -4063,6 +4066,39 @@ def test_unsloth_policy_patch_applies_declared_desktop_ownership_replacements(
     )
     with pytest.raises(RuntimeError, match="already applied"):
         module.patch_tree(tmp_path)
+
+
+def test_unsloth_policy_patch_keeps_previous_resolution_and_setup_anchors(
+    tmp_path: Path,
+) -> None:
+    """0.1.911-beta's predecessors still get the Nix backend and setup guard."""
+    module = _load_patch_module()
+    _write_patch_fixture(tmp_path, module)
+    _write_backend_patch_fixture(tmp_path, module)
+    markers = (
+        "In dev mode, check for local repo venv first",
+        "This script is spawned as powershell.exe",
+    )
+    expected: list[tuple[Path, str]] = []
+    for patch in (*module._PATCHES, *module._BACKEND_PATCHES):
+        if not patch.alternatives:
+            continue
+        old, new = patch.alternatives[0]
+        if not any(marker in old for marker in markers):
+            continue
+        path = tmp_path / patch.path
+        source = path.read_text(encoding="utf-8")
+        assert source.count(patch.old) == 1
+        path.write_text(source.replace(patch.old, old, 1), encoding="utf-8")
+        expected.append((patch.path, new))
+
+    assert len(expected) == len(markers)
+    module.patch_tree(tmp_path)
+    module.patch_backend_tree(tmp_path)
+
+    for relative_path, replacement in expected:
+        patched = (tmp_path / relative_path).read_text(encoding="utf-8")
+        assert replacement in patched
 
 
 def test_unsloth_policy_patch_omits_root_installers_from_macos_bundle(
