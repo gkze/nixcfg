@@ -681,17 +681,35 @@ _PATCHES = (
     // PYTHONHOME / PYTHONPATH left alone, for the reason in the blocking flavour.
 """,
     ),
+    # 0.1.911-beta wrapped the dev-venv lookup in cfg(debug_assertions) and
+    # dropped the old leading comment. Both shapes must still return the Nix
+    # backend before that lookup.
     _SourcePatch(
         Path("studio/src-tauri/src/process.rs"),
         """pub(crate) fn resolve_backend_binary() -> Result<std::path::PathBuf, String> {
-    // In dev mode, check for local repo venv first
+    #[cfg(debug_assertions)]
+    {
 """,
         """pub(crate) fn resolve_backend_binary() -> Result<std::path::PathBuf, String> {
     if crate::nix_managed::enabled() {
         return crate::nix_managed::backend_binary();
     }
+    #[cfg(debug_assertions)]
+    {
+""",
+        alternatives=(
+            (
+                """pub(crate) fn resolve_backend_binary() -> Result<std::path::PathBuf, String> {
     // In dev mode, check for local repo venv first
 """,
+                """pub(crate) fn resolve_backend_binary() -> Result<std::path::PathBuf, String> {
+    if crate::nix_managed::enabled() {
+        return crate::nix_managed::backend_binary();
+    }
+    // In dev mode, check for local repo venv first
+""",
+            ),
+        ),
     ),
     _SourcePatch(
         Path("studio/frontend/src/hooks/use-tauri-update.ts"),
@@ -1760,11 +1778,13 @@ SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
             "command -v npm &>/dev/null; then\n"
         ),
     ),
+    # 0.1.911-beta replaced the PowerShell 5.1 spawn note with the progress-bar
+    # preference. Fail closed immediately after ErrorActionPreference in both.
     _SourcePatch(
         Path("studio/setup.ps1"),
         """$ErrorActionPreference = "Stop"
 
-# This script is spawned as powershell.exe -- Windows PowerShell 5.1 (see the PSModulePath note
+# Windows PowerShell 5.1 progress bar redraws make downloads ~130x slower (38.18s vs 0.29s).
 """,
         f"""$ErrorActionPreference = "Stop"
 
@@ -1772,8 +1792,24 @@ if ($env:UNSLOTH_NIX_MANAGED -eq "1") {{
     throw "Cannot run Studio setup: {_MANAGED_ERROR}."
 }}
 
+# Windows PowerShell 5.1 progress bar redraws make downloads ~130x slower (38.18s vs 0.29s).
+""",
+        alternatives=(
+            (
+                """$ErrorActionPreference = "Stop"
+
 # This script is spawned as powershell.exe -- Windows PowerShell 5.1 (see the PSModulePath note
 """,
+                f"""$ErrorActionPreference = "Stop"
+
+if ($env:UNSLOTH_NIX_MANAGED -eq "1") {{
+    throw "Cannot run Studio setup: {_MANAGED_ERROR}."
+}}
+
+# This script is spawned as powershell.exe -- Windows PowerShell 5.1 (see the PSModulePath note
+""",
+            ),
+        ),
     ),
     _SourcePatch(
         Path("studio/setup.ps1"),
