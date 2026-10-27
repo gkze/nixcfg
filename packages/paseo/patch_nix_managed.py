@@ -74,6 +74,8 @@ _CLAUDE_SESSION_RESOLVER_WIRING = """\
     this.queryFactory = options.queryFactory;
     this.resolveBinary = options.resolveBinary;
 """
+# Session construction and model discovery both forward this resolver.
+# The discovery call is indented further, and the six-space token still matches.
 _CLAUDE_RESOLVER_FORWARDING = "      resolveBinary: this.resolveBinary,\n"
 # Current model discovery resolves the Claude Code version through the same
 # resolver as the sessions, so it reaches the Nix-provided executable.
@@ -109,7 +111,8 @@ export async function resolveClaudeCodeVersion(
   const availability = await checkProviderLaunchAvailable(launch);
 """
 _CLAUDE_BUILD_OPTIONS_SIGNATURE = (
-    "\n\n  private async buildOptions(): Promise<ClaudeOptions> {"
+    "\n\n  private async buildOptions(permissionMode: PermissionMode): "
+    "Promise<ClaudeOptions> {"
 )
 _CLAUDE_BINARY_RESOLUTION = "    const claudeBinary = await this.resolveBinary();\n"
 _CLAUDE_OPTIONS_HANDOFF = "      pathToClaudeCodeExecutable: claudeBinary,\n"
@@ -231,8 +234,9 @@ function nixOwnsUpdates(): boolean {{
     ),
     SourcePatch(
         "packages/server/src/server/session/daemon/npm-global-cli.ts",
-        """  installLatest(): Promise<CommandResult> {
-    return this.runCommand("npm", ["install", "-g", `${PASEO_CLI_PACKAGE}@latest`], {
+        """  installLatest(options: NpmGlobalOptions = {}): Promise<CommandResult> {
+    const prefixArgs = options.prefix ? ["--prefix", options.prefix] : [];
+    return this.runCommand("npm", ["install", "-g", `${PASEO_CLI_PACKAGE}@latest`, ...prefixArgs], {
       timeout: NPM_INSTALL_TIMEOUT_MS,
       maxBuffer: NPM_MAX_BUFFER_BYTES,
     });
@@ -311,7 +315,7 @@ def validate_claude_provider_source(source: str) -> None:
         (_CLAUDE_CLIENT_RESOLVER_WIRING, 1),
         (_CLAUDE_SESSION_CLASS, 1),
         (_CLAUDE_SESSION_RESOLVER_WIRING, 1),
-        (_CLAUDE_RESOLVER_FORWARDING, 2),
+        (_CLAUDE_RESOLVER_FORWARDING, 3),
         (_CLAUDE_CATALOG_VERSION_WIRING, 1),
         (_CLAUDE_AVAILABILITY_LAUNCH, 1),
         (_CLAUDE_DIAGNOSTIC_LAUNCH, 1),
