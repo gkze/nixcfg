@@ -742,6 +742,48 @@ class TestSourcesFile:
         assert merged.urls == {"buzz": new_buzz, "meshLlm": mesh}
         assert merged.version == "0.5.26"
 
+    def test_source_entry_merge_drops_replaced_url_keyed_hashes(self) -> None:
+        """A new tarball URL replaces the previous one of that hash type."""
+        old_pnpm = "https://registry.npmjs.org/pnpm/-/pnpm-11.28.4.tgz"
+        new_pnpm = "https://registry.npmjs.org/pnpm/-/pnpm-11.28.6.tgz"
+        addon = "https://registry.npmjs.org/node-addon-api/-/node-addon-api-8.3.0.tgz"
+        old_hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        new_hash = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+        addon_hash = "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="
+        darwin_hash = "sha256-DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD="
+        current = SourceEntry.model_validate({
+            "hashes": [
+                {"hashType": "sha256", "hash": old_hash, "url": old_pnpm},
+                {"hashType": "sha256", "hash": addon_hash, "url": addon},
+                {
+                    "hashType": "sha256",
+                    "hash": darwin_hash,
+                    "platform": "aarch64-darwin",
+                    "url": old_pnpm,
+                },
+                {"hashType": "srcHash", "hash": old_hash},
+            ],
+            "version": "0.15.0",
+        })
+        incoming = SourceEntry.model_validate({
+            "hashes": [
+                {"hashType": "sha256", "hash": new_hash, "url": new_pnpm},
+                {"hashType": "sha256", "hash": addon_hash, "url": addon},
+                {"hashType": "srcHash", "hash": new_hash},
+            ],
+            "version": "0.16.0",
+        })
+
+        merged = current.merge_native_update(incoming)
+        entries = expect_not_none(merged.hashes.entries)
+        assert {(entry.hash_type, entry.platform, entry.url) for entry in entries} == {
+            ("sha256", None, new_pnpm),
+            ("sha256", None, addon),
+            ("sha256", "aarch64-darwin", old_pnpm),
+            ("srcHash", None, None),
+        }
+        assert merged.version == "0.16.0"
+
     def test_source_entry_sources_file_merge_load_save(
         self,
         tmp_path: Path,
