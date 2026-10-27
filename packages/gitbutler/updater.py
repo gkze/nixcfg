@@ -5,6 +5,7 @@ import re
 from typing import TYPE_CHECKING, ClassVar, Literal, cast
 
 from lib.nix.models.sources import HashEntry, SourceHashes
+from lib.update import nix as update_nix
 from lib.update.events import (
     EventSink,
     ignore_event,
@@ -44,6 +45,10 @@ class GitButlerUpdater(Crate2NixArtifactsMixin, FlakeInputHashUpdater):
     input_name = "gitbutler"
     hash_type: Literal["npmDepsHash"] = "npmDepsHash"
     hash_attr_path = ".frontend.pnpmDeps"
+    # Fetcher v4 store paths differ by OS. Each native prepare certifies only
+    # its own hash; candidate merge unions the complementary entries.
+    platform_specific = True
+    native_only = True
     supported_platforms = ("aarch64-darwin", "x86_64-linux")
     GITHUB_OWNER: ClassVar[str] = "gitbutlerapp"
     GITHUB_REPO: ClassVar[str] = "gitbutler"
@@ -125,6 +130,52 @@ class GitButlerUpdater(Crate2NixArtifactsMixin, FlakeInputHashUpdater):
             for key in self.TOOLCHAIN_PIN_KEYS
         }
 
+    def _platform_targets(self, current_platform: str) -> tuple[str, ...]:
+        """Return only this host.
+
+        A foreign builder cannot materialize the other platform's pnpm store.
+        """
+        return (current_platform,)
+
+    def _retained_hash(self, entry: HashEntry, platform: str) -> bool:
+        """Keep hashes this run did not recompute."""
+        if entry.hash_type != self.hash_type:
+            return True
+        return entry.platform not in {None, platform}
+
+    async def _is_latest(
+        self,
+        context: UpdateContext,
+        info: VersionInfo,
+    ) -> bool:
+        """Trust this platform's certificate instead of the merged drvHash.
+
+        Parallel prepares last-win the scalar ``drvHash``. Comparing this host
+        to that value rehashed one platform on every Update after the merge.
+        """
+        current = context.current
+        if (
+            current is None
+            or current.version != info.version
+            or current.pins != self.source_pins_for(info)
+            or current.electron_version != self.build_result(info, []).electron_version
+        ):
+            return False
+        platform = update_nix.get_current_nix_platform()
+        if not self._hash_is_usable(
+            self._existing_platform_hashes(context).get(platform)
+        ):
+            return False
+        try:
+            await self._prepare_hash_probes(
+                self.build_result(info, []),
+                context=context,
+            )
+        except RuntimeError:
+            return False
+        certified = (current.platform_drv_hashes or {}).get(platform)
+        return certified == context.drv_fingerprints.get(platform)
+
     async def fetch_latest(
         self, session: aiohttp.ClientSession, *, context: UpdateContext
     ) -> VersionInfo:
@@ -173,11 +224,25 @@ class GitButlerUpdater(Crate2NixArtifactsMixin, FlakeInputHashUpdater):
         context: UpdateContext,
         emit: EventSink = ignore_event,
     ) -> SourceHashes:
-        """Refresh crate2nix artifacts before computing the pnpm hash."""
-        _ = (session, context)
+        """Refresh crate2nix artifacts, then record this host's pnpm hash."""
+        _ = session
         await self.stream_materialized_artifacts(emit=emit)
         context.prepared_probes.clear()
         context.drv_fingerprints.clear()
         context.drv_fingerprint = None
         hash_value = await self._compute_hash(info, context=context, emit=emit)
-        return [HashEntry.create(self.hash_type, hash_value)]
+        platform = update_nix.get_current_nix_platform()
+        preserved: list[HashEntry] = []
+        if context.current is not None:
+            preserved.extend(
+                entry
+                for entry in context.current.hashes.entries or ()
+                if self._retained_hash(entry, platform)
+            )
+            for key, value in (context.current.platform_drv_hashes or {}).items():
+                if key != platform:
+                    context.drv_fingerprints[key] = value
+        return [
+            *preserved,
+            HashEntry.create(self.hash_type, hash_value, platform=platform),
+        ]

@@ -3,7 +3,7 @@
 import pytest
 
 from lib.nix.models.flake_lock import FlakeLockNode
-from lib.nix.models.sources import HashEntry, SourceEntry
+from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import (
     empty_event_stream,
@@ -13,12 +13,16 @@ from lib.tests._updater_helpers import run_async as _run
 from lib.update import nix as update_nix
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.candidate import ResolvedVersion
+from lib.update.ci import candidate as candidate_pipeline
 from lib.update.events import EventSink, UpdateEvent, UpdateEventKind, ignore_event
 from lib.update.nix import PreparedProbe, _build_package_path_attr_expr
 from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters.node_compatibility import NodejsSelection
 
 HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+USABLE_HASH = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+FOREIGN_HASH = "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="
+OTHER_HASH = "sha256-DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD="
 NODEJS_VERSION = "24.11.1"
 PNPM_VERSION = "10.34.5"
 PACKAGE_MANIFEST = {
@@ -179,10 +183,14 @@ def test_gitbutler_updater_tracks_release_ref_and_metadata(
 
     assert module.GitButlerUpdater.hash_type == "npmDepsHash"
     assert module.GitButlerUpdater.input_name == "gitbutler"
+    assert module.GitButlerUpdater.platform_specific is True
+    assert module.GitButlerUpdater.native_only is True
     assert module.GitButlerUpdater.supported_platforms == (
         "aarch64-darwin",
         "x86_64-linux",
     )
+    updater.native_only = False
+    assert updater._platform_targets("aarch64-darwin") == ("aarch64-darwin",)
     assert info.version == "0.19.9"
     assert info.commit == "b" * 40
     assert info.metadata == {
@@ -470,6 +478,10 @@ def test_gitbutler_updater_streams_artifacts_before_hashing(
     )
     monkeypatch.setattr(updater, "stream_materialized_artifacts", _artifacts)
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
 
     events = _run(
         _collect(
@@ -488,7 +500,9 @@ def test_gitbutler_updater_streams_artifacts_before_hashing(
     ]
     assert events[0].message == "materialized cargo artifacts"
     assert events[1].message == "hashing pnpm deps"
-    assert events.result == [HashEntry.create("npmDepsHash", HASH)]
+    assert events.result == [
+        HashEntry.create("npmDepsHash", HASH, platform="aarch64-darwin")
+    ]
 
 
 def test_gitbutler_update_recomputes_pnpm_drv_hash_when_cargo_artifacts_change(
@@ -548,6 +562,10 @@ def test_gitbutler_update_recomputes_pnpm_drv_hash_when_cargo_artifacts_change(
         "lib.update.nix.compute_expr_drv_fingerprint",
         _compute_drv_fingerprint,
     )
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
 
     events = _run(
         _collect(lambda emit: updater.update_stream(current, object(), emit=emit))
@@ -559,7 +577,10 @@ def test_gitbutler_update_recomputes_pnpm_drv_hash_when_cargo_artifacts_change(
     assert isinstance(result, SourceEntry)
     assert result.version == "0.19.9"
     assert result.drv_hash == "pre-artifact-drv"
-    assert result.hashes.entries == [HashEntry.create("npmDepsHash", HASH)]
+    assert result.hashes.entries == [
+        HashEntry.create("npmDepsHash", HASH, platform="aarch64-darwin")
+    ]
+    assert result.platform_drv_hashes == {"aarch64-darwin": "pre-artifact-drv"}
     assert result.pins == TOOLCHAIN_PINS
     assert fingerprint_calls == 1
 
@@ -597,3 +618,268 @@ def test_gitbutler_updater_propagates_npm_hash_failure(
                 )
             )
         )
+
+
+def _platform_source(
+    *,
+    version: str = "0.19.9",
+    pins: dict[str, str] | None = None,
+    hashes: list[HashEntry] | None = None,
+    platform_drv_hashes: dict[str, str] | None = None,
+    electron_version: str | None = None,
+    drv_hash: str | None = "probe-drv",
+) -> SourceEntry:
+    return SourceEntry(
+        version=version,
+        input="gitbutler",
+        pins=TOOLCHAIN_PINS if pins is None else pins,
+        hashes=HashCollection(entries=hashes or []),
+        platform_drv_hashes=platform_drv_hashes,
+        electron_version=electron_version,
+        drv_hash=drv_hash,
+    )
+
+
+def test_gitbutler_fetch_hashes_keeps_foreign_platform_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A native rehash replaces this host and drops the old unqualified hash."""
+    module = _load_module("gitbutler_updater_preserve_platform_test")
+    updater = module.GitButlerUpdater()
+    foreign = HashEntry.create(
+        "npmDepsHash",
+        FOREIGN_HASH,
+        platform="x86_64-linux",
+    )
+    other = HashEntry.create("srcHash", OTHER_HASH)
+    current = _platform_source(
+        hashes=[
+            HashEntry.create("npmDepsHash", USABLE_HASH),
+            HashEntry.create("npmDepsHash", USABLE_HASH, platform="aarch64-darwin"),
+            foreign,
+            other,
+        ],
+        platform_drv_hashes={
+            "aarch64-darwin": "stale-darwin",
+            "x86_64-linux": "x86-cert",
+        },
+    )
+    context = UpdateContext(current=current)
+
+    async def _fixed_hash(*_args: object, **_kwargs: object) -> str:
+        return HASH
+
+    monkeypatch.setattr(updater, "stream_materialized_artifacts", empty_event_stream)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
+
+    events = _run(
+        _collect(
+            lambda emit: updater.fetch_hashes(
+                _version_info(),
+                object(),
+                emit=emit,
+                context=context,
+            )
+        )
+    )
+
+    assert events.result == [
+        foreign,
+        other,
+        HashEntry.create("npmDepsHash", HASH, platform="aarch64-darwin"),
+    ]
+    assert context.drv_fingerprints == {
+        "aarch64-darwin": "probe-drv",
+        "x86_64-linux": "x86-cert",
+    }
+
+
+def test_gitbutler_fetch_hashes_accepts_a_mapping_only_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A source with no hash entries still records this host's pnpm hash."""
+    module = _load_module("gitbutler_updater_mapping_source_test")
+    updater = module.GitButlerUpdater()
+    current = SourceEntry(
+        version="0.19.9",
+        input="gitbutler",
+        hashes=HashCollection(mapping={"aarch64-darwin": USABLE_HASH}),
+    )
+    context = UpdateContext(current=current)
+
+    async def _fixed_hash(*_args: object, **_kwargs: object) -> str:
+        return HASH
+
+    monkeypatch.setattr(updater, "stream_materialized_artifacts", empty_event_stream)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
+
+    events = _run(
+        _collect(
+            lambda emit: updater.fetch_hashes(
+                _version_info(),
+                object(),
+                emit=emit,
+                context=context,
+            )
+        )
+    )
+
+    assert events.result == [
+        HashEntry.create("npmDepsHash", HASH, platform="aarch64-darwin")
+    ]
+    assert context.drv_fingerprints == {"aarch64-darwin": "probe-drv"}
+
+
+def test_gitbutler_platform_hashes_union_across_native_prepares() -> None:
+    """Complementary pnpm hashes merge; one unqualified hash does not."""
+    darwin = _platform_source(
+        version="0.23.0",
+        hashes=[
+            HashEntry.create("npmDepsHash", USABLE_HASH, platform="aarch64-darwin")
+        ],
+        platform_drv_hashes={"aarch64-darwin": "darwin-drv"},
+        drv_hash="darwin-drv",
+    )
+    x86 = _platform_source(
+        version="0.23.0",
+        hashes=[HashEntry.create("npmDepsHash", FOREIGN_HASH, platform="x86_64-linux")],
+        platform_drv_hashes={"x86_64-linux": "x86-drv"},
+        drv_hash="x86-drv",
+    )
+
+    assert candidate_pipeline._source_entries_compatible(darwin, x86)
+    merged = darwin.merge(x86)
+    assert merged.hashes.entries == [
+        HashEntry.create("npmDepsHash", USABLE_HASH, platform="aarch64-darwin"),
+        HashEntry.create("npmDepsHash", FOREIGN_HASH, platform="x86_64-linux"),
+    ]
+    assert merged.platform_drv_hashes == {
+        "aarch64-darwin": "darwin-drv",
+        "x86_64-linux": "x86-drv",
+    }
+    collided = darwin.model_copy(
+        update={
+            "hashes": HashCollection(
+                entries=[HashEntry.create("npmDepsHash", USABLE_HASH)]
+            )
+        }
+    )
+    other = x86.model_copy(
+        update={
+            "hashes": HashCollection(
+                entries=[HashEntry.create("npmDepsHash", FOREIGN_HASH)]
+            )
+        }
+    )
+    assert not candidate_pipeline._source_entries_compatible(collided, other)
+
+
+@pytest.mark.parametrize(
+    "current",
+    [
+        None,
+        _platform_source(version="0.19.8"),
+        _platform_source(pins={**TOOLCHAIN_PINS, "pnpmVersion": "10.0.0"}),
+        _platform_source(electron_version="40.0.0"),
+        _platform_source(
+            hashes=[
+                HashEntry.create(
+                    "npmDepsHash",
+                    USABLE_HASH,
+                    platform="x86_64-linux",
+                )
+            ]
+        ),
+        _platform_source(
+            hashes=[HashEntry.create("npmDepsHash", HASH, platform="aarch64-darwin")]
+        ),
+    ],
+)
+def test_gitbutler_is_latest_rejects_incomplete_native_state(
+    monkeypatch: pytest.MonkeyPatch,
+    current: SourceEntry | None,
+) -> None:
+    """Version, pins, and a usable native hash are required before the probe."""
+    module = _load_module("gitbutler_updater_stale_latest_test")
+    updater = module.GitButlerUpdater()
+    probed = False
+
+    async def _probe(*_args: object, **_kwargs: object) -> str:
+        nonlocal probed
+        probed = True
+        return "probe-drv"
+
+    monkeypatch.setattr(updater, "_prepare_hash_probes", _probe)
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
+
+    assert not _run(updater._is_latest(UpdateContext(current=current), _version_info()))
+    assert not probed
+
+
+def test_gitbutler_is_latest_follows_this_platforms_certificate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A matching native certificate skips the pnpm fetch."""
+    module = _load_module("gitbutler_updater_fresh_latest_test")
+    updater = module.GitButlerUpdater()
+    current = _platform_source(
+        hashes=[
+            HashEntry.create(
+                "npmDepsHash",
+                USABLE_HASH,
+                platform="aarch64-darwin",
+            )
+        ],
+        platform_drv_hashes={"aarch64-darwin": "probe-drv"},
+    )
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
+
+    assert _run(updater._is_latest(UpdateContext(current=current), _version_info()))
+
+    stale = current.model_copy(
+        update={"platform_drv_hashes": {"aarch64-darwin": "other-drv"}}
+    )
+    assert not _run(updater._is_latest(UpdateContext(current=stale), _version_info()))
+
+
+def test_gitbutler_is_latest_treats_probe_failure_as_stale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fingerprint probe that cannot run must recompute the hash."""
+    module = _load_module("gitbutler_updater_probe_failure_test")
+    updater = module.GitButlerUpdater()
+    current = _platform_source(
+        hashes=[
+            HashEntry.create(
+                "npmDepsHash",
+                USABLE_HASH,
+                platform="aarch64-darwin",
+            )
+        ],
+        platform_drv_hashes={"aarch64-darwin": "probe-drv"},
+    )
+
+    async def _probe(*_args: object, **_kwargs: object) -> str:
+        raise RuntimeError("probe unavailable")
+
+    monkeypatch.setattr(updater, "_prepare_hash_probes", _probe)
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
+
+    assert not _run(updater._is_latest(UpdateContext(current=current), _version_info()))
