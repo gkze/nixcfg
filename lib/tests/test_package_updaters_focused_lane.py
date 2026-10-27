@@ -679,8 +679,7 @@ def test_zen_twilight_retries_the_whole_unpinned_snapshot(
             "20260803113308",  # first version resolution
             "20260803113308",  # first pre-hash check
             "20260804121500",  # first post-hash check detects movement
-            "20260804121500",  # retry version resolution
-            "20260804121500",  # retry pre-hash check
+            "20260804121500",  # retry hashes the newer build, pre-hash check
             "20260804121500",  # retry post-hash check
         ),
     )
@@ -737,12 +736,11 @@ def test_zen_twilight_bounds_repeated_snapshot_changes(
         monkeypatch,
         module,
         (
-            "20260803113308",
-            "20260803113308",
-            "20260804121500",
-            "20260804121500",
-            "20260804121500",
-            "20260805103000",
+            "20260803113308",  # resolve
+            "20260803113308",  # pre-hash
+            "20260804121500",  # post-hash adopts this build
+            "20260804121500",  # retry pre-hash confirms it
+            "20260805103000",  # retry post-hash moves again
         ),
     )
     hash_calls = _install_twilight_hashes(
@@ -761,6 +759,153 @@ def test_zen_twilight_bounds_repeated_snapshot_changes(
         )
 
     assert len(hash_calls) == 2
+
+
+@pytest.mark.usefixtures("_twilight_darwin_platform")
+def test_zen_twilight_adopts_a_newer_build_and_ignores_a_stale_reread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A checkpointed resolve must not outrank the newer live feed read.
+
+    Update 40593795688 hashed 1.24t, observed 1.25t, then retried the
+    checkpointed 1.24t and stopped. The retry hashes 1.25t and skips an
+    older edge response.
+    """
+    module = _load_updater(
+        "packages/zen-twilight/updater.py",
+        "zen_twilight_updater_test_stale_reread",
+    )
+    updater = module.ZenTwilightUpdater(config=resolve_config(retry_backoff=0))
+    _install_twilight_feed(
+        monkeypatch,
+        module,
+        (
+            "20261026063841",  # resolve
+            "20261026063841",  # pre-hash
+            "20261027070655",  # post-hash adopts the newer build
+            "20261026063841",  # retry pre-hash is a stale edge
+            "20261027070655",  # retry pre-hash confirms the adopted build
+            "20261027070655",  # retry post-hash
+        ),
+    )
+    hash_calls = _install_twilight_hashes(
+        monkeypatch,
+        ("sha256-stale", "sha256-current"),
+    )
+
+    events = _run(
+        _collect_events(lambda emit: updater.update_stream(None, object(), emit=emit))
+    )
+
+    result_payloads = [
+        event.payload
+        for event in events
+        if event.kind is UpdateEventKind.RESULT and event.payload is not None
+    ]
+    assert result_payloads == [
+        SourceEntry(
+            version="1.22t-20261027070655",
+            hashes={
+                "aarch64-darwin": "sha256-current",
+                "x86_64-darwin": "sha256-current",
+            },
+            urls={
+                "aarch64-darwin": updater.TWILIGHT_DMG_URL,
+                "x86_64-darwin": updater.TWILIGHT_DMG_URL,
+            },
+        )
+    ]
+    assert len(hash_calls) == 2
+
+
+def test_zen_twilight_rejects_a_version_without_a_build_id() -> None:
+    """Ordering reads requires the numeric build id from the feed."""
+    module = _load_updater(
+        "packages/zen-twilight/updater.py",
+        "zen_twilight_updater_test_build_id",
+    )
+
+    with pytest.raises(RuntimeError, match="no numeric build id"):
+        module._twilight_build_id("1.22t")
+
+
+def test_zen_twilight_stops_after_repeated_stale_feed_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An older edge that never recovers is still a failed snapshot."""
+    module = _load_updater(
+        "packages/zen-twilight/updater.py",
+        "zen_twilight_updater_test_stale_exhausted",
+    )
+    updater = module.ZenTwilightUpdater(config=resolve_config(retry_backoff=0))
+    _install_twilight_feed(
+        monkeypatch,
+        module,
+        ("20260803113308",) * module.ZenTwilightUpdater.STALE_READS,
+    )
+    hash_calls = _install_twilight_hashes(monkeypatch, ("sha256-unexpected",))
+
+    with pytest.raises(RuntimeError, match="changed before hashing"):
+        _run(
+            _collect_events(
+                lambda emit: updater.fetch_hashes(
+                    VersionInfo("1.22t-20260804121500"),
+                    object(),
+                    emit=emit,
+                    context=UpdateContext(current=None),
+                )
+            )
+        )
+
+    assert hash_calls == []
+
+
+@pytest.mark.usefixtures("_twilight_darwin_platform")
+def test_zen_twilight_retries_after_an_older_edge_hides_the_resolved_build(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep the resolved build when confirmation reads are only older."""
+    module = _load_updater(
+        "packages/zen-twilight/updater.py",
+        "zen_twilight_updater_test_older_edge",
+    )
+    updater = module.ZenTwilightUpdater(config=resolve_config(retry_backoff=0))
+    stale = ("20260803113308",) * module.ZenTwilightUpdater.STALE_READS
+    _install_twilight_feed(
+        monkeypatch,
+        module,
+        (
+            "20260804121500",  # resolve
+            *stale,  # pre-hash never confirms
+            "20260804121500",  # retry pre-hash
+            "20260804121500",  # retry post-hash
+        ),
+    )
+    hash_calls = _install_twilight_hashes(monkeypatch, ("sha256-current",))
+
+    events = _run(
+        _collect_events(lambda emit: updater.update_stream(None, object(), emit=emit))
+    )
+
+    result_payloads = [
+        event.payload
+        for event in events
+        if event.kind is UpdateEventKind.RESULT and event.payload is not None
+    ]
+    assert result_payloads == [
+        SourceEntry(
+            version="1.22t-20260804121500",
+            hashes={
+                "aarch64-darwin": "sha256-current",
+                "x86_64-darwin": "sha256-current",
+            },
+            urls={
+                "aarch64-darwin": updater.TWILIGHT_DMG_URL,
+                "x86_64-darwin": updater.TWILIGHT_DMG_URL,
+            },
+        )
+    ]
+    assert len(hash_calls) == 1
 
 
 def test_scratch_expr_builders_fetch_hashes_and_build_result(
