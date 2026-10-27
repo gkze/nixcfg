@@ -106,6 +106,8 @@ _RUST_TOOLCHAIN_BUILD_OVERRIDES: dict[str, str] = {
     "0.1.902-beta": "1.90.0",
     "0.1.909-beta": "1.90.0",
     "0.1.910-beta": "1.90.0",
+    # tauri 2.12.4 and muda 0.20.0 require rustc 1.90; rust-version stays 1.89.
+    "0.1.911-beta": "1.90.0",
 }
 _OXC_PACKAGE_PATH = "studio/backend/core/data_recipe/oxc-validator/package.json"
 _OXC_LOCK_PATH = "studio/backend/core/data_recipe/oxc-validator/package-lock.json"
