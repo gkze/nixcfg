@@ -370,6 +370,105 @@ def test_compute_sri_hash_retries_transient_prefetch_failure(
     assert events.result == "sha256-CCC="
 
 
+def test_compute_sri_hash_waits_out_a_resolver_negative_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A DNS failure waits for the resolver cache; other faults keep the backoff."""
+    delays: list[float] = []
+
+    async def _sleep(delay: float) -> None:
+        delays.append(delay)
+
+    async def _prefetch_url(
+        url: str,
+        *,
+        name: str | None = None,
+        command_timeout: float | None = None,
+    ) -> SimpleNamespace:
+        assert url == "https://example.com/archive.tar.gz"
+        assert name is None
+        assert command_timeout == 19
+        if not delays:
+            raise NixCommandError(
+                LibCommandResult(
+                    args=["nix", "store", "prefetch-file", url],
+                    returncode=1,
+                    stdout="",
+                    stderr=(
+                        "error: unable to download: Could not resolve host: example.com"
+                    ),
+                )
+            )
+        return SimpleNamespace(hash="sha256-CCC=", storePath="/nix/store/example")
+
+    monkeypatch.setattr("lib.update.process.asyncio.sleep", _sleep)
+    monkeypatch.setattr("lib.update.process.libnix_prefetch_url_result", _prefetch_url)
+
+    events = _collect_stream(
+        lambda emit: compute_sri_hash(
+            "demo",
+            "https://example.com/archive.tar.gz",
+            config=resolve_config(
+                retries=2,
+                retry_backoff=1,
+                subprocess_timeout=19,
+            ),
+            emit=emit,
+        )
+    )
+
+    assert delays == [30.0]
+    assert events.result == "sha256-CCC="
+
+
+def test_compute_sri_hash_keeps_configured_backoff_for_transfer_faults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-resolver transfer fault keeps the configured prefetch backoff."""
+    delays: list[float] = []
+
+    async def _sleep(delay: float) -> None:
+        delays.append(delay)
+
+    async def _prefetch_url(
+        url: str,
+        *,
+        name: str | None = None,
+        command_timeout: float | None = None,
+    ) -> SimpleNamespace:
+        assert command_timeout == 19
+        assert name is None
+        if not delays:
+            raise NixCommandError(
+                LibCommandResult(
+                    args=["nix", "store", "prefetch-file", url],
+                    returncode=1,
+                    stdout="",
+                    stderr="Failure when receiving data from the peer",
+                )
+            )
+        return SimpleNamespace(hash="sha256-CCC=", storePath="/nix/store/example")
+
+    monkeypatch.setattr("lib.update.process.asyncio.sleep", _sleep)
+    monkeypatch.setattr("lib.update.process.libnix_prefetch_url_result", _prefetch_url)
+
+    result = _collect_stream(
+        lambda emit: compute_sri_hash(
+            "demo",
+            "https://example.com/archive.tar.gz",
+            config=resolve_config(
+                retries=2,
+                retry_backoff=1.5,
+                subprocess_timeout=19,
+            ),
+            emit=emit,
+        )
+    )
+
+    assert delays == [1.5]
+    assert result.result == "sha256-CCC="
+
+
 def test_compute_url_hashes_gather_and_type_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
