@@ -39,3 +39,4 @@ canary-slots: 0
 2026-10-27T11:12:02Z one Update run after b8891834 (unsloth 0.1.911 ownership anchors and rustc 1.90)
 2026-10-27T15:28:34Z one Update run after 274e167e (drop a source hash URL the incoming entry replaced)
 2026-10-27T20:21:00Z one Update run after 9386ce48 (neutils zon2nix cold-fetch budget)
+2026-10-27T22:18:23Z one Update run after 7adf2a97 (gitbutler pnpm 12 fetcher v4, per-platform npmDepsHash)
