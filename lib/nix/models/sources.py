@@ -399,11 +399,46 @@ class SourceEntry(BaseModel):
             entries=[entry for entry in self.hashes.entries if entry.url not in urls]
         )
 
+    def _superseded_url_entries(
+        self,
+        other: SourceEntry,
+    ) -> frozenset[tuple[str, str | None, str]]:
+        """Return URL-keyed hashes the incoming entry replaced.
+
+        Merge identity includes the URL, so a new pnpm tarball used to sit
+        beside the previous one. ``sourceHashEntry`` then saw two unqualified
+        sha256 entries. Sibling URLs that the incoming entry still carries,
+        and hashes for another platform, stay.
+        """
+        if self.hashes.entries is None or other.hashes.entries is None:
+            return frozenset()
+        incoming: dict[tuple[str, str | None], set[str]] = {}
+        for entry in other.hashes.entries:
+            if entry.url is None:
+                continue
+            incoming.setdefault((entry.hash_type, entry.platform), set()).add(entry.url)
+        superseded: list[tuple[str, str | None, str]] = []
+        for entry in self.hashes.entries:
+            if entry.url is None:
+                continue
+            urls = incoming.get((entry.hash_type, entry.platform))
+            if urls is not None and entry.url not in urls:
+                superseded.append((entry.hash_type, entry.platform, entry.url))
+        return frozenset(superseded)
+
     def _merge(self, other: SourceEntry, *, replace_pins: bool) -> SourceEntry:
         """Merge *other*, optionally treating its pins as authoritative."""
-        merged_hashes = self._hashes_without_urls(
-            self._replaced_named_urls(other)
-        ).merge(other.hashes)
+        filtered_hashes = self._hashes_without_urls(self._replaced_named_urls(other))
+        superseded = self._superseded_url_entries(other)
+        if superseded and filtered_hashes.entries is not None:
+            filtered_hashes = HashCollection(
+                entries=[
+                    entry
+                    for entry in filtered_hashes.entries
+                    if (entry.hash_type, entry.platform, entry.url) not in superseded
+                ]
+            )
+        merged_hashes = filtered_hashes.merge(other.hashes)
         merged_urls: dict[str, str] | None = None
         if self.urls or other.urls:
             merged_urls = {**(self.urls or {}), **(other.urls or {})}
