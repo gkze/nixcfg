@@ -956,10 +956,16 @@ class GoVendorHashUpdater(FlakeInputHashUpdater):
 
 
 class CargoVendorHashUpdater(FlakeInputHashUpdater):
-    """Flake-input updater refreshing a Rust ``cargoHash``."""
+    """Flake-input updater refreshing a Rust ``cargoHash``.
+
+    ``fetchCargoVendor`` stores the hash on ``vendorStaging``. The outer
+    ``cargoDeps`` derivation only copies that fixed-output into the vendor
+    directory, so probing the outer derivation reports a nested staging
+    mismatch that the prepared-probe contract cannot certify.
+    """
 
     hash_type: HashType = "cargoHash"
-    hash_attr_path = ".cargoDeps"
+    hash_attr_path = ".cargoDeps.vendorStaging"
 
 
 class NpmDepsHashUpdater(FlakeInputHashUpdater):

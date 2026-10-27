@@ -2591,6 +2591,7 @@ def test_flake_hash_shorthand_updaters_declare_expected_hash_types() -> None:
     """Flake shorthand strategy classes should pin their hash type contracts."""
     assert GoVendorHashUpdater.hash_type == "vendorHash"
     assert CargoVendorHashUpdater.hash_type == "cargoHash"
+    assert CargoVendorHashUpdater.hash_attr_path == ".cargoDeps.vendorStaging"
     assert NpmDepsHashUpdater.hash_type == "npmDepsHash"
     assert BunNodeModulesHashUpdater.hash_type == "nodeModulesHash"
     assert BunNodeModulesHashUpdater.platform_specific is True
