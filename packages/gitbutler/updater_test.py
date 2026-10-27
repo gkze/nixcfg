@@ -750,9 +750,7 @@ def test_gitbutler_platform_hashes_union_across_native_prepares() -> None:
     )
     x86 = _platform_source(
         version="0.23.0",
-        hashes=[
-            HashEntry.create("npmDepsHash", FOREIGN_HASH, platform="x86_64-linux")
-        ],
+        hashes=[HashEntry.create("npmDepsHash", FOREIGN_HASH, platform="x86_64-linux")],
         platform_drv_hashes={"x86_64-linux": "x86-drv"},
         drv_hash="x86-drv",
     )
@@ -801,9 +799,7 @@ def test_gitbutler_platform_hashes_union_across_native_prepares() -> None:
             ]
         ),
         _platform_source(
-            hashes=[
-                HashEntry.create("npmDepsHash", HASH, platform="aarch64-darwin")
-            ]
+            hashes=[HashEntry.create("npmDepsHash", HASH, platform="aarch64-darwin")]
         ),
     ],
 )
@@ -827,9 +823,7 @@ def test_gitbutler_is_latest_rejects_incomplete_native_state(
         lambda: "aarch64-darwin",
     )
 
-    assert not _run(
-        updater._is_latest(UpdateContext(current=current), _version_info())
-    )
+    assert not _run(updater._is_latest(UpdateContext(current=current), _version_info()))
     assert not probed
 
 
@@ -859,9 +853,7 @@ def test_gitbutler_is_latest_follows_this_platforms_certificate(
     stale = current.model_copy(
         update={"platform_drv_hashes": {"aarch64-darwin": "other-drv"}}
     )
-    assert not _run(
-        updater._is_latest(UpdateContext(current=stale), _version_info())
-    )
+    assert not _run(updater._is_latest(UpdateContext(current=stale), _version_info()))
 
 
 def test_gitbutler_is_latest_treats_probe_failure_as_stale(
@@ -890,6 +882,4 @@ def test_gitbutler_is_latest_treats_probe_failure_as_stale(
         lambda: "aarch64-darwin",
     )
 
-    assert not _run(
-        updater._is_latest(UpdateContext(current=current), _version_info())
-    )
+    assert not _run(updater._is_latest(UpdateContext(current=current), _version_info()))

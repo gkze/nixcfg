@@ -162,7 +162,9 @@ class GitButlerUpdater(Crate2NixArtifactsMixin, FlakeInputHashUpdater):
         ):
             return False
         platform = update_nix.get_current_nix_platform()
-        if not self._hash_is_usable(self._existing_platform_hashes(context).get(platform)):
+        if not self._hash_is_usable(
+            self._existing_platform_hashes(context).get(platform)
+        ):
             return False
         try:
             await self._prepare_hash_probes(
