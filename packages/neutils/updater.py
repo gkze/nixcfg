@@ -67,7 +67,12 @@ class NeutilsUpdater(GitHubReleaseUpdater):
     additional_input_names: ClassVar[tuple[str, ...]] = (ZON2NIX_INPUT,)
 
     _ZON2NIX_MAX_ATTEMPTS = 3
-    _ZON2NIX_TIMEOUT_SECONDS = 180
+    # 40550337071 prepare-x86 killed three attempts at 180s while zig was
+    # still storing deps into the shared cache. prepare-arm finished the
+    # same commit's zon2nix in 104s. One attempt has to outlast a cold
+    # fetch on a prepare runner that is already saturating disk and
+    # network; the cache only keeps deps that finished before the kill.
+    _ZON2NIX_TIMEOUT_SECONDS = 1200
     # Command-timeout wording is not a Nix network 5xx. HTTP 5xx,
     # BadHttpStatus, and git 503 live on is_retryable_nix_network_failure.
     _ZON2NIX_TIMEOUT_MARKERS: ClassVar[tuple[str, ...]] = (
