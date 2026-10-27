@@ -38,7 +38,15 @@ let
   pnpmRelease = lib.toInt (builtins.head (builtins.match "pnpm_([0-9]+)" toolchain.pnpmAttr));
   # nixpkgs rejects fetcherVersion 3 once the pnpm pin is 11 or newer.
   # The pnpm 10 pin in sources.json keeps hashing with version 3.
+  # Fetcher v4 store paths differ by platform, so a recorded per-platform
+  # hash wins. The unqualified pnpm 10 hash remains until prepare rewrites it.
   pnpmFetcherVersion = if pnpmRelease >= 11 then 4 else 3;
+  inherit (stdenv.hostPlatform) system;
+  npmDepsHash =
+    let
+      perPlatformHash = builtins.tryEval (slib.sourceHashForPlatform pname "npmDepsHash" system);
+    in
+    if perPlatformHash.success then perPlatformHash.value else slib.sourceHash pname "npmDepsHash";
 
   pnpmDeps =
     if fetchPnpmDeps != null then
@@ -50,7 +58,7 @@ let
           pnpm
           ;
         fetcherVersion = pnpmFetcherVersion;
-        hash = slib.sourceHash pname "npmDepsHash";
+        hash = npmDepsHash;
       }
     else
       pnpm.fetchDeps {
@@ -60,7 +68,7 @@ let
           src
           ;
         fetcherVersion = pnpmFetcherVersion;
-        hash = slib.sourceHash pname "npmDepsHash";
+        hash = npmDepsHash;
       };
 
   frontend = stdenv.mkDerivation {
