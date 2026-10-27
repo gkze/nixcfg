@@ -342,6 +342,15 @@ def _nix_prefetch_name(url: str) -> str | None:
     return safe_name
 
 
+# 40531381947 prepare-darwin: capy and capy-nightly failed
+# "Could not resolve host" for their CloudFront zips. Nix's sub-second retries
+# and the 1s prefetch backoff all landed inside the resolver's negative cache,
+# then the rest of the hour-long prepare was discarded. A resolver failure
+# waits long enough for that cache to expire. Other transfer faults keep the
+# configured backoff.
+_DNS_PREFETCH_RETRY_BACKOFF = 30.0
+
+
 def _is_retryable_prefetch_error(exc: NixCommandError) -> bool:
     """Retry transient transfer failures, never the runner's own timeout.
 
@@ -355,6 +364,13 @@ def _is_retryable_prefetch_error(exc: NixCommandError) -> bool:
     return failures.is_retryable_nix_network_failure(
         stdout="", stderr=text
     ) or failures.contains_marker(text, failures.TRANSFER_TIMEOUT_MARKERS)
+
+
+def _prefetch_retry_backoff(exc: NixCommandError, config: UpdateConfig) -> float:
+    """Return how long to wait before repeating a failed prefetch."""
+    if failures.contains_marker(str(exc), failures.DNS_RESOLUTION_MARKERS):
+        return max(config.default_retry_backoff, _DNS_PREFETCH_RETRY_BACKOFF)
+    return max(0.0, config.default_retry_backoff)
 
 
 def _record_prefetch_receipt(store_path: str) -> None:
@@ -434,7 +450,7 @@ async def compute_sri_hash(
                     ),
                 )
             )
-            await asyncio.sleep(max(0.0, config.default_retry_backoff))
+            await asyncio.sleep(_prefetch_retry_backoff(exc, config))
             attempt += 1
 
 
