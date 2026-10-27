@@ -1026,7 +1026,7 @@ def test_run_zon2nix_retries_with_bounded_ordered_progress(
         assert output_path.read_text(encoding="utf-8") == "# generated\n"
     else:
         expected_error = (
-            "Command timed out after 180s"
+            f"Command timed out after {updater._ZON2NIX_TIMEOUT_SECONDS}s"
             if failure_kind == "timeout"
             else "dependency fetch failed"
         )
