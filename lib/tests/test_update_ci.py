@@ -4641,6 +4641,26 @@ def test_dump_hosted_storage_fault_skips_non_darwin_runners(
     assert not (tmp_path / "update-artifacts/storage-fault.txt").exists()
 
 
+def test_dump_hosted_storage_fault_skips_step_output_without_github_output(
+    tmp_path, monkeypatch
+) -> None:
+    """Repair quality runs with GITHUB_OUTPUT set, so the unset branch needs a test."""
+    _hosted_darwin_dump_env(tmp_path, monkeypatch)
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+
+    def forbid_outputs(**_kwargs: str) -> None:
+        raise AssertionError("step outputs require GITHUB_OUTPUT")
+
+    monkeypatch.setattr(jobs, "_outputs", forbid_outputs)
+    monkeypatch.setattr(jobs.shutil, "which", lambda _name: None)
+    assert jobs.main("dump-storage-fault") == 0
+    assert "GITHUB_OUTPUT" not in os.environ
+    assert (
+        "diskutil missing"
+        in (tmp_path / "update-artifacts/storage-fault.txt").read_text()
+    )
+
+
 def _hosted_darwin_dump_env(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
