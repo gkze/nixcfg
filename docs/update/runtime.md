@@ -284,7 +284,9 @@ fixed-output mismatch produced while Nix builds the original expression.
 A mismatch from any other nested derivation cannot certify the probe.
 
 A shared hash strategy targets its fixed-output dependency directly:
-`goModules`, `cargoDeps`, `npmDeps`, or `node_modules`. A custom
+`goModules`, `cargoDeps.vendorStaging`, `npmDeps`, or `node_modules`.
+`fetchCargoVendor` stores `cargoHash` on `vendorStaging`; the outer
+`cargoDeps` derivation is not fixed-output. A custom
 pnpm/offline-cache path remains explicit. OpenCode Desktop probes
 `node_modules`. The T3 workspace uses the same prepared-probe contract
 instead of repeated fingerprint stabilization evaluations.
