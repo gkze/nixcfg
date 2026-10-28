@@ -81,6 +81,13 @@ _CRATE2NIX_IO_CHUNK_BYTES = 8192
 _CRATE2NIX_CARGO_HOME_ENV = "NIXCFG_CRATE2NIX_CARGO_HOME"
 _CRATE2NIX_GENERATE_ATTEMPTS = 3
 _CRATE2NIX_GENERATE_RETRY_DELAY_SECONDS = 2.0
+# 40606669118 prepare-darwin-retry: nix printed
+# ``error (ignored): write of 9157 bytes: No buffer space available`` while
+# unpacking goose into the Git cache, then produced no further output until
+# the 2400s timeout. Kill that stall and retry; do not sit out the budget.
+_CRATE2NIX_TRANSPORT_STALL_SECONDS = 120.0
+_CRATE2NIX_TRANSPORT_RETRY_DELAY_SECONDS = 15.0
+_TRANSPORT_STALL_MARKER = "no buffer space available"
 _CRATE2NIX_GENERATE_LOCK = threading.Lock()
 _RETRYABLE_CRATE2NIX_NETWORK_CONTEXT_MARKERS = (
     "cargo metadata",
@@ -89,6 +96,7 @@ _RETRYABLE_CRATE2NIX_NETWORK_CONTEXT_MARKERS = (
     "failed to get",
     "git fetch",
     "index.crates.io",
+    "into the Git cache",
     "nix-prefetch-git",
 )
 # Only consulted together with a network context marker above. Beyond the
@@ -107,6 +115,7 @@ _RETRYABLE_CRATE2NIX_TRANSIENT_MARKERS = (
     "The requested URL returned error: 5",
     "cannot create the lock file",
     "Directory not empty",
+    "No buffer space available",
     "No such file or directory",
 )
 _ANSI_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|$))")
@@ -132,6 +141,7 @@ class _BoundedCapture:
         self._chunks: deque[str] = deque()
         self._classification_tail = ""
         self.enospc = False
+        self.transport_stall = False
         self._length = 0
         self._limit = limit
         self._truncated = False
@@ -141,6 +151,9 @@ class _BoundedCapture:
         classification_text = (self._classification_tail + text).casefold()
         self.enospc = self.enospc or any(
             marker in classification_text for marker in _ENOSPC_MARKERS
+        )
+        self.transport_stall = (
+            self.transport_stall or _TRANSPORT_STALL_MARKER in classification_text
         )
         self._classification_tail = classification_text[-32:]
         self._chunks.append(text)
@@ -1106,6 +1119,24 @@ def _raise_timed_out_command(
     raise Crate2NixCommandTimeoutError(msg)
 
 
+def _raise_stalled_git_fetch(
+    args: list[str],
+    *,
+    stdout: str,
+    stderr: str,
+) -> None:
+    """Raise a retryable failure after a silent git-cache transport stall.
+
+    Nix logs ``error (ignored)`` for ``No buffer space available`` and keeps
+    the process alive. The raised text names both the git-cache context and
+    the transport marker so the patched-source and crate2nix retry loops
+    classify it without depending on the captured tail.
+    """
+    context = _format_command_failure(args, stdout=stdout, stderr=stderr)
+    msg = f"{context}\ngit fetch stalled: No buffer space available"
+    raise RuntimeError(msg)
+
+
 def _prepare_process_collection(
     process: subprocess.Popen[bytes],
 ) -> tuple[
@@ -1154,6 +1185,53 @@ def _completed_command_result(
     return completed
 
 
+def _read_ready_process_output(
+    selector: selectors.BaseSelector,
+    captures: dict[str, _BoundedCapture],
+    stdout_stream: IO[bytes],
+    stderr_stream: IO[bytes],
+    *,
+    wait_seconds: float,
+    progress: Callable[[str], None] | None,
+    last_output_at: float,
+    last_progress_at: float,
+) -> tuple[bool, float, float]:
+    """Drain pipes that are ready and remember when the process last spoke."""
+    saw_output = False
+    for key, _mask in selector.select(wait_seconds):
+        try:
+            chunk = os.read(key.fd, _CRATE2NIX_IO_CHUNK_BYTES)
+        except BlockingIOError:
+            continue
+        if not chunk:
+            stream = stdout_stream if key.data == "stdout" else stderr_stream
+            selector.unregister(stream)
+            stream.close()
+            continue
+        text = chunk.decode(errors="replace")
+        captures[key.data].append(text)
+        saw_output = True
+        last_output_at = time.monotonic()
+        if _report_progress_chunk(text, progress):
+            last_progress_at = time.monotonic()
+    return saw_output, last_output_at, last_progress_at
+
+
+def _git_fetch_stalled(
+    captures: dict[str, _BoundedCapture],
+    *,
+    saw_output: bool,
+    now: float,
+    last_output_at: float,
+) -> bool:
+    """Return whether a git-cache fetch went silent after ENOBUFS."""
+    return (
+        not saw_output
+        and any(capture.transport_stall for capture in captures.values())
+        and now - last_output_at >= _CRATE2NIX_TRANSPORT_STALL_SECONDS
+    )
+
+
 def _collect_managed_process(
     process: subprocess.Popen[bytes],
     args: list[str],
@@ -1170,6 +1248,7 @@ def _collect_managed_process(
     started_at = time.monotonic()
     deadline = started_at + timeout
     last_progress_at = started_at
+    last_output_at = started_at
     interrupted = False
 
     try:
@@ -1197,22 +1276,30 @@ def _collect_managed_process(
                 _CRATE2NIX_PROCESS_POLL_SECONDS,
                 max(0.0, deadline - now),
             )
-            for key, _mask in selector.select(wait_seconds):
-                try:
-                    chunk = os.read(key.fd, _CRATE2NIX_IO_CHUNK_BYTES)
-                except BlockingIOError:
-                    continue
-                if not chunk:
-                    stream = stdout_stream if key.data == "stdout" else stderr_stream
-                    selector.unregister(stream)
-                    stream.close()
-                    continue
-                text = chunk.decode(errors="replace")
-                captures[key.data].append(text)
-                if _report_progress_chunk(text, progress):
-                    last_progress_at = time.monotonic()
-
+            saw_output, last_output_at, last_progress_at = _read_ready_process_output(
+                selector,
+                captures,
+                stdout_stream,
+                stderr_stream,
+                wait_seconds=wait_seconds,
+                progress=progress,
+                last_output_at=last_output_at,
+                last_progress_at=last_progress_at,
+            )
             now = time.monotonic()
+            if _git_fetch_stalled(
+                captures,
+                saw_output=saw_output,
+                now=now,
+                last_output_at=last_output_at,
+            ):
+                interrupted = True
+                _terminate_process_group(process)
+                _raise_stalled_git_fetch(
+                    args,
+                    stdout=captures["stdout"].render(),
+                    stderr=captures["stderr"].render(),
+                )
             if (
                 progress is not None
                 and now - last_progress_at >= _CRATE2NIX_PROGRESS_INTERVAL_SECONDS
@@ -1434,13 +1521,12 @@ def _run_crate2nix_generate(
             attempt += 1
 
 
-def _build_patched_src(
+def _patched_src_build_args(
     target: Crate2NixTarget,
     *,
-    source_overrides: dict[str, SourceEntry] | None = None,
-    cancel_event: threading.Event | None = None,
-    progress: Callable[[str], None] | None = None,
-) -> Path:
+    source_overrides: dict[str, SourceEntry] | None,
+) -> list[str]:
+    """Return the nix build invocation for one patched crate2nix source."""
     installable = (
         _build_package_path_attr_expr(
             f"{target.name}-crate2nix-src",
@@ -1450,7 +1536,7 @@ def _build_patched_src(
         if source_overrides
         else _local_flake_installable(target.patched_src_installable)
     )
-    args = [
+    return [
         "nix",
         "build",
         "--impure",
@@ -1459,20 +1545,68 @@ def _build_patched_src(
         *(["--expr"] if source_overrides else []),
         installable,
     ]
-    completed = (
-        _run(args)
-        if cancel_event is None and progress is None
-        else _run(
-            args,
-            cancel_event=cancel_event,
-            progress=progress,
-        )
-    )
-    out_paths = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+
+
+def _read_patched_src_output(target: Crate2NixTarget, stdout: str) -> Path:
+    """Return the single store path printed by a patched-source build."""
+    out_paths = [line.strip() for line in stdout.splitlines() if line.strip()]
     if len(out_paths) != 1:
-        msg = f"Expected one patchedSrc output path for {target.name}, got {len(out_paths)}"
+        msg = (
+            f"Expected one patchedSrc output path for {target.name}, "
+            f"got {len(out_paths)}"
+        )
         raise RuntimeError(msg)
     return Path(out_paths[0])
+
+
+def _build_patched_src(
+    target: Crate2NixTarget,
+    *,
+    source_overrides: dict[str, SourceEntry] | None = None,
+    cancel_event: threading.Event | None = None,
+    progress: Callable[[str], None] | None = None,
+) -> Path:
+    """Build the patched source, retrying a stalled git-cache fetch."""
+    args = _patched_src_build_args(target, source_overrides=source_overrides)
+    attempt = 1
+    while True:
+        try:
+            completed = (
+                _run(args)
+                if cancel_event is None and progress is None
+                else _run(
+                    args,
+                    cancel_event=cancel_event,
+                    progress=progress,
+                )
+            )
+        except (
+            Crate2NixCommandCancelledError,
+            Crate2NixCommandTimeoutError,
+            Crate2NixResourceError,
+        ):
+            raise
+        except RuntimeError as exc:
+            if (
+                attempt >= _CRATE2NIX_GENERATE_ATTEMPTS
+                or not _is_retryable_crate2nix_generate_failure(str(exc))
+            ):
+                raise
+            retry_message = (
+                "Retrying patched source build after a stalled git fetch "
+                f"({attempt}/{_CRATE2NIX_GENERATE_ATTEMPTS})..."
+            )
+            if progress is not None:
+                progress(retry_message)
+            delay = _CRATE2NIX_TRANSPORT_RETRY_DELAY_SECONDS * attempt
+            if cancel_event is None:
+                time.sleep(delay)
+            elif cancel_event.wait(delay):
+                msg = "crate2nix patched source build cancelled by caller"
+                raise Crate2NixCommandCancelledError(msg) from exc
+            attempt += 1
+            continue
+        return _read_patched_src_output(target, completed.stdout)
 
 
 def _generation_identity(

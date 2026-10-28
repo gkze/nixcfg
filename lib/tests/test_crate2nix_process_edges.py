@@ -236,6 +236,127 @@ def test_process_collection_retries_a_nonblocking_pipe_read(
     assert selector.closed
 
 
+class _GitCacheStallSelector(_Selector):
+    """Deliver one git-cache transport error, then stay quiet."""
+
+    def __init__(self, stdout: _Pipe, stderr: _Pipe, clock: dict[str, float]) -> None:
+        super().__init__(stdout, stderr)
+        self._clock = clock
+        self._sent = False
+
+    def select(self, _timeout: float) -> list[tuple[SimpleNamespace, int]]:
+        if not self._sent:
+            self._sent = True
+            return [(SimpleNamespace(fd="stderr", data="stderr"), 0)]
+        self._clock["now"] += self._clock["step"]
+        return []
+
+
+class _RecoveringGitCacheSelector(_GitCacheStallSelector):
+    """Idle briefly after ENOBUFS, then let both streams finish."""
+
+    def __init__(self, stdout: _Pipe, stderr: _Pipe, clock: dict[str, float]) -> None:
+        super().__init__(stdout, stderr, clock)
+        self._idled = False
+
+    def select(self, timeout: float) -> list[tuple[SimpleNamespace, int]]:
+        if not self._sent:
+            return super().select(timeout)
+        if not self._idled:
+            self._idled = True
+            self._clock["now"] += self._clock["step"]
+            return []
+        return _Selector.select(self, timeout)
+
+
+def test_process_collection_aborts_a_silent_git_cache_transport_stall(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A git-cache fetch that goes silent after ENOBUFS must not sit out the timeout.
+
+    Update 40606669118 prepare-darwin-retry logged ``No buffer space available``
+    while unpacking goose, then heartbeats until the 2400s crate2nix budget.
+    """
+    stdout = _Pipe()
+    stderr = _Pipe()
+    clock = {"now": 1000.0, "step": crate2nix._CRATE2NIX_TRANSPORT_STALL_SECONDS}
+    selector = _GitCacheStallSelector(stdout, stderr, clock)
+    captures = {
+        "stdout": crate2nix._BoundedCapture(),
+        "stderr": crate2nix._BoundedCapture(),
+    }
+    reads = iter((
+        b"unpacking 'github:aaif-goose/goose/9949' into the Git cache...\n"
+        b"error (ignored): write of 9157 bytes: No buffer space available\n",
+        b"",
+    ))
+    terminated: list[object] = []
+    monkeypatch.setattr(
+        crate2nix,
+        "_prepare_process_collection",
+        lambda _process: (selector, captures, stdout, stderr),
+    )
+    monkeypatch.setattr(crate2nix.os, "read", lambda _fd, _size: next(reads))
+    monkeypatch.setattr(crate2nix.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(
+        crate2nix,
+        "_terminate_process_group",
+        lambda process: terminated.append(process),
+    )
+    process = _CompletedProcess()
+
+    with pytest.raises(RuntimeError, match="git fetch stalled") as raised:
+        crate2nix._collect_managed_process(
+            process,  # type: ignore[arg-type]
+            ["nix", "build", "goose-cli-crate2nix-src"],
+            timeout=2400,
+        )
+
+    message = str(raised.value)
+    assert "No buffer space available" in message
+    assert "into the Git cache" in message
+    assert terminated == [process]
+    assert crate2nix._is_retryable_crate2nix_generate_failure(message)
+
+
+def test_process_collection_keeps_a_git_cache_fetch_that_recovers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An ignored ENOBUFS followed by a short pause is not a stalled fetch."""
+    stdout = _Pipe()
+    stderr = _Pipe()
+    clock = {"now": 1000.0, "step": 10.0}
+    selector = _RecoveringGitCacheSelector(stdout, stderr, clock)
+    captures = {
+        "stdout": crate2nix._BoundedCapture(),
+        "stderr": crate2nix._BoundedCapture(),
+    }
+    chunks = {
+        "stderr": iter((
+            b"error (ignored): write of 9157 bytes: No buffer space available\n",
+            b"",
+        )),
+        "stdout": iter((b"/nix/store/goose\n", b"")),
+    }
+    monkeypatch.setattr(
+        crate2nix,
+        "_prepare_process_collection",
+        lambda _process: (selector, captures, stdout, stderr),
+    )
+    monkeypatch.setattr(crate2nix.os, "read", lambda fd, _size: next(chunks[fd]))
+    monkeypatch.setattr(crate2nix.time, "monotonic", lambda: clock["now"])
+
+    completed = crate2nix._collect_managed_process(
+        _CompletedProcess(),  # type: ignore[arg-type]
+        ["nix", "build"],
+        timeout=2400,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout == "/nix/store/goose\n"
+    assert captures["stderr"].transport_stall
+
+
 def test_process_collection_reports_a_deterministic_idle_heartbeat(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -593,4 +714,192 @@ def test_retry_cancels_during_backoff(
             cancel_event=cancel_event,  # type: ignore[arg-type]
         )
 
+    assert calls == 1
+
+
+def _demo_crate2nix_target() -> crate2nix.Crate2NixTarget:
+    return crate2nix.Crate2NixTarget(
+        name="demo",
+        patched_src_installable="path:.#demo",
+        cargo_nix=Path("Cargo.nix"),
+        crate_hashes=Path("crate-hashes.json"),
+        normalizer_path=Path("normalize.py"),
+        supported_platforms=("linux",),
+    )
+
+
+_STALLED_GIT_FETCH = (
+    "unpacking 'github:aaif-goose/goose/9949' into the Git cache...\n"
+    "error (ignored): write of 9157 bytes: No buffer space available"
+)
+
+
+def test_capture_remembers_a_transport_stall_split_across_chunks() -> None:
+    """The ENOBUFS marker stays set after later output scrolls past it."""
+    capture = crate2nix._BoundedCapture()
+
+    capture.append("error (ignored): write of 9157 bytes: No buffer ")
+    assert not capture.transport_stall
+    capture.append("space available\n")
+    assert capture.transport_stall
+    capture.append("still fetching\n")
+    assert capture.transport_stall
+
+
+def test_patched_src_retries_a_stalled_git_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The goose git-cache stall retries instead of failing the whole prepare."""
+    calls = 0
+    progress: list[str] = []
+
+    class _NoDelayEvent:
+        def is_set(self) -> bool:
+            return False
+
+        def wait(self, _timeout: float) -> bool:
+            return False
+
+    def _run(
+        _args: list[str],
+        *,
+        cancel_event: threading.Event | None = None,
+        progress: object | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        del cancel_event, progress
+        calls += 1
+        if calls == 1:
+            raise RuntimeError(_STALLED_GIT_FETCH)
+        return subprocess.CompletedProcess(
+            _args, 0, stdout="/nix/store/goose\n", stderr=""
+        )
+
+    monkeypatch.setattr(crate2nix, "_run", _run)
+
+    assert crate2nix._build_patched_src(
+        _demo_crate2nix_target(),
+        cancel_event=_NoDelayEvent(),  # type: ignore[arg-type]
+        progress=progress.append,
+    ) == Path("/nix/store/goose")
+    assert calls == 2
+    assert progress == [
+        "Retrying patched source build after a stalled git fetch (1/3)..."
+    ]
+
+
+def test_patched_src_sleeps_between_unstalled_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A caller without a progress sink still backs off between fetch attempts."""
+    calls = 0
+    sleeps: list[float] = []
+
+    def _run(_args: list[str]) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        calls += 1
+        if calls < crate2nix._CRATE2NIX_GENERATE_ATTEMPTS:
+            raise RuntimeError(_STALLED_GIT_FETCH)
+        return subprocess.CompletedProcess(
+            _args, 0, stdout="/nix/store/goose\n", stderr=""
+        )
+
+    monkeypatch.setattr(crate2nix, "_run", _run)
+    monkeypatch.setattr(crate2nix.time, "sleep", sleeps.append)
+
+    assert crate2nix._build_patched_src(_demo_crate2nix_target()) == Path(
+        "/nix/store/goose"
+    )
+    assert calls == 3
+    assert sleeps == [
+        crate2nix._CRATE2NIX_TRANSPORT_RETRY_DELAY_SECONDS,
+        crate2nix._CRATE2NIX_TRANSPORT_RETRY_DELAY_SECONDS * 2,
+    ]
+
+
+def test_patched_src_stops_after_repeated_git_fetch_stalls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Three stalled fetches still fail closed."""
+    calls = 0
+    sleeps: list[float] = []
+
+    def _run(_args: list[str]) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError(_STALLED_GIT_FETCH)
+
+    monkeypatch.setattr(crate2nix, "_run", _run)
+    monkeypatch.setattr(crate2nix.time, "sleep", sleeps.append)
+
+    with pytest.raises(RuntimeError, match="No buffer space available"):
+        crate2nix._build_patched_src(_demo_crate2nix_target())
+    assert calls == crate2nix._CRATE2NIX_GENERATE_ATTEMPTS
+    assert sleeps == [
+        crate2nix._CRATE2NIX_TRANSPORT_RETRY_DELAY_SECONDS,
+        crate2nix._CRATE2NIX_TRANSPORT_RETRY_DELAY_SECONDS * 2,
+    ]
+
+
+def test_patched_src_does_not_retry_a_real_build_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A crate2nix source error without a transport marker fails on the first build."""
+    calls = 0
+
+    def _run(_args: list[str]) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("error: builder for '/nix/store/goose.drv' failed")
+
+    monkeypatch.setattr(crate2nix, "_run", _run)
+    monkeypatch.setattr(
+        crate2nix.time,
+        "sleep",
+        lambda _seconds: pytest.fail("permanent failures must not sleep"),
+    )
+
+    with pytest.raises(RuntimeError, match="builder for"):
+        crate2nix._build_patched_src(_demo_crate2nix_target())
+    assert calls == 1
+
+
+def test_patched_src_does_not_retry_a_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fetch that uses the whole timeout stays terminal."""
+
+    def _run(_args: list[str]) -> subprocess.CompletedProcess[str]:
+        raise crate2nix.Crate2NixCommandTimeoutError("command timed out after 2400s")
+
+    monkeypatch.setattr(crate2nix, "_run", _run)
+
+    with pytest.raises(crate2nix.Crate2NixCommandTimeoutError):
+        crate2nix._build_patched_src(_demo_crate2nix_target())
+
+
+def test_patched_src_retry_honors_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancellation during the git-fetch backoff must not start another build."""
+    calls = 0
+
+    def _run(
+        _args: list[str],
+        *,
+        cancel_event: threading.Event | None = None,
+        progress: object | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        del cancel_event, progress
+        calls += 1
+        raise RuntimeError(_STALLED_GIT_FETCH)
+
+    monkeypatch.setattr(crate2nix, "_run", _run)
+
+    with pytest.raises(crate2nix.Crate2NixCommandCancelledError, match="cancelled"):
+        crate2nix._build_patched_src(
+            _demo_crate2nix_target(),
+            cancel_event=_CancelDuringBackoff(),  # type: ignore[arg-type]
+        )
     assert calls == 1
