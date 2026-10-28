@@ -17,6 +17,7 @@ from lib.update.events import (
 from lib.update.net import fetch_url
 from lib.update.updaters import (
     DownloadHashUpdater,
+    UpdateContext,
     VersionInfo,
     register_updater,
 )
@@ -26,7 +27,15 @@ if TYPE_CHECKING:
     import aiohttp
 
     from lib.nix.models.sources import SourceEntry, SourceHashes
-    from lib.update.updaters import UpdateContext
+
+
+def _twilight_build_id(version: str) -> str:
+    """Return the numeric build id from ``appVersion-buildID``."""
+    build_id = version.rpartition("-")[2]
+    if not build_id.isdigit() or build_id == version:
+        msg = f"Twilight version {version!r} has no numeric build id"
+        raise RuntimeError(msg)
+    return build_id
 
 
 class _TwilightSnapshotChangedError(RuntimeError):
@@ -54,6 +63,9 @@ class ZenTwilightUpdater(DownloadHashUpdater):
 
     name = "zen-twilight"
     SNAPSHOT_ATTEMPTS = 2
+    # A stale edge can answer with the previous build after the feed has moved.
+    # Ignore a few of those reads before treating the snapshot as unconfirmed.
+    STALE_READS = 3
     TWILIGHT_UPDATE_URL = (
         "https://updates.zen-browser.app/updates/browser/"
         "Darwin_aarch64-gcc3/twilight/update.xml"
@@ -112,6 +124,40 @@ class ZenTwilightUpdater(DownloadHashUpdater):
         )
         return VersionInfo(version=f"{app_version}-{build_id}")
 
+    async def _observe_snapshot(
+        self,
+        session: aiohttp.ClientSession,
+        context: UpdateContext,
+        info: VersionInfo,
+        *,
+        phase: str,
+    ) -> None:
+        """Require a live read of ``info``, ignoring older cached builds.
+
+        A newer build is a real channel move. An older build is a stale edge:
+        Update 40593795688 resolved ``1.24t`` from the resolve checkpoint, then
+        the next live read was already ``1.25t``.
+        """
+        stale_reads = 0
+        while True:
+            observed = await self.fetch_latest(session, context=context)
+            if observed == info:
+                return
+            if _twilight_build_id(observed.version) > _twilight_build_id(info.version):
+                raise _TwilightSnapshotChangedError(
+                    phase=phase,
+                    expected=info.version,
+                    observed=observed.version,
+                )
+            stale_reads += 1
+            if stale_reads >= self.STALE_READS:
+                raise _TwilightSnapshotChangedError(
+                    phase=phase,
+                    expected=info.version,
+                    observed=observed.version,
+                )
+            await asyncio.sleep(max(0.0, self.config.default_retry_backoff))
+
     async def fetch_hashes(
         self,
         info: VersionInfo,
@@ -121,22 +167,9 @@ class ZenTwilightUpdater(DownloadHashUpdater):
         emit: EventSink = ignore_event,
     ) -> SourceHashes:
         """Hash only a channel artifact bracketed by matching feed snapshots."""
-        before = await self.fetch_latest(session, context=context)
-        if before != info:
-            raise _TwilightSnapshotChangedError(
-                phase="before",
-                expected=info.version,
-                observed=before.version,
-            )
+        await self._observe_snapshot(session, context, info, phase="before")
         hashes = await super().fetch_hashes(info, session, context=context, emit=emit)
-        after = await self.fetch_latest(session, context=context)
-        if after != info:
-            raise _TwilightSnapshotChangedError(
-                phase="after",
-                expected=info.version,
-                observed=after.version,
-            )
-
+        await self._observe_snapshot(session, context, info, phase="after")
         return hashes
 
     async def update_stream(
@@ -147,7 +180,12 @@ class ZenTwilightUpdater(DownloadHashUpdater):
         context: UpdateContext | None = None,
         emit: EventSink = ignore_event,
     ) -> SourceEntry | None:
-        """Resolve a fresh version and retry after channel movement."""
+        """Resolve a fresh version and retry after channel movement.
+
+        The resolve step is checkpointed, so a retry would otherwise keep
+        hashing the first build. A newer live read replaces that target.
+        """
+        context = context if context is not None else UpdateContext(current=current)
         attempt = 1
         while True:
             try:
@@ -155,10 +193,12 @@ class ZenTwilightUpdater(DownloadHashUpdater):
                     current, session, context=context, emit=emit
                 )
             except _TwilightSnapshotChangedError as exc:
+                if _twilight_build_id(exc.observed) > _twilight_build_id(exc.expected):
+                    context.resolved_version = VersionInfo(version=exc.observed)
                 if attempt >= self.SNAPSHOT_ATTEMPTS:
                     msg = (
                         "Twilight channel changed repeatedly while hashing; "
-                        "rerun the updater after publication settles"
+                        f"expected {exc.expected}, observed {exc.observed}"
                     )
                     raise RuntimeError(msg) from exc
                 next_attempt = attempt + 1
