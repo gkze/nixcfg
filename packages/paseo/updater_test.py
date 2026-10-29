@@ -198,8 +198,8 @@ _CLAUDE_BUILD_OPTIONS_TAIL_FIXTURE = b"""\
 """
 _CLAUDE_PROVIDER_FIXTURE = (
     # The constructor wires resolveBinary directly into contextUsage;
-    # it has no intervening rewindSdk assignment. Model discovery forwards
-    # the same resolver, and buildOptions takes the permission mode.
+    # it has no intervening rewindSdk assignment. Session construction
+    # forwards the resolver and buildOptions takes no arguments.
     _CLAUDE_RESOLVER_FIXTURE
     + b"""\
 
@@ -259,9 +259,7 @@ export class ClaudeAgentClient implements AgentClient {
   }
 
   async discoverModels(): Promise<void> {
-    await this.discoverModels({
-          resolveBinary: this.resolveBinary,
-    });
+    await this.discoverModels();
   }
 
   async fetchCatalog(): Promise<ProviderCatalog> {
@@ -281,7 +279,7 @@ class ClaudeAgentSession implements AgentSession {
     );
   }
 
-  private async buildOptions(permissionMode: PermissionMode): Promise<ClaudeOptions> {
+  private async buildOptions(): Promise<ClaudeOptions> {
     const claudeBinary = await this.resolveBinary();
     const base: ClaudeOptions = {
       pathToClaudeCodeExecutable: claudeBinary,
@@ -415,10 +413,9 @@ _PINNED_SOURCE_FIXTURES = {
     "packages/server/src/server/session/daemon/npm-global-cli.ts": (
         'export const PASEO_CLI_PACKAGE = "@getpaseo/cli";\n'
         "const NPM_INSTALL_TIMEOUT_MS = 300_000;\n"
-        "  installLatest(options: NpmGlobalOptions = {}): Promise<CommandResult> {\n"
-        '    const prefixArgs = options.prefix ? ["--prefix", options.prefix] : [];\n'
+        "  installLatest(): Promise<CommandResult> {\n"
         '    return this.runCommand("npm", ["install", "-g", '
-        "`${PASEO_CLI_PACKAGE}@latest`, ...prefixArgs], {\n"
+        "`${PASEO_CLI_PACKAGE}@latest`], {\n"
         "      timeout: NPM_INSTALL_TIMEOUT_MS,\n"
         "      maxBuffer: NPM_MAX_BUFFER_BYTES,\n"
         "    });\n"
@@ -458,10 +455,9 @@ _ORIGINAL_MUTATION_FRAGMENTS = {
     ),
     "packages/server/src/server/session/daemon/npm-global-cli.ts": (
         "const NPM_INSTALL_TIMEOUT_MS = 300_000;\n",
-        "  installLatest(options: NpmGlobalOptions = {}): Promise<CommandResult> {\n"
-        '    const prefixArgs = options.prefix ? ["--prefix", options.prefix] : [];\n'
+        "  installLatest(): Promise<CommandResult> {\n"
         '    return this.runCommand("npm", ["install", "-g", '
-        "`${PASEO_CLI_PACKAGE}@latest`, ...prefixArgs], {\n"
+        "`${PASEO_CLI_PACKAGE}@latest`], {\n"
         "      timeout: NPM_INSTALL_TIMEOUT_MS,\n"
         "      maxBuffer: NPM_MAX_BUFFER_BYTES,\n"
         "    });\n"
