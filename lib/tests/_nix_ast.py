@@ -8,6 +8,7 @@ from nix_manipulator import parse
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.expression import NixExpression
 from nix_manipulator.expressions.function.call import FunctionCall
+from nix_manipulator.expressions.if_expression import IfExpression
 from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.inherit import Inherit
 from nix_manipulator.expressions.parenthesis import Parenthesis
@@ -15,7 +16,7 @@ from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
 from nix_manipulator.expressions.source_code import NixSourceCode
 
-from lib.tests._assertions import expect_not_none
+from lib.tests._assertions import expect_instance, expect_not_none
 
 _NON_SEMANTIC_FIELD_NAMES = {
     "after",
@@ -314,3 +315,14 @@ def expect_binding(bindings: Iterable[Binding | Inherit], name: str) -> Binding:
 def expect_scope_binding(expr: NixExpression, name: str) -> Binding:
     """Return the scoped let-binding named *name* from *expr*."""
     return expect_binding(expr.scope, name)
+
+
+def expect_platform_branch(output: NixExpression) -> IfExpression:
+    """Return the platform branch, unwrapping a trailing `.overrideAttrs` call."""
+    if isinstance(output, FunctionCall):
+        selector = expect_instance(output.name, Select)
+        if selector.attribute == "overrideAttrs":
+            output = expect_instance(selector.expression, NixExpression)
+    if isinstance(output, Parenthesis):
+        output = expect_instance(output.value, NixExpression)
+    return expect_instance(output, IfExpression)

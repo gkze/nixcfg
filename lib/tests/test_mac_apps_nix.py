@@ -40,6 +40,7 @@ from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     binding_map,
     expect_binding,
+    expect_platform_branch,
     expect_scope_binding,
     parse_nix_expr,
 )
@@ -4001,7 +4002,7 @@ def test_chatgpt_package_ships_the_unified_chatgpt_bundle() -> None:
         encoding="utf-8"
     )
     package = expect_instance(parse_nix_expr(package_source), FunctionDefinition)
-    platform_branch = expect_instance(package.output, IfExpression)
+    platform_branch = expect_platform_branch(package.output)
     assert_nix_ast_equal(platform_branch.condition, Identifier(name="isDarwin"))
 
     # The zip's ChatGPT.app payload must flow through mkZipApp defaults so the

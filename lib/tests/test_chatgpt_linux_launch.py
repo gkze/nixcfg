@@ -2,12 +2,11 @@
 
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
-from nix_manipulator.expressions.if_expression import IfExpression
 from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.tests._assertions import expect_instance
-from lib.tests._nix_ast import expect_binding, parse_nix_expr
+from lib.tests._nix_ast import expect_binding, expect_platform_branch, parse_nix_expr
 from lib.tests._shell_ast import (
     ParsedShell,
     command_texts,
@@ -63,7 +62,7 @@ def test_chatgpt_user_wrapper_keeps_chromium_sandbox() -> None:
         encoding="utf-8"
     )
     package = expect_instance(parse_nix_expr(source), FunctionDefinition)
-    platform_branch = expect_instance(package.output, IfExpression)
+    platform_branch = expect_platform_branch(package.output)
     linux_call = expect_instance(platform_branch.alternative, FunctionCall)
     linux_args = expect_instance(linux_call.argument, AttributeSet)
     install = expect_instance(
