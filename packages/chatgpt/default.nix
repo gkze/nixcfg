@@ -70,128 +70,139 @@ let
       throw "Unexpected ChatGPT deb pool URL: ${debUrl}"
     else
       builtins.head debVersionMatch;
+  # Topgrade's Codex step runs `codex update`, which cannot update a CLI that
+  # ships inside the ChatGPT app bundle. Naming the step here keeps the
+  # exclusion attached to the package instead of a Topgrade disable list.
+  topgradePassthru = {
+    topgrade.steps = [ "codex" ];
+  };
 in
-if isDarwin then
-  mkZipApp {
-    pname = "chatgpt";
-    appName = "ChatGPT";
-    info = selfSource;
-    dontFixup = true;
-    # Leave sourceName unset so fetchurl keeps the ZIP basename. Prepare
-    # prefetches that same name into Cachix; a versioned rename misses the cache
-    # and re-fetches OpenAI's short-version URL, which can change bytes before
-    # Darwin closures (Update 37586805620).
-    inherit meta;
-  }
-else
-  stdenv.mkDerivation {
-    pname = "chatgpt";
-    version = debVersion;
+(
+  if isDarwin then
+    mkZipApp {
+      pname = "chatgpt";
+      appName = "ChatGPT";
+      info = selfSource;
+      dontFixup = true;
+      # Leave sourceName unset so fetchurl keeps the ZIP basename. Prepare
+      # prefetches that same name into Cachix; a versioned rename misses the cache
+      # and re-fetches OpenAI's short-version URL, which can change bytes before
+      # Darwin closures (Update 37586805620).
+      inherit meta;
+    }
+  else
+    stdenv.mkDerivation {
+      pname = "chatgpt";
+      version = debVersion;
 
-    src = fetchurl {
-      url = debUrl;
-      hash = selfSource.hashes.${system};
-    };
+      src = fetchurl {
+        url = debUrl;
+        hash = selfSource.hashes.${system};
+      };
 
-    nativeBuildInputs = [
-      dpkg
-      autoPatchelfHook
-      makeWrapper
-    ];
+      nativeBuildInputs = [
+        dpkg
+        autoPatchelfHook
+        makeWrapper
+      ];
 
-    # Runtime dependencies declared by the deb control file, mapped to nixpkgs.
-    buildInputs = [
-      alsa-lib
-      at-spi2-atk
-      at-spi2-core
-      atk
-      cairo
-      cups
-      dbus
-      expat
-      gdk-pixbuf
-      glib
-      gtk3
-      libdrm
-      libgbm
-      libnotify
-      libusb1
-      libxkbcommon
-      mesa
-      nspr
-      nss
-      openssl
-      pango
-      systemd
-      tpm2-tss
-      vulkan-loader
-      xz
-      libx11
-      libxcb
-      libxcomposite
-      libxdamage
-      libxext
-      libxfixes
-      libxrandr
-      libxscrnsaver
-      libxtst
-    ];
+      # Runtime dependencies declared by the deb control file, mapped to nixpkgs.
+      buildInputs = [
+        alsa-lib
+        at-spi2-atk
+        at-spi2-core
+        atk
+        cairo
+        cups
+        dbus
+        expat
+        gdk-pixbuf
+        glib
+        gtk3
+        libdrm
+        libgbm
+        libnotify
+        libusb1
+        libxkbcommon
+        mesa
+        nspr
+        nss
+        openssl
+        pango
+        systemd
+        tpm2-tss
+        vulkan-loader
+        xz
+        libx11
+        libxcb
+        libxcomposite
+        libxdamage
+        libxext
+        libxfixes
+        libxrandr
+        libxscrnsaver
+        libxtst
+      ];
 
-    # Electron dlopens the Qt shims only when the host provides a Qt platform
-    # theme. Vendored node-hid / serialport prebuilds also ship Android NDK and
-    # musl objects that can never load on glibc Linux (38564429681 validate-x86:
-    # libc.musl-x86_64.so.1 on chatgpt-26.1007.71326). None may fail patchelf.
-    autoPatchelfIgnoreMissingDeps = [
-      "libQt5Core.so.5"
-      "libQt5Gui.so.5"
-      "libQt5Widgets.so.5"
-      "libQt6Core.so.6"
-      "libQt6Gui.so.6"
-      "libQt6Widgets.so.6"
-      "liblog.so"
-      "libc++_shared.so"
-      "libc.musl-x86_64.so.1"
-      "libc.musl-aarch64.so.1"
-    ];
+      # Electron dlopens the Qt shims only when the host provides a Qt platform
+      # theme. Vendored node-hid / serialport prebuilds also ship Android NDK and
+      # musl objects that can never load on glibc Linux (38564429681 validate-x86:
+      # libc.musl-x86_64.so.1 on chatgpt-26.1007.71326). None may fail patchelf.
+      autoPatchelfIgnoreMissingDeps = [
+        "libQt5Core.so.5"
+        "libQt5Gui.so.5"
+        "libQt5Widgets.so.5"
+        "libQt6Core.so.6"
+        "libQt6Gui.so.6"
+        "libQt6Widgets.so.6"
+        "liblog.so"
+        "libc++_shared.so"
+        "libc.musl-x86_64.so.1"
+        "libc.musl-aarch64.so.1"
+      ];
 
-    dontConfigure = true;
-    dontBuild = true;
-    dontStrip = true;
+      dontConfigure = true;
+      dontBuild = true;
+      dontStrip = true;
 
-    unpackPhase = ''
-      runHook preUnpack
+      unpackPhase = ''
+        runHook preUnpack
 
-      mkdir unpack
-      dpkg-deb -x "$src" unpack
+        mkdir unpack
+        dpkg-deb -x "$src" unpack
 
-      runHook postUnpack
-    '';
+        runHook postUnpack
+      '';
 
-    installPhase = ''
-      runHook preInstall
+      installPhase = ''
+        runHook preInstall
 
-      mkdir -p "$out/lib" "$out/bin" "$out/share"
-      cp -a unpack/usr/lib/chatgpt "$out/lib/chatgpt"
-      chmod +x "$out/lib/chatgpt/ChatGPT" \
-        "$out/lib/chatgpt/codex-launcher" \
-        "$out/lib/chatgpt/browser_crashpad_handler"
+        mkdir -p "$out/lib" "$out/bin" "$out/share"
+        cp -a unpack/usr/lib/chatgpt "$out/lib/chatgpt"
+        chmod +x "$out/lib/chatgpt/ChatGPT" \
+          "$out/lib/chatgpt/codex-launcher" \
+          "$out/lib/chatgpt/browser_crashpad_handler"
 
-      install -Dm644 unpack/usr/share/applications/chatgpt.desktop \
-        "$out/share/applications/chatgpt.desktop"
-      for share_dir in pixmaps metainfo; do
-        if [ -d "unpack/usr/share/$share_dir" ]; then
-          mkdir -p "$out/share/$share_dir"
-          cp -a "unpack/usr/share/$share_dir/." "$out/share/$share_dir/"
-        fi
-      done
+        install -Dm644 unpack/usr/share/applications/chatgpt.desktop \
+          "$out/share/applications/chatgpt.desktop"
+        for share_dir in pixmaps metainfo; do
+          if [ -d "unpack/usr/share/$share_dir" ]; then
+            mkdir -p "$out/share/$share_dir"
+            cp -a "unpack/usr/share/$share_dir/." "$out/share/$share_dir/"
+          fi
+        done
 
-      # The bundle entrypoint is lib/chatgpt/ChatGPT; upstream's usr/bin/chatgpt
-      # is only a two-line shell launcher around it.
-      makeWrapper "$out/lib/chatgpt/ChatGPT" "$out/bin/chatgpt" \
-        --prefix LD_LIBRARY_PATH : "$out/lib/chatgpt"
+        # The bundle entrypoint is lib/chatgpt/ChatGPT; upstream's usr/bin/chatgpt
+        # is only a two-line shell launcher around it.
+        makeWrapper "$out/lib/chatgpt/ChatGPT" "$out/bin/chatgpt" \
+          --prefix LD_LIBRARY_PATH : "$out/lib/chatgpt"
 
-      runHook postInstall
-    '';
+        runHook postInstall
+      '';
 
-    inherit meta;
-  }
+      inherit meta;
+    }
+).overrideAttrs
+  (previous: {
+    passthru = (previous.passthru or { }) // topgradePassthru;
+  })

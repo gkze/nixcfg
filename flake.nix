@@ -921,6 +921,14 @@
                   src = ./.;
                 };
 
+              "test-nix-topgrade-exclusions" =
+                { pkgs, ... }:
+                import ./tests/nix/topgrade-exclusions.nix {
+                  inherit (pkgs) lib;
+                  inherit pkgs;
+                  src = ./.;
+                };
+
               "test-nix-common-maintenance" =
                 { pkgs, ... }:
                 import ./tests/nix/common-maintenance.nix {

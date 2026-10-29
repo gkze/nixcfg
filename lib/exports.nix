@@ -33,6 +33,7 @@ let
       nixcfgFonts = modulesRoot + "/home/fonts.nix";
       nixcfgStylix = modulesRoot + "/home/stylix.nix";
       nixcfgZsh = modulesRoot + "/home/zsh.nix";
+      nixcfgTopgrade = modulesRoot + "/home/topgrade.nix";
       nixcfgZen = modulesRoot + "/home/zen.nix";
       nixcfgDarwin = modulesRoot + "/home/darwin.nix";
       nixcfgLinux = modulesRoot + "/home/linux.nix";

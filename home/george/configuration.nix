@@ -30,6 +30,7 @@
     outputs.homeModules.nixcfgLanguageRust
     outputs.homeModules.nixcfgStylix
     outputs.homeModules.nixcfgZsh
+    outputs.homeModules.nixcfgTopgrade
     inputs.catppuccin.homeModules.catppuccin
   ];
 
@@ -287,6 +288,19 @@
       managedMacAppProjection = macAppHelpers.managedMacAppRoutingProjection managedMacAppRouting;
     in
     {
+      # Nix-managed tools cannot self-update, so their Topgrade steps are
+      # excluded here instead of in a hand-maintained disable list. Packages own
+      # the step names they expose; third-party tools are named explicitly
+      # because a foreign derivation cannot carry our `passthru`.
+      topgrade = {
+        disabledSteps = [
+          "antigravity_cli" # pkgs.antigravity-cli, installed via programs below
+          "brew_cask"
+          "brew_formula"
+          "home_manager"
+        ];
+        excludedPackages = [ pkgs.chatgpt ];
+      };
       zen =
         let
           inherit (config.theme) capitalize;
@@ -609,12 +623,6 @@
     topgrade = {
       enable = true;
       settings = {
-        misc.disable = [
-          "brew_cask"
-          "brew_formula"
-          "home_manager"
-          # "cursor"
-        ];
         # `git.repos` entries are glob patterns, not directory names. A bare
         # "Development" matched only that directory, which is not itself a
         # repository, so Topgrade reported "No repositories to pull" and pulled

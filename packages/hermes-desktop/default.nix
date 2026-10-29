@@ -209,6 +209,9 @@ hermesNpmLib.buildNpmPackage {
 
   passthru = {
     packageJsonPath = "apps/desktop/package.json";
+    # Hermes refuses to self-update from a Nix store path, so Topgrade's
+    # hermes_agent step is excluded wherever this package is installed.
+    topgrade.steps = [ "hermes_agent" ];
     inherit
       (mkMacAppPassthru {
         bundleName = appBundleName;

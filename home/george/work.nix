@@ -88,6 +88,11 @@ in
 
   nixcfg = {
     macApps.applications = projection.applications;
+    # Hermes Agent is a Nix-managed app whose CLI refuses to self-update.
+    topgrade = {
+      disabledSteps = [ "gcloud" ];
+      excludedPackages = [ pkgs.hermes-desktop ];
+    };
     packageSets = {
       inherit (projection) excludePackagesByName;
       extraPackages = [
@@ -105,7 +110,6 @@ in
   };
 
   programs = {
-    topgrade.settings.misc.disable = [ "gcloud" ];
     zsh.plugins = [
       {
         name = "op";
