@@ -162,6 +162,7 @@ def test_zsh_completion_deferral_is_conservative_and_host_scoped() -> None:
 
 _GEORGE_BASE_SYSTEM_MODULES = [
     "./darwin/george/caches.nix",
+    "./darwin/george/locale-launchd.nix",
     {
         "darwinDefaults": {
             "appearance": "dark",

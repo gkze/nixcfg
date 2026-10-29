@@ -176,7 +176,6 @@
         airfoil.package = pkgs.airfoil;
         antigravity.package = pkgs.antigravity;
         appcleaner.package = pkgs.appcleaner;
-        arc.package = pkgs.arc;
         betterdisplay = {
           package = pkgs.betterdisplay;
           preventDowngrade = true;
@@ -224,7 +223,6 @@
         hoppscotch.package = pkgs.hoppscotch;
         iina.package = pkgs.iina;
         jacq.package = pkgs.jacq;
-        keepingyouawake.package = pkgs.keepingyouawake;
         linear.package = pkgs.linear;
         "logi-options-plus".package = pkgs.logi-options-plus;
         loom.package = pkgs.loom;

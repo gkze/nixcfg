@@ -62,9 +62,15 @@ let
   # `.mcp.json` inside its bundled plugins, and clearing an extended attribute
   # needs write access to the file. Make the copied bundle writable before the
   # sweep; the store normalizes modes again on the way out.
+  #
+  # `-s` sweeps symlinks in place instead of following them. Vendors ship
+  # dangling links: Rex Beta's Sparkle.framework links `XPCServices` to a
+  # `Versions/B/XPCServices` directory it does not actually contain, and
+  # following that link aborts the whole install. Regular files lose their
+  # attributes exactly as before; only the symlink target lookup changes.
   clearBundleXattrs = bundlePath: ''
     chmod -R u+w ${bundlePath}
-    ${prev.darwin.xattr}/bin/xattr -cr ${bundlePath}
+    ${prev.darwin.xattr}/bin/xattr -s -cr ${bundlePath}
   '';
 
   # `bundle` is a shell word the caller has already quoted (same convention as

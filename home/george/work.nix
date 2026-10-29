@@ -22,6 +22,7 @@ let
     cleanshot.package = pkgs.cleanshot;
     clearly = systemApp pkgs.clearly;
     coast-local = systemApp pkgs.coast-local;
+    devin = systemApp pkgs.devin;
     energy = systemApp pkgs.energy;
     executor = systemApp pkgs.executor;
     factory = systemApp pkgs.factory;
@@ -42,16 +43,8 @@ let
     openchamber = systemApp pkgs.openchamber;
     paseo = systemApp pkgs.paseo;
     reflect = systemApp pkgs.reflect-open;
+    rex-beta = systemApp pkgs.rex-beta;
     screen-studio = systemApp pkgs.screen-studio;
-    # Sculptor was a plain package, so it launched from the store bundle and
-    # macOS attached com.apple.macl to that store path, which made it
-    # undeletable and broke GC and the next rebuild. A managed app is copied to
-    # /Applications and launched from there instead; the shim keeps the CLI.
-    sculptor = {
-      package = pkgs.sculptor;
-      scope = "system";
-      cli.sculptor.path = "Contents/MacOS/Sculptor";
-    };
     # macOS requires the system extension's parent app in /Applications.
     tailscale = {
       package = pkgs.tailscale-app;

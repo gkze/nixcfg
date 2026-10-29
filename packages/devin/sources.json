@@ -1,0 +1,9 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-MKLlvIuX0sW6lLCbmMCu01c02HZ3vb3xdgw9DT79Psc="
+  },
+  "urls": {
+    "aarch64-darwin": "https://windsurf-stable.codeiumdata.com/darwin-arm64/stable/053434014dbdb7a662a14e38752946a0dafb97f2/Devin-darwin-arm64-3.11.228.zip"
+  },
+  "version": "3.11.228"
+}

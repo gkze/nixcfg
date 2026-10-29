@@ -31,6 +31,7 @@ rec {
     ];
     extraSystemModules = [
       ./caches.nix
+      ./locale-launchd.nix
       {
         # Home Manager initializes completion after adding plugin directories to fpath.
         darwinDefaults.zsh.deferCompletionInitToHomeManager = true;

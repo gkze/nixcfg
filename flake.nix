@@ -194,7 +194,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.163.0";
+      url = "github:openai/codex/rust-v0.165.0";
       flake = false;
     };
     curator = {

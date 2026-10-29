@@ -305,6 +305,28 @@ def _transaction_directories(target_directory: Path) -> list[Path]:
     return list(target_directory.glob(".nixcfg-app-activation-*"))
 
 
+def _deny_chmod_under(
+    monkeypatch: pytest.MonkeyPatch,
+    directory: Path,
+    *,
+    installed_bundles_only: bool = False,
+) -> None:
+    """Simulate App Management refusing metadata changes on installed bundles."""
+    real_chmod = Path.chmod
+
+    def _denied(path: Path) -> bool:
+        if installed_bundles_only:
+            return path.parent == directory
+        return path.is_relative_to(directory)
+
+    def _chmod(path: Path, mode: int, *, follow_symlinks: bool = True) -> None:
+        if _denied(path):
+            raise PermissionError(1, "Operation not permitted", str(path))
+        real_chmod(path, mode, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(Path, "chmod", _chmod)
+
+
 def _crash_activation(payload: dict[str, object], crash_point: str) -> None:
     """Exit only a forked test child after one exact durable boundary."""
     target_directory = Path(str(payload["targetDirectory"]))
@@ -756,6 +778,174 @@ def test_manifest_publication_failure_restores_current_and_stale_apps(
     assert stat.S_IMODE(stale.stat().st_mode) == 0o555
     assert _manifest_names(state_file) == "Good.app\nStale.app\n"
     assert _transaction_directories(target_directory) == []
+
+
+def test_promotion_tolerates_refused_bundle_metadata_changes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """App Management refuses chmod on installed bundles; promotion must survive.
+
+    The live bundle stays writable, so the rename itself needs no help, exactly
+    as a root activation sees a protected bundle. The staged copy is read-only,
+    so the post-promotion mode restore does run against the installed bundle and
+    is refused.
+    """
+    source = _app(tmp_path / "source", "Good.app", "new-good")
+    source.chmod(0o555)
+    live = _app(tmp_path / "Applications", "Good.app", "old-good")
+    payload, target_directory, state_file = _payload(
+        tmp_path,
+        entries=[_entry(source)],
+        previous_manifest=[],
+    )
+    monkeypatch.setattr(helper, "_rsync_copy", _copy_rsync)
+    _deny_chmod_under(monkeypatch, target_directory, installed_bundles_only=True)
+
+    helper._system_applications(payload)
+
+    assert _marker(live) == "new-good"
+    assert _manifest_names(state_file) == "Good.app\n"
+    assert _transaction_directories(target_directory) == []
+    assert "could not restore mode 555" in capsys.readouterr().err
+
+
+def test_rollback_restores_bundles_when_chmod_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A refused chmod must never turn a complete rollback into an incomplete one."""
+    source = _app(tmp_path / "source", "Good.app", "new-good")
+    source.chmod(0o555)
+    live = _app(tmp_path / "Applications", "Good.app", "old-good")
+    stale = _app(tmp_path / "Applications", "Stale.app", "old-stale")
+    payload, target_directory, state_file = _payload(
+        tmp_path,
+        entries=[_entry(source)],
+        previous_manifest=["Good.app", "Stale.app"],
+    )
+    monkeypatch.setattr(helper, "_rsync_copy", _copy_rsync)
+
+    def _fail_manifest(_state_file: Path, _bundle_names: Sequence[str]) -> None:
+        raise OSError("injected manifest-publication failure")
+
+    monkeypatch.setattr(helper, "_write_managed_app_manifest", _fail_manifest)
+    _deny_chmod_under(monkeypatch, target_directory, installed_bundles_only=True)
+
+    with pytest.raises(OSError, match="injected manifest-publication failure"):
+        helper._system_applications(payload)
+
+    assert _marker(live) == "old-good"
+    assert _marker(stale) == "old-stale"
+    assert _manifest_names(state_file) == "Good.app\nStale.app\n"
+    assert _transaction_directories(target_directory) == []
+
+
+def test_rollback_treats_a_refused_mode_restore_as_resolved(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Drift App Management refuses to fix must not retain transaction artifacts."""
+    target = _app(tmp_path / "Target.app", "Target.app", "old")
+    change = helper._ApplicationChange(
+        target=target,
+        backup=tmp_path / "Backup.app",
+        replacement=None,
+    )
+    change.original_mode = 0o700
+
+    _deny_chmod_under(monkeypatch, target)
+
+    assert helper._rollback_application_changes([change]) == []
+    assert stat.S_IMODE(target.stat().st_mode) == 0o755
+
+
+def test_chmod_user_writable_warns_when_app_management_refuses(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A refused chmod is only a warning; the caller still attempts its rename."""
+    bundle = _app(tmp_path / "Bundle.app", "Bundle.app", "payload")
+    bundle.chmod(0o555)
+    _deny_chmod_under(monkeypatch, bundle)
+
+    helper._chmod_user_writable(bundle)
+
+    assert stat.S_IMODE(bundle.stat().st_mode) == 0o555
+    assert "user-writable" in capsys.readouterr().err
+
+
+def test_restore_directory_mode_rewrites_only_drifted_bundles(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Mode restoration is limited to real drift and never raises on denial."""
+    bundle = _app(tmp_path / "Bundle.app", "Bundle.app", "payload")
+    bundle.chmod(0o755)
+    plain_file = tmp_path / "plain-file"
+    plain_file.write_text("payload", encoding="utf-8")
+
+    def _unexpected_chmod(_path: Path, _mode: int, **_kwargs: object) -> None:
+        raise AssertionError("a matching or inapplicable mode must not be rewritten")
+
+    with pytest.MonkeyPatch.context() as patch_context:
+        patch_context.setattr(Path, "chmod", _unexpected_chmod)
+        helper._restore_directory_mode(bundle, None)
+        helper._restore_directory_mode(bundle, 0o755)
+        helper._restore_directory_mode(tmp_path / "missing", 0o555)
+        helper._restore_directory_mode(plain_file, 0o555)
+
+    with pytest.MonkeyPatch.context() as patch_context:
+        patch_context.setattr(
+            Path,
+            "chmod",
+            lambda _path, _mode, **_kwargs: (_ for _ in ()).throw(
+                PermissionError(1, "Operation not permitted", str(bundle))
+            ),
+        )
+        helper._restore_directory_mode(bundle, 0o555)
+
+    assert "could not restore mode 555" in capsys.readouterr().err
+
+    helper._restore_directory_mode(bundle, 0o555)
+
+    assert stat.S_IMODE(bundle.stat().st_mode) == 0o555
+
+
+def test_cleanup_explains_bundles_app_management_refuses_to_delete(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An undeletable installed bundle must name the policy that retained it."""
+    transaction_directory = tmp_path / ".nixcfg-app-activation-denied"
+    transaction_directory.mkdir()
+
+    def _denied_removal(path: Path) -> None:
+        raise PermissionError(1, "Operation not permitted", str(path))
+
+    with pytest.MonkeyPatch.context() as patch_context:
+        patch_context.setattr(helper, "_remove_path", _denied_removal)
+        helper._cleanup_application_transaction(transaction_directory)
+
+    denied_message = capsys.readouterr().err
+    assert "App Management" in denied_message
+    assert transaction_directory.is_dir()
+
+    with pytest.MonkeyPatch.context() as patch_context:
+        patch_context.setattr(
+            helper,
+            "_remove_path",
+            lambda _path: (_ for _ in ()).throw(OSError("injected removal failure")),
+        )
+        helper._cleanup_application_transaction(transaction_directory)
+
+    other_message = capsys.readouterr().err
+    assert "injected removal failure" in other_message
+    assert "App Management" not in other_message
 
 
 def test_post_commit_cleanup_failure_is_explicit_and_retains_backups(
@@ -1497,10 +1687,6 @@ def test_prepublication_failure_restores_previously_absent_manifest(
 
 
 def test_apply_change_rejects_live_or_staging_drift(tmp_path: Path) -> None:
-    plain_file = tmp_path / "plain-file"
-    plain_file.write_text("contents", encoding="utf-8")
-    assert helper._make_directory_renameable(plain_file) is None
-
     target = _app(tmp_path / "live", "Target.app", "old")
     replacement = _app(tmp_path / "staged", "Target.app", "new")
     change = helper._ApplicationChange(

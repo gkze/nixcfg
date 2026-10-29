@@ -2,7 +2,6 @@
 
 import asyncio
 from collections.abc import Iterable
-from datetime import UTC, datetime
 from types import ModuleType
 
 import pytest
@@ -313,109 +312,6 @@ def test_netnewswire_requires_download_url_metadata() -> None:
 
     with pytest.raises(TypeError, match="Expected string field 'url'"):
         updater.get_download_url("aarch64-darwin", VersionInfo(version="6.2.1"))
-
-
-def test_sculptor_fetch_latest_paths(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Derive the date version from Last-Modified and fall back when needed."""
-    module = _load_updater("packages/sculptor/updater.py", "sculptor_updater_test")
-    updater = module.SculptorUpdater()
-
-    monkeypatch.setattr(
-        module,
-        "fetch_headers",
-        lambda *_a, **_k: asyncio.sleep(
-            0,
-            result={"Last-Modified": "Tue, 20 Feb 2024 12:34:56 GMT"},
-        ),
-    )
-    assert (
-        _run(
-            updater.fetch_latest(object(), context=UpdateContext(current=None))
-        ).version
-        == "2024-02-20"
-    )
-
-    monkeypatch.setattr(
-        module,
-        "parsedate_to_datetime",
-        lambda _value: (_ for _ in ()).throw(ValueError("bad date")),
-    )
-    monkeypatch.setattr(
-        module,
-        "fetch_headers",
-        lambda *_a, **_k: asyncio.sleep(0, result={"Last-Modified": "invalid-date"}),
-    )
-    assert (
-        _run(
-            updater.fetch_latest(object(), context=UpdateContext(current=None))
-        ).version
-        == "invalid-da"
-    )
-
-
-def test_sculptor_resolves_absolute_platform_urls() -> None:
-    """Resolve every artifact path against the canonical object-store root."""
-    module = _load_updater(
-        "packages/sculptor/updater.py",
-        "sculptor_updater_test_platform_urls",
-    )
-    updater = module.SculptorUpdater()
-    info = VersionInfo(version="2024-02-20")
-
-    assert updater._platform_urls(info) == {
-        platform: f"{updater.BASE_URL}/{artifact}"
-        for platform, artifact in updater.PLATFORMS.items()
-    }
-
-
-def test_sculptor_accepts_naive_last_modified_timestamp(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Treat naive parsed dates as UTC before normalizing."""
-    module = _load_updater(
-        "packages/sculptor/updater.py", "sculptor_updater_test_naive_timestamp"
-    )
-    updater = module.SculptorUpdater()
-    monkeypatch.setattr(
-        module,
-        "parsedate_to_datetime",
-        lambda _value: datetime(2024, 2, 20, 12, 34, 56, tzinfo=UTC).replace(
-            tzinfo=None
-        ),
-    )
-    monkeypatch.setattr(
-        module,
-        "fetch_headers",
-        lambda *_a, **_k: asyncio.sleep(
-            0,
-            result={"Last-Modified": "Tue, 20 Feb 2024 12:34:56"},
-        ),
-    )
-
-    assert (
-        _run(
-            updater.fetch_latest(object(), context=UpdateContext(current=None))
-        ).version
-        == "2024-02-20"
-    )
-
-
-def test_sculptor_rejects_missing_last_modified_header(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Require the object-store metadata header used for versioning."""
-    module = _load_updater(
-        "packages/sculptor/updater.py", "sculptor_updater_test_missing_header"
-    )
-    updater = module.SculptorUpdater()
-    monkeypatch.setattr(
-        module,
-        "fetch_headers",
-        lambda *_a, **_k: asyncio.sleep(0, result={"Last-Modified": ""}),
-    )
-
-    with pytest.raises(RuntimeError, match="No Last-Modified header"):
-        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_zen_twilight_reads_channel_version_and_recomputes_hashes(

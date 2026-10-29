@@ -1,0 +1,9 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-gaIjGiw6rf+a1Rjv0CX/yiktY9+02F/gROqnUk6G/WU="
+  },
+  "urls": {
+    "aarch64-darwin": "https://blob.superlogical.com/public/rex-app/snapshot-arm64/Rex-0.1.0-1613.dmg"
+  },
+  "version": "0.1.0-1613"
+}

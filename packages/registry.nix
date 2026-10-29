@@ -22,7 +22,6 @@ let
   nonX86DarwinLinuxSystems = systemsForCapability (
     system: isAarch64Darwin system || isSupportedLinux system
   );
-  sculptorSystems = builtins.sort builtins.lessThan (darwinLinuxSystems ++ [ "x86_64-darwin" ]);
 
   discoveredPackages = discovery.discoverDefaultNixEntries {
     root = pkgDir;
@@ -85,7 +84,6 @@ let
       helperPackages = [ "t3code-workspace" ];
       darwinPackages = [
         "airfoil"
-        "arc"
         "aside"
         "baseten-switch"
         "capy"
@@ -102,7 +100,6 @@ let
         "framer"
         "granola"
         "grok-bot"
-        "keepingyouawake"
         "linear"
         "loom"
         "mole-app"
@@ -129,6 +126,7 @@ let
         "claude-code-url-handler"
         "coast-local"
         "cogito"
+        "devin"
         "docker-desktop"
         "energy"
         "executor"
@@ -153,6 +151,7 @@ let
         "pica"
         "reason"
         "reflect-open"
+        "rex-beta"
         "rio"
         "solo"
         "spotify"
@@ -197,12 +196,7 @@ let
     // constrainedTo "darwin" darwinPackages
     // constrainedTo aarch64DarwinSystems aarch64DarwinPackages
     // constrainedTo darwinLinuxSystems darwinLinuxPackages
-    // constrainedTo nonX86DarwinLinuxSystems nonX86DarwinLinuxPackages
-    // {
-      sculptor = {
-        constraint = sculptorSystems;
-      };
-    };
+    // constrainedTo nonX86DarwinLinuxSystems nonX86DarwinLinuxPackages;
 
   validatePackageMetadataOverrides =
     baseMetadata: overrides:

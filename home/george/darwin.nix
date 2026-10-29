@@ -218,7 +218,70 @@ in
     ${lib.getExe codexBundledPluginRepair}
   '';
 
+  # Migration: both hand-written codex agents predate the Nix-managed
+  # dev.george.codex-app-server agent, which now owns the control socket. They
+  # are identified by their hand-written shape (launch through the ~/.local/bin
+  # shim or a login shell) so the managed plist is never touched. Delete this
+  # block once no machine carries them.
+  home.activation.nixcfgDropLegacyCodexAgents = lib.hm.dag.entryBefore [ "checkLinkTargets" ] ''
+    agents_dir=${lib.escapeShellArg "${config.home.homeDirectory}/Library/LaunchAgents"}
+    for legacy_label in dev.george.codex-app-server dev.george.codex-remote-control; do
+      legacy_plist="$agents_dir/$legacy_label.plist"
+      [ -f "$legacy_plist" ] || continue
+      if grep -q -e '/bin/zsh' -e '\.local/bin/codex' "$legacy_plist"; then
+        run /bin/launchctl bootout "gui/$(id -u)/$legacy_label" 2>/dev/null || true
+        run rm -f "$legacy_plist"
+      fi
+    done
+  '';
+
+  # launchd keeps per-user "disabled" overrides outside Nix. A label can still
+  # be disabled from an earlier hand-written agent even though this module now
+  # declares it with `enable = true`, and `launchctl bootstrap` then fails with
+  # "Input/output error (code 5)" and aborts activation. Assert every declared
+  # gui-domain label is enabled before Home Manager installs and bootstraps it.
+  home.activation.nixcfgEnableDeclaredLaunchAgents = lib.hm.dag.entryBefore [ "setupLaunchAgents" ] ''
+    ${lib.concatMapStringsSep "\n"
+      (label: ''run /bin/launchctl enable "gui/$(id -u)/${label}" 2>/dev/null || true'')
+      (
+        lib.filter (label: label != null) (
+          map (agent: agent.config.Label or null) (lib.attrValues config.launchd.agents)
+        )
+      )
+    }
+  '';
+
   launchd.agents = {
+    # Shared app-server for the TUI's daemon mode. launchd owns the process and
+    # therefore the control socket, so the managed daemon under
+    # ~/.codex/packages is never selected, updated, or able to replace itself.
+    # --remote-control is accepted by this build but missing from
+    # `codex app-server --help`; if a future build drops it, fall back to
+    # `codex remote-control start` against the managed daemon.
+    codex-app-server = {
+      enable = true;
+      config = {
+        Label = "dev.george.codex-app-server";
+        RunAtLoad = true;
+        KeepAlive = {
+          SuccessfulExit = false;
+        };
+        ThrottleInterval = 30;
+        EnvironmentVariables = {
+          CODEX_HOME = "${config.home.homeDirectory}/.codex";
+          RUST_LOG = "warn";
+        };
+        ProgramArguments = [
+          "${pkgs.chatgpt}/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex"
+          "app-server"
+          "--remote-control"
+          "--listen"
+          "unix://"
+        ];
+        StandardOutPath = "${config.home.homeDirectory}/Library/Logs/codex-app-server.log";
+        StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/codex-app-server.log";
+      };
+    };
     codex-bundled-plugin-repair = {
       enable = true;
       config = {

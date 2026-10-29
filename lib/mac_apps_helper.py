@@ -13,6 +13,10 @@ filesystem. Staging, bundle comparisons, and the post-commit LaunchServices
 refresh run in bounded pools because they are independent per bundle. Live
 bundles change only by rename after every install stages, and
 the ownership manifest is published only after current and stale promotions.
+Live bundle changes are renames, and the owner-write bit that a cross-parent
+rename needs is added best-effort: macOS App Management denies chmod and
+in-bundle writes for installed apps even to root, while renaming the directory
+entry stays permitted, so a refusal must not abort a transaction.
 A target-wide lock serializes managers, while a durable journal records the
 previous manifest and every rename. Activation recovers recognized incomplete
 transactions under that lock; unrelated legacy transaction directories remain
@@ -1288,30 +1292,44 @@ def _stage_managed_apps(
             future.result()
 
 
-def _make_directory_renameable(path: Path) -> int | None:
-    """Temporarily add user-write permission to a bundle root for macOS rename."""
-    if path.is_symlink() or not path.is_dir():
-        return None
-    mode = stat.S_IMODE(path.stat().st_mode)
-    if mode & stat.S_IWUSR:
-        return None
-    path.chmod(mode | stat.S_IWUSR)
-    return mode
+def _restore_directory_mode(path: Path, mode: int | None) -> None:
+    """Best-effort mode restoration for an app bundle directory.
+
+    macOS App Management denies metadata changes to installed app bundles even
+    for root, so a refused chmod must never fail a promotion or a rollback. The
+    mode is rewritten only when it actually drifted, and a refusal warns instead
+    of raising: the bundle tree itself is already in its intended state.
+    """
+    if mode is None:
+        return
+    current = _directory_mode(path)
+    if current is None or current == mode:
+        return
+    try:
+        path.chmod(mode)
+    except PermissionError as exc:
+        _print_stderr(f"warning: could not restore mode {mode:o} on {path}: {exc}")
 
 
 def _apply_application_change(
     change: _ApplicationChange,
     transaction: _ApplicationTransaction,
 ) -> None:
-    """Apply one rename pair, durably recording each completed rename."""
+    """Apply one rename pair, durably recording each completed rename.
+
+    Moving a directory to a different parent rewrites ``..`` inside it, so a
+    non-root caller needs owner-write on the bundle root; ``_chmod_user_writable``
+    adds it best-effort. macOS App Management refuses that chmod for installed
+    bundles even to root, where the rename still succeeds, so a refusal must not
+    abort the transaction. No step writes inside the bundle it moves.
+    """
     if change.original_exists != _path_exists(change.target):
         msg = f"app changed after transaction preparation: {change.target}"
         raise OSError(msg)
 
     if change.original_exists:
         change.backup.parent.mkdir(parents=True, exist_ok=True)
-        if change.original_mode is not None and not change.original_mode & stat.S_IWUSR:
-            change.target.chmod(change.original_mode | stat.S_IWUSR)
+        _chmod_user_writable(change.target)
         change.target.replace(change.backup)
         change.original_moved = True
         _write_application_journal(transaction)
@@ -1320,15 +1338,10 @@ def _apply_application_change(
         if not _path_exists(change.replacement):
             msg = f"staged app disappeared before promotion: {change.replacement}"
             raise OSError(msg)
-        if (
-            change.replacement_mode is not None
-            and not change.replacement_mode & stat.S_IWUSR
-        ):
-            change.replacement.chmod(change.replacement_mode | stat.S_IWUSR)
+        _chmod_user_writable(change.replacement)
         change.replacement.replace(change.target)
         change.replacement_moved = True
-        if change.replacement_mode is not None:
-            change.target.chmod(change.replacement_mode)
+        _restore_directory_mode(change.target, change.replacement_mode)
         _write_application_journal(transaction)
 
 
@@ -1337,10 +1350,9 @@ def _restore_replacement_to_staging(
     replacement: Path,
 ) -> None:
     """Move a promoted replacement out of the live target before restoring backup."""
-    _make_directory_renameable(change.target)
+    _chmod_user_writable(change.target)
     change.target.replace(replacement)
-    if change.replacement_mode is not None:
-        replacement.chmod(change.replacement_mode)
+    _restore_directory_mode(replacement, change.replacement_mode)
 
 
 def _restore_application_change(change: _ApplicationChange) -> None:
@@ -1368,8 +1380,7 @@ def _restore_application_change(change: _ApplicationChange) -> None:
         elif not target_exists:
             msg = f"stale app and its backup are both missing: {change.target}"
             raise OSError(msg)
-        if change.original_mode is not None:
-            change.target.chmod(change.original_mode)
+        _restore_directory_mode(change.target, change.original_mode)
         return
 
     replacement_exists = _path_exists(replacement)
@@ -1405,8 +1416,7 @@ def _restore_application_change(change: _ApplicationChange) -> None:
         msg = f"cannot locate original and staged copies for {change.target}"
         raise OSError(msg)
 
-    if change.original_mode is not None:
-        change.target.chmod(change.original_mode)
+    _restore_directory_mode(change.target, change.original_mode)
 
 
 def _rollback_application_changes(
@@ -1453,9 +1463,19 @@ def _cleanup_application_transaction(transaction_directory: Path) -> None:
         _make_tree_user_writable(transaction_directory)
         _remove_path(transaction_directory)
     except OSError as error:
+        # App Management also forbids unlinking the contents of an installed
+        # bundle, so a backup of a previously installed app can be impossible to
+        # delete even as root. Name the cause instead of an unexplained failure.
+        hint = (
+            " macOS App Management blocks deleting the installed bundles this "
+            "transaction replaced; grant App Management to the process that runs "
+            "activation so the next activation can remove them."
+            if isinstance(error, PermissionError)
+            else ""
+        )
         _print_stderr(
             f"warning: could not remove application transaction "
-            f"{transaction_directory}: {error}; transaction artifacts remain there."
+            f"{transaction_directory}: {error}; transaction artifacts remain there.{hint}"
         )
 
 

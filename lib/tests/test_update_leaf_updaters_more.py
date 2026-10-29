@@ -76,12 +76,6 @@ def _patch_dependency(
             None,
         ),
         (
-            "packages/arc/updater.py",
-            SparkleAppcastItem("122.0", "122.0.1", "https://example.com/Arc.zip"),
-            "122.0.1",
-            "https://example.com/Arc.zip",
-        ),
-        (
             "packages/ghostty-tip/updater.py",
             SparkleAppcastItem(
                 "1234",
@@ -617,12 +611,6 @@ def test_mole_app_latest_release_and_urls(monkeypatch: pytest.MonkeyPatch) -> No
             "Freelens-1.0.0-macos-arm64.dmg",
         ),
         (
-            "packages/keepingyouawake/updater.py",
-            "1.0.0",
-            "darwin",
-            "KeepingYouAwake-1.0.0.zip",
-        ),
-        (
             "packages/pants-preview/updater.py",
             "1.0.0",
             "linux-x86_64",
@@ -645,7 +633,6 @@ def test_github_asset_name_updaters(
 @pytest.mark.parametrize(
     ("path", "payload"),
     [
-        ("packages/arc/updater.py", None),
         ("packages/claude/updater.py", {"releases": []}),
         ("packages/cleanshot/updater.py", b"no version here"),
         ("packages/docker-desktop/updater.py", {"Items": []}),

@@ -1101,7 +1101,6 @@ def test_package_registry_metadata_overrides_are_intentional() -> None:
         name for name, meta in overrides.items() if meta.get("constraint") == "darwin"
     ) == [
         "airfoil",
-        "arc",
         "aside",
         "baseten-switch",
         "capy",
@@ -1118,7 +1117,6 @@ def test_package_registry_metadata_overrides_are_intentional() -> None:
         "framer",
         "granola",
         "grok-bot",
-        "keepingyouawake",
         "linear",
         "loom",
         "mole-app",
@@ -1139,11 +1137,8 @@ def test_package_registry_metadata_overrides_are_intentional() -> None:
     assert overrides["goose-desktop"]["constraint"] == ["aarch64-darwin"]
     assert overrides["openchamber"]["constraint"] == ["aarch64-darwin"]
     assert overrides["reflect-open"]["constraint"] == ["aarch64-darwin"]
-    assert overrides["sculptor"]["constraint"] == [
-        "aarch64-darwin",
-        "x86_64-darwin",
-        "x86_64-linux",
-    ]
+    assert overrides["devin"]["constraint"] == ["aarch64-darwin"]
+    assert overrides["rex-beta"]["constraint"] == ["aarch64-darwin"]
 
 
 def test_crate2nix_source_files_exist_for_registered_targets() -> None:

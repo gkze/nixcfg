@@ -4937,21 +4937,22 @@ def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
         [
           "/System/Applications/Messages.app"
           (appPath "slack" "Slack.app")
+          (appPath "signal-beta" "Signal Beta.app")
           (appPath "onepassword" "1Password.app")
           (appPath "aside" "Aside.app")
-          (appPath "google-chrome" "Google Chrome.app")
           (appPath "claude" "Claude.app")
           (appPath "codex" "ChatGPT.app")
-          (appPath "capy-nightly" "Capy Nightly.app")
-          (appPath "code-cursor" "Cursor.app")
-          (appPath "town-assistant" "Town Assistant.app")
           (appPath "grok-bot" "Grok Bot.app")
+          (appPath "town-assistant" "Town Assistant.app")
+          (appPath "capy-nightly" "Capy Nightly.app")
+          (appPath "ghostty" "Ghostty.app")
+          (appPath "rex-beta" "Rex Beta.app")
+          (appPath "code-cursor" "Cursor.app")
+          (appPath "devin" "Devin.app")
           (appPath "zed" "Zed Nightly.app")
           (appPath "linear" "Linear.app")
-          (appPath "ghostty" "Ghostty.app")
           (appPath "notion" "Notion.app")
-          "/System/Applications/Notes.app"
-          (appPath "spotify" "Spotify.app")
+          "/System/Applications/Podcasts.app"
           "/System/Applications/System Settings.app"
         ]
         """,

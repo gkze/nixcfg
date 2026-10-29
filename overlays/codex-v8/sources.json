@@ -1,22 +1,22 @@
 {
-  "commit": "5c15a6995c9bb4bacd3e341b59fff32c909c80bf",
+  "commit": "2768994f664e8a6e3aba27503606c58339136e2a",
   "hashes": [
     {
-      "hash": "sha256-WGn9twcbHyHyAKl86X0gElh34PMc2ALtmd4sU/SIsGw=",
+      "hash": "sha256-tmg+mvy3f72MssOs9F001SApqyFrMyUiyVF5wS8P7Tw=",
       "hashType": "rustyV8ArchiveHash",
       "platform": "x86_64-linux",
-      "url": "https://github.com/denoland/rusty_v8/releases/download/v150.4.0/librusty_v8_release_x86_64-unknown-linux-gnu.a.gz"
+      "url": "https://github.com/denoland/rusty_v8/releases/download/v152.2.0/librusty_v8_release_x86_64-unknown-linux-gnu.a.gz"
     },
     {
-      "hash": "sha256-dyeCauR5vbZF6Acjn7EtH44uI956bPFvXuWSaQ0dhQY=",
+      "hash": "sha256-Pk1f7Nvg+YpgF+adfKglGad/sDLF615M2+zdPi7FGdU=",
       "hashType": "rustyV8BindingHash",
       "platform": "x86_64-linux",
-      "url": "https://github.com/denoland/rusty_v8/releases/download/v150.4.0/src_binding_release_x86_64-unknown-linux-gnu.rs"
+      "url": "https://github.com/denoland/rusty_v8/releases/download/v152.2.0/src_binding_release_x86_64-unknown-linux-gnu.rs"
     },
     {
-      "hash": "sha256-dzFIzoMgs5UmUcCnl2XiGBBjPnPuVhvT6JS56y+xvoo=",
+      "hash": "sha256-kMO0+BGkVpgeo1mURRFN5D+uHYiGWaCuxUe7cXyS6YY=",
       "hashType": "srcHash"
     }
   ],
-  "version": "v150.4.0"
+  "version": "v152.2.0"
 }
