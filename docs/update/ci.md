@@ -99,6 +99,30 @@ real derivation failure (`error: builder for`, `error: Cannot build`, or a
 failed dependency) still fails the shard. The last shard does not yield. An
 unfinished closure or a store fault that survives the retry fails the run.
 
+A completed real failure of a required sibling stops the jobs that can no
+longer reach publish. `lib/update/sibling_failfast.py` owns that decision.
+The watched conclusions are `failure`, `timed_out`, and `startup_failure`.
+`cancelled` and `skipped` do not stop anyone. A device-faulted Darwin prepare
+still completes successfully so the fresh VM can retry it. The stop exits the
+updater process and leaves the Cachix flush in place. GitHub
+`strategy.fail-fast` stays off because cancellation skips that flush.
+
+`prepare-darwin`, `prepare-arm`, `prepare-x86`, and `prepare-darwin-retry`
+watch each other. `prepare-pins` does not: later stages have not started.
+Linux prepare is the short hash check, and a failure there means Darwin's
+remaining hashes cannot merge. Run 40577174548
+had prepare-x86 fail at 11 minutes on gitbutler while prepare-darwin kept
+hashing that target for another 35 minutes. `plan-darwin-closures` failure
+stops `validate-arm` and `validate-x86`. Run 40494342241 planned for 6.5
+minutes and validate-x86 kept building for 134. A validate failure does not
+stop plan. Rust-warmup slots, cascade-warmup slots, and Darwin root shards
+stop their own matrix cells. Run 39912925016 rust slot 0 failed at 262
+minutes and the other slots ran until the 360-minute cap. A canary-rust
+failure does not fail-close the 5-wide rust stripe. Prebuild and
+cascade-canary failures stay non-gates. The poll interval is 60 seconds.
+Publish still requires every validation job, the coverage assertion, and
+certification. A green run still builds every closure.
+
 Every declared package platform and every native root is still built. Shards
 are serial because the closure's slow graph is shared. Parallel host builds
 duplicate the same graph.
@@ -531,6 +555,37 @@ Preparation requires one native stage per configured system before validation.
 Candidates only apply to their exact original source tree. Reports describe
 prepared trees, not successful promotion or deployment. Local DBOS runs stay
 local and retain their original resume constraints.
+
+## Free-tier closure speed
+
+The pipeline is **not** at the maximum free-tier speed for these closures. It
+is arranged around the free-tier limits that already held, and this sibling
+stop removes wasted runner time after a real failure. It does not make a
+green run shorter. No after-change wall clock has been measured.
+
+What already matches the free tier:
+
+- Standard `ubuntu-24.04`, `ubuntu-24.04-arm`, and `macos-15` only. No larger
+  paid runners.
+- At most five `macos-15` jobs at once for the rust and cascade stripes.
+- Prepare hashes overlap one build per hosted core (pull request 277).
+- Heavy Darwin leaves prebuild during the plan window (pull request 280).
+- Linux-deps overlap cascade. The rust canary overlaps the rust stripe.
+- Coverage is the first publish step. Closures still run the cached-boundary
+  check before the aggregate proof.
+- Every declared package platform and every Darwin root is still built.
+  Shards, warmups, coverage, and publish gating stay required.
+
+The remaining gap is Darwin prepare. It is one `macos-15` job, about 50 to 95
+minutes on the runs measured through 2026-10-30, while the other four public
+macOS runners are idle. Those runners cannot take a slice of the same prepare
+today: candidate merge requires disjoint platforms and an identical target
+set, so two partial Darwin prepares are not a legal merge. Closing that gap
+means a same-platform partial merge that still hashes every target, then the
+existing three-system merge. Plan-shards stays one `ubuntu-24.04` job because
+a 4-wide graph eval SIGTERM'd the 16 GiB runner. The public macOS pool and
+the `gkze` cache size stay the other caps. Paid `macos-15-xlarge` is out of
+scope.
 
 ## Related
 

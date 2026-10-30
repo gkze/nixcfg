@@ -162,7 +162,7 @@ the job graph, credentials, and retry behavior.
 
 ## Related
 
-- [ci.md](ci.md): hosted builders, job graph, credentials, failure handling
+- [ci.md](ci.md): hosted builders, job graph, credentials, failure handling, sibling stop
 - [free-tier-ceiling.md](free-tier-ceiling.md): measured 5h06m no-skip wall clock vs the 2h54m skip-shards baseline, extra-time breakdown, and the unpaid GitHub Actions ceiling
 - [runtime.md](runtime.md): admission, scheduling, and observability
 - [safety.md](safety.md): safety invariants and their owning code

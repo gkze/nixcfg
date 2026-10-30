@@ -13,6 +13,9 @@ on:
       - overlays/**
 permissions:
   contents: read
+  # Same sibling stop as Update: list this run's jobs and exit a prepare
+  # that can no longer merge. The token cannot cancel the run.
+  actions: read
 concurrency:
   group: pr-update-prepare-${{ github.event.pull_request.number }}
   cancel-in-progress: true

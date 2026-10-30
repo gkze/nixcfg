@@ -31,6 +31,7 @@ from typing import TextIO, cast
 if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from lib.update import sibling_failfast
 from lib.update.nix_policy import NO_IMPORT_FROM_DERIVATION_ARGS
 from lib.update.paths import local_flake_url
 
@@ -48,6 +49,10 @@ _VALIDATION_SCOPES = frozenset({
     "zed-warmup",
 })
 _HEARTBEAT_INTERVAL_SECONDS = 60
+# A required sibling's completed failure is visible on the next poll. The
+# build keeps its heartbeat cadence; this does not add a serial gate.
+_SIBLING_POLL_SECONDS = 60.0
+_SIBLING_STOP_GRACE_SECONDS = 5.0
 _OUTPUT_LOG_NAME = "output.log"
 _APPLICATIONS = Path("/Applications")
 _DARWIN_SYSTEM_SIMULATORS = Path("/Library/Developer/CoreSimulator")
@@ -994,6 +999,139 @@ def _drain_stderr(stderr: TextIO, diagnostics: queue.SimpleQueue[str | None]) ->
         diagnostics.put(None)
 
 
+def _sibling_watch_configured(stage: str) -> bool:
+    """Return whether this hosted stage should poll for a completed sibling failure."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return False
+    if not os.environ.get("NIXCFG_ACTIONS_TOKEN", "").strip():
+        return False
+    if not os.environ.get("GITHUB_REPOSITORY", "") or not os.environ.get(
+        "GITHUB_RUN_ID", ""
+    ):
+        return False
+    return (
+        sibling_failfast.failfast_group(
+            stage=stage,
+            system=os.environ.get("NIXCFG_SYSTEM", ""),
+            scope=os.environ.get("NIXCFG_VALIDATE_SCOPE", "all"),
+            canary=os.environ.get("NIXCFG_CANARY") == "true",
+        )
+        != ""
+    )
+
+
+def _poll_sibling_stop(stage: str, log: TextIO) -> sibling_failfast.SiblingStop | None:
+    """Read the current attempt's jobs and return a sibling stop, or nothing.
+
+    A poll error keeps the build running. The log names the error type, not
+    the token or the response body.
+    """
+    group = sibling_failfast.failfast_group(
+        stage=stage,
+        system=os.environ.get("NIXCFG_SYSTEM", ""),
+        scope=os.environ.get("NIXCFG_VALIDATE_SCOPE", "all"),
+        canary=os.environ.get("NIXCFG_CANARY") == "true",
+    )
+    try:
+        jobs = sibling_failfast.fetch_workflow_jobs(
+            repository=os.environ.get("GITHUB_REPOSITORY", ""),
+            run_id=os.environ.get("GITHUB_RUN_ID", ""),
+            token=os.environ.get("NIXCFG_ACTIONS_TOKEN", ""),
+        )
+    except sibling_failfast.SiblingPollError as error:
+        _write_diagnostic(log, f"Sibling failure poll skipped: {error}")
+        return None
+    return sibling_failfast.sibling_stop(group, jobs)
+
+
+def _record_sibling_stop(
+    log: TextIO, artifacts: Path, stop: sibling_failfast.SiblingStop
+) -> None:
+    """Persist and annotate the sibling that already blocked publish."""
+    payload = {
+        "conclusion": stop.conclusion,
+        "failedStep": stop.failed_step,
+        "group": stop.group,
+        "sibling": stop.job,
+    }
+    (artifacts / sibling_failfast.SIBLING_STOP_FILENAME).write_text(
+        json.dumps(payload, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    message = sibling_failfast.stop_message(stop)
+    _write_diagnostic(log, f"::error title=Sibling real failure::{message}")
+
+
+def _sibling_stop_recorded(artifacts: Path) -> bool:
+    """Return whether this stage already recorded a sibling stop."""
+    return (artifacts / sibling_failfast.SIBLING_STOP_FILENAME).is_file()
+
+
+def _process_is_group_leader(pid: int) -> bool:
+    """Return whether *pid* is its own process-group leader."""
+    try:
+        return os.getpgid(pid) == pid
+    except OSError:
+        return False
+
+
+def _signal_updater(process: subprocess.Popen[str], sig: int) -> None:
+    """Signal the updater and the Nix children started in its session."""
+    if process.poll() is not None:
+        return
+    if _process_is_group_leader(process.pid):
+        try:
+            os.killpg(process.pid, sig)
+        except OSError:
+            process.send_signal(sig)
+        return
+    try:
+        process.send_signal(sig)
+    except OSError:
+        return
+
+
+def _terminate_updater(process: subprocess.Popen[str]) -> None:
+    """Stop the updater process group so a sibling failure does not keep building."""
+    _signal_updater(process, signal.SIGTERM)
+    try:
+        process.wait(timeout=_SIBLING_STOP_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        _signal_updater(process, signal.SIGKILL)
+        try:
+            process.wait(timeout=_SIBLING_STOP_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            return
+
+
+def _abort_for_sibling_failure(
+    stage: str,
+    process: subprocess.Popen[str],
+    log: TextIO,
+    artifacts: Path,
+    poll_clock: list[float],
+    *,
+    watch: bool,
+) -> bool:
+    """Stop *process* when a required sibling has completed in real failure."""
+    if not watch or process.poll() is not None:
+        return False
+    now = time.monotonic()
+    if now - poll_clock[0] < _SIBLING_POLL_SECONDS:
+        return False
+    poll_clock[0] = now
+    stop = _poll_sibling_stop(stage, log)
+    if stop is None:
+        return False
+    try:
+        _record_sibling_stop(log, artifacts, stop)
+    finally:
+        # A record failure must still kill the updater. Otherwise the stderr
+        # reader blocks and the job never reaches the sibling annotation.
+        _terminate_updater(process)
+    return True
+
+
 def _wait_for_diagnostics(
     process: subprocess.Popen[str],
     log: TextIO,
@@ -1009,6 +1147,8 @@ def _wait_for_diagnostics(
     offsets: dict[str, int] = {}
     run_logs = artifacts / "runs"
     started = time.monotonic()
+    watch = _sibling_watch_configured(stage)
+    poll_clock = [time.monotonic()]
     _write_diagnostic(
         log,
         "Starting updater "
@@ -1019,30 +1159,45 @@ def _wait_for_diagnostics(
         target=_drain_stderr,
         args=(process.stderr, diagnostics),
         name="nixcfg-update-stderr",
+        daemon=True,
     )
     reader.start()
-    while True:
-        try:
-            diagnostic = diagnostics.get(timeout=_HEARTBEAT_INTERVAL_SECONDS)
-        except queue.Empty:
-            if text := _read_new_run_log_text(run_logs, offsets):
-                _forward_text(log, text)
-            elif process.poll() is None:
-                _write_diagnostic(
-                    log,
-                    f"Updater still running stage={stage} pid={process.pid} "
-                    f"elapsed={time.monotonic() - started:.0f}s artifacts={artifacts} "
-                    f"run_logs={run_logs} "
-                    f"free={shutil.disk_usage('/').free}",
-                )
-            continue
-        if diagnostic is None:
-            break
-        _forward_text(log, diagnostic)
+    # None waits for the reader. A sibling stop bounds that wait so a blocked
+    # stderr read cannot hold the job open after the updater has been signaled.
+    reader_join_timeout: list[float | None] = [None]
+    try:
+        while True:
+            try:
+                diagnostic = diagnostics.get(timeout=_HEARTBEAT_INTERVAL_SECONDS)
+            except queue.Empty:
+                if text := _read_new_run_log_text(run_logs, offsets):
+                    _forward_text(log, text)
+                elif process.poll() is None:
+                    _write_diagnostic(
+                        log,
+                        f"Updater still running stage={stage} pid={process.pid} "
+                        f"elapsed={time.monotonic() - started:.0f}s artifacts={artifacts} "
+                        f"run_logs={run_logs} "
+                        f"free={shutil.disk_usage('/').free}",
+                    )
+                if _abort_for_sibling_failure(
+                    stage, process, log, artifacts, poll_clock, watch=watch
+                ):
+                    reader_join_timeout[0] = _SIBLING_STOP_GRACE_SECONDS
+                    return 1
+                continue
+            if diagnostic is None:
+                break
+            _forward_text(log, diagnostic)
+            if _abort_for_sibling_failure(
+                stage, process, log, artifacts, poll_clock, watch=watch
+            ):
+                reader_join_timeout[0] = _SIBLING_STOP_GRACE_SECONDS
+                return 1
+    finally:
+        reader.join(timeout=reader_join_timeout[0])
     _forward_text(log, _read_new_run_log_text(run_logs, offsets))
-    returncode = process.wait()
-    reader.join()
-    return returncode
+    return process.wait()
 
 
 def _push_prefetched_paths(
@@ -1375,23 +1530,51 @@ def native(stage: str) -> int:
             text=True,
             bufsize=1,
             env=_native_updater_env(artifacts, receipts, stage),
+            # A new session lets a sibling stop signal Nix children with the
+            # updater. Local and unwatched runs stay in the caller's group.
+            start_new_session=_sibling_watch_configured(stage),
         ) as process:
             returncode = _wait_for_diagnostics(process, log, stage, artifacts, args)
         _write_diagnostic(
             log, f"Updater finished stage={stage} returncode={returncode}"
         )
         record_runner_storage(f"after-native-{stage}", log, detail=False, live=False)
-        if summary := _failure_summary(artifacts / "result.json"):
-            _write_diagnostic(log, summary)
-        # A green updater on a faulted disk still hashed untrusted bytes.
-        if (
-            stage == "prepare"
-            and is_hosted_darwin_runner()
-            and (faults := hosted_device_faults())
-        ):
-            _quarantine_faulted_runner(artifacts, faults, log)
-            return _hand_off_device_fault(faults, returncode)
-        return _publish_prefetched_receipts(receipts, log, artifacts, returncode)
+        return _finish_native_stage(stage, artifacts, receipts, log, returncode)
+
+
+def _finish_native_stage(
+    stage: str,
+    artifacts: Path,
+    receipts: Path,
+    log: TextIO,
+    returncode: int,
+) -> int:
+    """Hand off the updater result without turning a sibling stop into a retry.
+
+    A sibling stop already blocked publish. Prefetch receipts still upload so
+    the next attempt can substitute them. A device-fault retry stays reserved
+    for a prepare that finished on a faulted disk with no sibling failure.
+    """
+    if not _sibling_stop_recorded(artifacts) and (
+        summary := _failure_summary(artifacts / "result.json")
+    ):
+        _write_diagnostic(log, summary)
+        _write_diagnostic(log, f"::error title=Updater failed::{summary}")
+    if _sibling_stop_recorded(artifacts):
+        _write_diagnostic(
+            log,
+            "Sibling real failure recorded; this result is not a device-fault retry",
+        )
+        return _publish_prefetched_receipts(receipts, log, artifacts, returncode or 1)
+    # A green updater on a faulted disk still hashed untrusted bytes.
+    if (
+        stage == "prepare"
+        and is_hosted_darwin_runner()
+        and (faults := hosted_device_faults())
+    ):
+        _quarantine_faulted_runner(artifacts, faults, log)
+        return _hand_off_device_fault(faults, returncode)
+    return _publish_prefetched_receipts(receipts, log, artifacts, returncode)
 
 
 def _hand_off_device_fault(faults: list[str], returncode: int) -> int:

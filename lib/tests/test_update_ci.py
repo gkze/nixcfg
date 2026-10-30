@@ -142,6 +142,8 @@ def native_job(tmp_path: Path) -> tuple[dict[str, str], Path]:
     # out of native_job unless a test opts in with an isolated path.
     env.pop("GITHUB_ENV", None)
     env.pop("GITHUB_OUTPUT", None)
+    # A hosted token would turn this local fixture into a sibling-stop poll.
+    env.pop("NIXCFG_ACTIONS_TOKEN", None)
     return env, checkout
 
 
@@ -2669,7 +2671,7 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
         ".github/update-kick",
         "lib/update/**",
     ]
-    assert workflow["permissions"] == {"contents": "read"}
+    assert workflow["permissions"] == {"actions": "read", "contents": "read"}
     assert (
         "github.event_name == 'push'"
         in (workflow["jobs"]["prepare-darwin"]["with"]["validate_all_packages"])

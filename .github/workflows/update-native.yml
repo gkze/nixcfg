@@ -77,6 +77,7 @@ on:
         required: true
 permissions:
   contents: read
+  actions: read
 jobs:
   native:
     runs-on: ${{ inputs.runner }}
@@ -160,6 +161,9 @@ jobs:
           NIXCFG_CANARY: ${{ inputs.canary }}
           NIXCFG_CANARY_SLOTS: ${{ inputs.canary_slots }}
           NIXCFG_CANARY_CRATES: ${{ inputs.canary_crates }}
+          NIXCFG_SYSTEM: ${{ inputs.system }}
+          # actions:read on this workflow. Not the update PAT.
+          NIXCFG_ACTIONS_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
           NIXCFG_CI_STAGE: ${{ inputs.stage }}
         run: |

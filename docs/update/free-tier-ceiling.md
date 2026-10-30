@@ -161,3 +161,22 @@ each purge is diagnostic only.
 - Do not buy `macos-15-xlarge`. Do not drop the combined closures proof.
 - Do not remove canaries. Do not overlap cascade canary with the cascade
   5-wide stripe (duplicate buzz compile / 6 macos vs a 5 pool).
+- Do not turn on `strategy.fail-fast`. Cancellation skips the Cachix flush.
+  A completed real sibling failure stops the doomed job from
+  `lib/update/sibling_failfast.py` instead, and flush still runs.
+
+## Sibling stop and the remaining prepare gap
+
+Measured failure runs through 2026-10-30 still spend their wall clock in
+prepare and, when they get that far, in rust-warmup. Linux prepare often
+fails in about 11 to 15 minutes while Darwin keeps hashing. Plan can fail in
+minutes while Linux validate keeps building. A rust slot can fail hours in
+while the other slots run to the 360-minute cap. The sibling stop ends that
+tail. It does not shorten a green run, and no after-change wall clock is
+claimed here.
+
+The unpaid ceiling for a green run is still the one in the tables above, plus
+one idle-runner gap those tables do not close: Darwin prepare uses a single
+`macos-15` while four public macOS runners sit idle. Splitting it requires a
+same-platform partial candidate merge. The current merge rejects that shape.
+Do not sample targets to get there.
