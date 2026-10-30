@@ -109,26 +109,29 @@ def test_pr_update_prepare_runs_the_update_prepare_stages() -> None:
     assert stages == expected
     assert set(stages) == {
         "prepare-pins",
-        "prepare-darwin",
-        "prepare-darwin-retry",
+        *(f"prepare-darwin-{index}" for index in range(5)),
+        *(f"prepare-darwin-retry-{index}" for index in range(5)),
+        "prepare-darwin-merge",
         "prepare-arm",
         "prepare-x86",
         "prepare-merge",
     }
-    retry = jobs["prepare-darwin-retry"]
-    assert retry["with"] == jobs["prepare-darwin"]["with"]
-    assert " ".join(retry["if"].split()) == " ".join(
-        update["jobs"]["prepare-darwin-retry"]["if"].split()
-    )
-    assert " ".join(jobs["prepare-merge"]["if"].split()) == " ".join(
-        update["jobs"]["prepare-merge"]["if"].split()
-    )
+    for index in range(5):
+        retry = jobs[f"prepare-darwin-retry-{index}"]
+        assert retry["with"] == jobs[f"prepare-darwin-{index}"]["with"]
+        assert " ".join(retry["if"].split()) == " ".join(
+            update["jobs"][f"prepare-darwin-retry-{index}"]["if"].split()
+        )
+    for name in ("prepare-merge", "prepare-darwin-merge"):
+        assert " ".join(jobs[name]["if"].split()) == " ".join(
+            update["jobs"][name]["if"].split()
+        )
     for name, job in jobs.items():
         if name == "targets":
             continue
         assert job["uses"] == "./.github/workflows/update-native.yml"
         assert job["secrets"] == "inherit"
-        if name != "prepare-merge":
+        if name not in {"prepare-merge", "prepare-darwin-merge"}:
             assert job["with"]["targets"] == "${{ needs.targets.outputs.targets }}"
     assert (
         jobs["prepare-merge"]["with"]

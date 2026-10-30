@@ -36,6 +36,7 @@ from lib.update.derivation_validation import (
     ValidationIncompleteError,
 )
 from lib.update.persistence import IsolatedUpdateWorkspace
+from lib.update.prepare_shard import coverage_from_json, partition_prepare_targets
 from lib.update.ui_consumer import consume_events
 from lib.update.updaters import Updater, VersionInfo
 from lib.update.updaters.metadata import GitHubReleaseMetadata, MappingMetadata
@@ -281,6 +282,165 @@ def test_pin_then_parallel_native_matches_serial_darwin_then_linux(
         )
     assert result.version == "2"
     assert set(result.hashes.mapping) == set(pipeline.supported_systems())
+
+
+def test_darwin_prepare_shards_hash_every_target_once_then_merge(
+    prepared_run, tmp_path: Path
+) -> None:
+    """Five Darwin slices keep one target set; the three-system fold still hashes all."""
+    root, operations, state = prepared_run
+    state["system"] = "x86_64-linux"
+    pin, pin_status = pipeline.prepare_candidate(("example",), pins_only=True)
+    assert pin_status == 0
+    assert pin.systems == ()
+    operations.clear()
+    shards: list[Candidate] = []
+    coverages = []
+    for shard in range(5):
+        state["system"] = "aarch64-darwin"
+        coverage_path = tmp_path / f"shard-{shard}" / "prepare-coverage.json"
+        candidate, status = pipeline.prepare_candidate(
+            ("example",),
+            previous=pin,
+            prepare_shard=shard,
+            prepare_shard_count=5,
+            coverage_path=coverage_path,
+        )
+        assert status == 0
+        assert candidate.prepared
+        assert candidate.targets == ("example",)
+        assert candidate.systems == ("aarch64-darwin",)
+        coverage = coverage_from_json(coverage_path.read_text(encoding="utf-8"))
+        assert coverage.plan == ("example",)
+        assert coverage.hashed == partition_prepare_targets(
+            ("example",), shard=shard, count=5
+        )
+        shards.append(candidate)
+        coverages.append(coverage)
+    assert operations == ["hash:aarch64-darwin"]
+    darwin = pipeline.merge_same_platform_partials(
+        tuple(shards), tuple(coverages), repo=root
+    )
+    assert darwin.systems == ("aarch64-darwin",)
+    assert darwin.targets == ("example",)
+    for system in ("aarch64-linux", "x86_64-linux"):
+        state["system"] = system
+        native = pipeline.prepare_candidate(("example",), previous=pin)[0]
+        darwin = pipeline.merge_prepared_candidates(darwin, native, repo=root)
+    assert set(darwin.systems) == set(pipeline.supported_systems())
+    with IsolatedUpdateWorkspace(root) as workspace:
+        darwin.apply(workspace.root)
+        result = SourceEntry.model_validate_json(
+            (workspace.root / "packages/example/sources.json").read_bytes()
+        )
+    assert result.version == "2"
+    assert set(result.hashes.mapping) == set(pipeline.supported_systems())
+    shard_root = tmp_path / "shards"
+    for index, (candidate, coverage) in enumerate(zip(shards, coverages, strict=True)):
+        directory = shard_root / str(index)
+        directory.mkdir(parents=True)
+        (directory / "candidate.json").write_text(
+            candidate.model_dump_json(indent=2) + "\n", encoding="utf-8"
+        )
+        (directory / "prepare-coverage.json").write_text(
+            coverage.to_json(), encoding="utf-8"
+        )
+    merged_out = tmp_path / "merged.json"
+    merged = CliRunner().invoke(
+        pipeline.app,
+        [
+            "merge-prepare-shards",
+            "--shards",
+            str(shard_root),
+            "--output",
+            str(merged_out),
+        ],
+    )
+    assert merged.exit_code == 0, merged.output
+    loaded = Candidate.model_validate_json(merged_out.read_bytes())
+    assert loaded.tree == shards[0].tree
+    assert loaded.systems == ("aarch64-darwin",)
+    assert loaded.targets == ("example",)
+
+
+def test_prepare_shard_coverage_is_only_written_for_a_prepared_slice(
+    prepared_run, tmp_path: Path
+) -> None:
+    """A failed shard and an unsharded prepare leave no coverage sidecar."""
+    _root, _operations, state = prepared_run
+    plain = tmp_path / "plain" / "prepare-coverage.json"
+    candidate, status = pipeline.prepare_candidate(("example",), coverage_path=plain)
+    assert status == 0
+    assert candidate.prepared
+    assert not plain.exists()
+    state["fail"] = True
+    failed = tmp_path / "failed" / "prepare-coverage.json"
+    candidate, status = pipeline.prepare_candidate(
+        ("example",),
+        prepare_shard=0,
+        prepare_shard_count=5,
+        coverage_path=failed,
+    )
+    assert status == 1
+    assert not candidate.prepared
+    assert not failed.exists()
+
+
+def test_prepare_command_writes_and_rejects_shard_flags(
+    prepared_run, tmp_path: Path
+) -> None:
+    """The CI prepare command records the slice and refuses a partial shard."""
+    _root, _operations, state = prepared_run
+    state["system"] = "x86_64-linux"
+    pin_out = tmp_path / "pin.json"
+    pinned = CliRunner().invoke(
+        pipeline.app,
+        ["prepare", "--output", str(pin_out), "--pins-only", "example"],
+    )
+    assert pinned.exit_code == 0, pinned.output
+    assert not (tmp_path / "prepare-coverage.json").exists()
+    state["system"] = "aarch64-darwin"
+    out = tmp_path / "candidate.json"
+    result = CliRunner().invoke(
+        pipeline.app,
+        [
+            "prepare",
+            "--output",
+            str(out),
+            "--previous",
+            str(pin_out),
+            "--prepare-shard",
+            "0",
+            "--prepare-shard-count",
+            "5",
+            "example",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    coverage = coverage_from_json(
+        (tmp_path / "prepare-coverage.json").read_text(encoding="utf-8")
+    )
+    assert coverage == coverage_from_json(coverage.to_json())
+    assert coverage.hashed == ("example",)
+    assert coverage.count == 5
+    assert Candidate.model_validate_json(out.read_bytes()).targets == ("example",)
+    for args in (
+        ["prepare", "--output", str(out), "--prepare-shard", "0", "example"],
+        ["prepare", "--output", str(out), "--prepare-shard-count", "5", "example"],
+        [
+            "prepare",
+            "--output",
+            str(out),
+            "--pins-only",
+            "--prepare-shard",
+            "0",
+            "--prepare-shard-count",
+            "5",
+            "example",
+        ],
+    ):
+        rejected = CliRunner().invoke(pipeline.app, args)
+        assert rejected.exit_code != 0
 
 
 def test_preparation_streams_progress_separately_from_json(

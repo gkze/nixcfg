@@ -6,7 +6,7 @@ import os
 import shutil
 import sys
 from contextlib import nullcontext
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Unpack, cast
 
@@ -57,6 +57,7 @@ from lib.update.derivation_validation import (
 from lib.update.errors import format_exception
 from lib.update.event_queue import EVENT_QUEUE_SIZE, run_event_pipeline
 from lib.update.paths import get_repo_root
+from lib.update.prepare_shard import partition_prepare_targets
 from lib.update.refs import (
     FlakeInputRef,
     get_flake_inputs_with_refs,
@@ -706,6 +707,64 @@ def _build_run_plan(opts: UpdateOptions) -> _RunPlan | _RunPlanError | None:
         resolved=resolved,
         sources=sources,
         item_meta=item_meta,
+        order=order,
+    )
+
+
+def _apply_prepare_shard(
+    run_plan: _RunPlan | _RunPlanError | None,
+    preparation: Preparation | None,
+) -> _RunPlan | _RunPlanError | None:
+    """Narrow hashing to one slice without changing the requested target set.
+
+    A plan error records no coverage. An empty plan records an empty slice so
+    the merge still sees every shard index. The requested ``targets`` stay on
+    the preparation and are not replaced by the slice.
+    """
+    if preparation is None or preparation.prepare_shard is None:
+        return run_plan
+    if isinstance(run_plan, _RunPlan):
+        return _restrict_plan_to_prepare_shard(run_plan, preparation)
+    if run_plan is None:
+        preparation.prepare_plan = ()
+        preparation.prepare_hashed = ()
+    return run_plan
+
+
+def _restrict_plan_to_prepare_shard(
+    plan: _RunPlan,
+    preparation: Preparation,
+) -> _RunPlan | None:
+    """Record the full plan, then keep only this shard's names.
+
+    Callers pass a preparation whose shard and count were accepted together.
+    """
+    hashed = partition_prepare_targets(
+        tuple(plan.order),
+        shard=cast("int", preparation.prepare_shard),
+        count=cast("int", preparation.prepare_shard_count),
+    )
+    preparation.prepare_plan = tuple(plan.order)
+    preparation.prepare_hashed = hashed
+    if not hashed:
+        return None
+    keep = set(hashed)
+    source_names = [name for name in plan.resolved.source_names if name in keep]
+    ref_inputs = [item for item in plan.resolved.ref_inputs if item.name in keep]
+    order = [name for name in plan.order if name in keep]
+    return replace(
+        plan,
+        resolved=replace(
+            plan.resolved,
+            do_sources=bool(source_names),
+            do_refs=bool(ref_inputs),
+            source_names=source_names,
+            ref_inputs=ref_inputs,
+        ),
+        sources=SourcesFile(
+            entries={name: plan.sources.entries[name] for name in source_names}
+        ),
+        item_meta={name: plan.item_meta[name] for name in order},
         order=order,
     )
 
@@ -1650,7 +1709,10 @@ async def _run_updates(
                 updaters = _get_updaters()
             update_flake.invalidate_flake_lock()
             allowed_paths: tuple[Path, ...] = ()
-            run_plan = durable.checkpoint_sync("plan", lambda: _build_run_plan(opts))
+            run_plan = _apply_prepare_shard(
+                durable.checkpoint_sync("plan", lambda: _build_run_plan(opts)),
+                preparation,
+            )
             if isinstance(run_plan, _RunPlanError):
                 outcome.plan_error = run_plan
                 outcome.summary.accumulate(

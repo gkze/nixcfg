@@ -108,7 +108,9 @@ roots from the previous green run):
 
 Expected warm wall: **about 2h30m–2h50m**, which can meet or beat the
 skip-shards baseline **without skipping shards**. The remaining ceiling
-is plan-shards eval plus Darwin prepare hashing.
+is plan-shards eval plus Darwin prepare hashing. Darwin prepare hashing
+is now split across the five public `macos-15` runners; the expected
+saving below is unmeasured until five Update runs after that change.
 
 **Absolute floor** if prepare Darwin and plan-shards also hit cache
 (no pin/hash work, reused graphs): certify + coverage + a short
@@ -145,6 +147,32 @@ Expected additional cut on a similarly shaped cold run: **about 14–21m**.
 `nix derivation show` is not in Determinate's parallel-eval command list,
 so eval-cores is a warning fix, not a claimed 27m win. Per-path df after
 each purge is diagnostic only.
+
+## Darwin prepare across the public macOS pool
+
+One `macos-15` runner hashed every Darwin target. The other four public
+macOS runners were idle for that whole job. Measured Darwin prepare was
+**39m** on the no-skip run 39166099302 and **50–95m** on later runs where
+prepare was the long pole (including 40577174548 at about 56m after a
+short Linux prepare).
+
+The five `prepare-darwin-N` jobs hash disjoint slices of that same plan.
+Each keeps the requested target set. `prepare-darwin-merge` is a short
+ubuntu git/json fold: it checks the coverage sidecars and does not hash
+again. Linux prepare still hashes every target and still runs beside the
+shards.
+
+If the hash work splits evenly, a 50–95m Darwin prepare becomes about
+**10–19m** of shard wall, which is about **40–76m** off the critical path
+before the ubuntu fold. The 39m green run would fall by about **31m** on
+the same even split. A target that dominates the shard, and the repeated
+plan resolution on every runner, both shrink the saving. The fold itself
+is a few minutes, not another hash.
+
+**Unmeasured** until five Update runs after this change. Paid
+`macos-15-xlarge` stays out of scope. Plan-shards stays serial. This uses
+the idle public macOS runners during Darwin prepare; it does not drop,
+sample, or skip a target.
 
 ## What not to do
 

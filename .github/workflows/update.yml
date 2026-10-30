@@ -65,10 +65,14 @@ jobs:
   # flake.lock, source versions, and generated files — not HEAD.
   # Those pins cannot ride along with Darwin hashes: a version bump
   # without hashes is an illegal persist, so the pin job refreshes
-  # refs/versions and keeps existing hashes. The three native prepares
-  # then hash in parallel from that pin. plan-darwin-closures still
-  # waits for prepare-merge because root-out-paths and certify bind to
-  # the complete three-system tree (require_complete_candidate).
+  # refs/versions and keeps existing hashes. Darwin hashing is split
+  # across the five public macos-15 runners. Each shard keeps the same
+  # target set and hashes a disjoint slice of the plan. prepare-darwin-merge
+  # on ubuntu proves every plan name was hashed exactly once and publishes
+  # prepare-aarch64-darwin. Arm, x86, and that Darwin candidate then fold
+  # in prepare-merge. plan-darwin-closures still waits for prepare-merge
+  # because root-out-paths and certify bind to the complete three-system
+  # tree (require_complete_candidate).
   # #1263 force-local dry-runs the will-be-built set so a 406-drv
   # bootstrap compile fails the slot immediately.
   prepare-pins:
@@ -84,7 +88,11 @@ jobs:
         ${{ github.event_name == 'push' ||
         inputs.validate_all_packages || false }}
     secrets: inherit
-  prepare-darwin:
+  # Five explicit jobs, not a matrix: device_fault is a per-job output,
+  # and a matrix cell does not publish its own output to the workflow.
+  # Each shard keeps the caller's target set. prepare_shard only selects
+  # which plan names that runner hashes.
+  prepare-darwin-0:
     needs: prepare-pins
     if: |-
       always() && !cancelled() &&
@@ -96,23 +104,17 @@ jobs:
       stage: prepare
       previous: prepare-pins
       targets: ${{ inputs.targets || '' }}
+      prepare_shard: "0"
+      prepare_shard_count: "5"
       validate_all_packages: |-
         ${{ github.event_name == 'push' ||
         inputs.validate_all_packages || false }}
     secrets: inherit
-  # A kernel block-device I/O error on the hosted VM (39883371442,
-  # 39835075034) leaves registered store paths with bad bytes. The same
-  # VM cannot recover: it publishes nothing, uploads its candidate under a
-  # -device-fault name, and this job reruns the identical stage once on a
-  # fresh VM. Any other prepare failure is not retried.
-  prepare-darwin-retry:
-    needs:
-      - prepare-pins
-      - prepare-darwin
+  prepare-darwin-1:
+    needs: prepare-pins
     if: |-
       always() && !cancelled() &&
-      needs.prepare-pins.result == 'success' &&
-      needs.prepare-darwin.outputs.device_fault == 'true'
+      needs.prepare-pins.result == 'success'
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -120,9 +122,220 @@ jobs:
       stage: prepare
       previous: prepare-pins
       targets: ${{ inputs.targets || '' }}
+      prepare_shard: "1"
+      prepare_shard_count: "5"
       validate_all_packages: |-
         ${{ github.event_name == 'push' ||
         inputs.validate_all_packages || false }}
+    secrets: inherit
+  prepare-darwin-2:
+    needs: prepare-pins
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-pins.result == 'success'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: prepare
+      previous: prepare-pins
+      targets: ${{ inputs.targets || '' }}
+      prepare_shard: "2"
+      prepare_shard_count: "5"
+      validate_all_packages: |-
+        ${{ github.event_name == 'push' ||
+        inputs.validate_all_packages || false }}
+    secrets: inherit
+  prepare-darwin-3:
+    needs: prepare-pins
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-pins.result == 'success'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: prepare
+      previous: prepare-pins
+      targets: ${{ inputs.targets || '' }}
+      prepare_shard: "3"
+      prepare_shard_count: "5"
+      validate_all_packages: |-
+        ${{ github.event_name == 'push' ||
+        inputs.validate_all_packages || false }}
+    secrets: inherit
+  prepare-darwin-4:
+    needs: prepare-pins
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-pins.result == 'success'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: prepare
+      previous: prepare-pins
+      targets: ${{ inputs.targets || '' }}
+      prepare_shard: "4"
+      prepare_shard_count: "5"
+      validate_all_packages: |-
+        ${{ github.event_name == 'push' ||
+        inputs.validate_all_packages || false }}
+    secrets: inherit
+  # A kernel block-device I/O error on the hosted VM (39883371442,
+  # 39835075034) leaves registered store paths with bad bytes. The same
+  # VM cannot recover: it publishes nothing, uploads its candidate under a
+  # -device-fault name, and the matching retry reruns that shard once on a
+  # fresh VM. Any other prepare failure is not retried. A retry starts
+  # only after its shard finishes, so the five-runner pool is unchanged.
+  prepare-darwin-retry-0:
+    needs:
+      - prepare-pins
+      - prepare-darwin-0
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin-0.outputs.device_fault == 'true'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: prepare
+      previous: prepare-pins
+      targets: ${{ inputs.targets || '' }}
+      prepare_shard: "0"
+      prepare_shard_count: "5"
+      validate_all_packages: |-
+        ${{ github.event_name == 'push' ||
+        inputs.validate_all_packages || false }}
+    secrets: inherit
+  prepare-darwin-retry-1:
+    needs:
+      - prepare-pins
+      - prepare-darwin-1
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin-1.outputs.device_fault == 'true'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: prepare
+      previous: prepare-pins
+      targets: ${{ inputs.targets || '' }}
+      prepare_shard: "1"
+      prepare_shard_count: "5"
+      validate_all_packages: |-
+        ${{ github.event_name == 'push' ||
+        inputs.validate_all_packages || false }}
+    secrets: inherit
+  prepare-darwin-retry-2:
+    needs:
+      - prepare-pins
+      - prepare-darwin-2
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin-2.outputs.device_fault == 'true'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: prepare
+      previous: prepare-pins
+      targets: ${{ inputs.targets || '' }}
+      prepare_shard: "2"
+      prepare_shard_count: "5"
+      validate_all_packages: |-
+        ${{ github.event_name == 'push' ||
+        inputs.validate_all_packages || false }}
+    secrets: inherit
+  prepare-darwin-retry-3:
+    needs:
+      - prepare-pins
+      - prepare-darwin-3
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin-3.outputs.device_fault == 'true'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: prepare
+      previous: prepare-pins
+      targets: ${{ inputs.targets || '' }}
+      prepare_shard: "3"
+      prepare_shard_count: "5"
+      validate_all_packages: |-
+        ${{ github.event_name == 'push' ||
+        inputs.validate_all_packages || false }}
+    secrets: inherit
+  prepare-darwin-retry-4:
+    needs:
+      - prepare-pins
+      - prepare-darwin-4
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin-4.outputs.device_fault == 'true'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: prepare
+      previous: prepare-pins
+      targets: ${{ inputs.targets || '' }}
+      prepare_shard: "4"
+      prepare_shard_count: "5"
+      validate_all_packages: |-
+        ${{ github.event_name == 'push' ||
+        inputs.validate_all_packages || false }}
+    secrets: inherit
+  # Ubuntu fold. It does not take a macos-15 slot. The uploaded artifact
+  # name is prepare-aarch64-darwin, which prepare-merge already downloads.
+  prepare-darwin-merge:
+    needs:
+      - prepare-pins
+      - prepare-darwin-0
+      - prepare-darwin-1
+      - prepare-darwin-2
+      - prepare-darwin-3
+      - prepare-darwin-4
+      - prepare-darwin-retry-0
+      - prepare-darwin-retry-1
+      - prepare-darwin-retry-2
+      - prepare-darwin-retry-3
+      - prepare-darwin-retry-4
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-pins.result == 'success' &&
+      (needs.prepare-darwin-0.result == 'success' &&
+      needs.prepare-darwin-0.outputs.device_fault != 'true' ||
+      needs.prepare-darwin-retry-0.result == 'success' &&
+      needs.prepare-darwin-retry-0.outputs.device_fault != 'true') &&
+      (needs.prepare-darwin-1.result == 'success' &&
+      needs.prepare-darwin-1.outputs.device_fault != 'true' ||
+      needs.prepare-darwin-retry-1.result == 'success' &&
+      needs.prepare-darwin-retry-1.outputs.device_fault != 'true') &&
+      (needs.prepare-darwin-2.result == 'success' &&
+      needs.prepare-darwin-2.outputs.device_fault != 'true' ||
+      needs.prepare-darwin-retry-2.result == 'success' &&
+      needs.prepare-darwin-retry-2.outputs.device_fault != 'true') &&
+      (needs.prepare-darwin-3.result == 'success' &&
+      needs.prepare-darwin-3.outputs.device_fault != 'true' ||
+      needs.prepare-darwin-retry-3.result == 'success' &&
+      needs.prepare-darwin-retry-3.outputs.device_fault != 'true') &&
+      (needs.prepare-darwin-4.result == 'success' &&
+      needs.prepare-darwin-4.outputs.device_fault != 'true' ||
+      needs.prepare-darwin-retry-4.result == 'success' &&
+      needs.prepare-darwin-retry-4.outputs.device_fault != 'true')
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: ubuntu-24.04
+      system: x86_64-linux
+      stage: merge-prepare-shards
     secrets: inherit
   prepare-arm:
     needs: prepare-pins
@@ -158,16 +371,12 @@ jobs:
     secrets: inherit
   prepare-merge:
     needs:
-      - prepare-darwin
-      - prepare-darwin-retry
+      - prepare-darwin-merge
       - prepare-arm
       - prepare-x86
     if: |-
       always() && !cancelled() &&
-      (needs.prepare-darwin.result == 'success' &&
-      needs.prepare-darwin.outputs.device_fault != 'true' ||
-      needs.prepare-darwin-retry.result == 'success' &&
-      needs.prepare-darwin-retry.outputs.device_fault != 'true') &&
+      needs.prepare-darwin-merge.result == 'success' &&
       needs.prepare-arm.result == 'success' &&
       needs.prepare-x86.result == 'success'
     uses: ./.github/workflows/update-native.yml
@@ -739,8 +948,17 @@ jobs:
       tree: ${{ steps.proposal.outputs.tree }}
     needs:
       - prepare-pins
-      - prepare-darwin
-      - prepare-darwin-retry
+      - prepare-darwin-0
+      - prepare-darwin-1
+      - prepare-darwin-2
+      - prepare-darwin-3
+      - prepare-darwin-4
+      - prepare-darwin-retry-0
+      - prepare-darwin-retry-1
+      - prepare-darwin-retry-2
+      - prepare-darwin-retry-3
+      - prepare-darwin-retry-4
+      - prepare-darwin-merge
       - prepare-arm
       - prepare-x86
       - prepare-merge
