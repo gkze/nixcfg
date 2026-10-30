@@ -746,6 +746,138 @@ def test_capture_remembers_a_transport_stall_split_across_chunks() -> None:
     assert capture.transport_stall
 
 
+def test_corrupt_cargo_git_db_is_removed_before_the_next_generate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A pack that does not match its index is deleted under the cargo lock.
+
+    Update 40623890748 prepare-darwin-retry failed zed-editor-nightly because
+    cargo kept refetching a corrupt windows-capture git db.
+    """
+    cargo_home = tmp_path / "cargo"
+    db = cargo_home / "git" / "db" / "windows-capture-abc"
+    pack = db / "objects" / "pack"
+    pack.mkdir(parents=True)
+    (pack / "pack-abc.pack").write_text("corrupt", encoding="utf-8")
+    other = cargo_home / "git" / "db" / "other-repo"
+    other.mkdir(parents=True)
+    (other / "keep").write_text("keep", encoding="utf-8")
+    checkout = cargo_home / "git" / "checkouts" / "windows-capture-abc"
+    checkout.mkdir(parents=True)
+    (checkout / "keep").write_text("keep", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep").write_text("keep", encoding="utf-8")
+    message = (
+        "`cargo metadata` exited with an error: "
+        f"packfile {pack}/pack-abc.pack does not match index\n"
+        f"failed to fetch into: {db}\n"
+        f"failed to fetch into: {outside}\n"
+        "fatal: in the commit graph file but not in the object database.\n"
+        "This is probably due to repo corruption."
+    )
+    calls = 0
+
+    def _run(
+        args: list[str],
+        *,
+        env: dict[str, str] | None = None,
+        timeout: float,
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        del env, timeout
+        calls += 1
+        if calls == 1:
+            assert db.exists()
+            raise RuntimeError(message)
+        assert not db.exists()
+        return subprocess.CompletedProcess(args, 0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr(crate2nix, "_crate2nix_cargo_home", lambda: cargo_home)
+    monkeypatch.setattr(crate2nix, "_run", _run)
+    monkeypatch.setattr(crate2nix.time, "sleep", lambda _seconds: None)
+
+    completed = crate2nix._run_crate2nix_generate(
+        ["nix", "run", "nixpkgs#crate2nix"],
+        env={},
+        generated_outputs=(),
+    )
+
+    assert completed.stdout == "ok\n"
+    assert calls == 2
+    assert other.is_dir()
+    assert checkout.is_dir()
+    assert (outside / "keep").is_file()
+    assert crate2nix._is_retryable_crate2nix_generate_failure(message)
+
+
+def test_corrupt_cargo_git_db_cleanup_ignores_the_db_root_and_missing_dirs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Do not delete the git db root, and tolerate a db that is already gone."""
+    cargo_home = tmp_path / "cargo"
+    db_root = cargo_home / "git" / "db"
+    db_root.mkdir(parents=True)
+    (db_root / "marker").write_text("keep", encoding="utf-8")
+    monkeypatch.setattr(crate2nix, "_crate2nix_cargo_home", lambda: cargo_home)
+
+    crate2nix._discard_corrupt_cargo_git_dbs("nothing to do")
+    crate2nix._discard_corrupt_cargo_git_dbs(f"packfile {db_root} does not match index")
+    crate2nix._discard_corrupt_cargo_git_dbs("nix-prefetch-git\nfatal: early EOF")
+    crate2nix._discard_corrupt_cargo_git_dbs(
+        "packfile "
+        f"{db_root}/missing-repo//objects/pack/pack-abc.pack "
+        "does not match index"
+    )
+
+    assert (db_root / "marker").is_file()
+    assert not (db_root / "missing-repo").exists()
+
+
+def test_corrupt_cargo_git_db_cleanup_reports_disk_exhaustion(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """ENOSPC while removing a corrupt db is a terminal resource failure."""
+    cargo_home = tmp_path / "cargo"
+    db = cargo_home / "git" / "db" / "windows-capture-abc"
+    db.mkdir(parents=True)
+    monkeypatch.setattr(crate2nix, "_crate2nix_cargo_home", lambda: cargo_home)
+
+    def _rmtree(path: Path) -> None:
+        raise OSError(errno.ENOSPC, "No space left on device", str(path))
+
+    monkeypatch.setattr(crate2nix.shutil, "rmtree", _rmtree)
+
+    with pytest.raises(crate2nix.Crate2NixResourceError, match="ENOSPC"):
+        crate2nix._discard_corrupt_cargo_git_dbs(
+            f"failed to fetch into: {db}\ndoes not match index"
+        )
+
+
+def test_corrupt_cargo_git_db_cleanup_reraises_other_os_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A permission error while discarding a db is not reclassified."""
+    cargo_home = tmp_path / "cargo"
+    db = cargo_home / "git" / "db" / "windows-capture-abc"
+    db.mkdir(parents=True)
+    monkeypatch.setattr(crate2nix, "_crate2nix_cargo_home", lambda: cargo_home)
+    monkeypatch.setattr(
+        crate2nix.shutil,
+        "rmtree",
+        lambda _path: (_ for _ in ()).throw(OSError(errno.EACCES, "Permission denied")),
+    )
+
+    with pytest.raises(OSError, match="Permission denied"):
+        crate2nix._discard_corrupt_cargo_git_dbs(
+            f"failed to fetch into: {db}\nrepo corruption"
+        )
+
+
 def test_patched_src_retries_a_stalled_git_fetch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
