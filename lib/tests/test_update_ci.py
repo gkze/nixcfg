@@ -2024,6 +2024,44 @@ def test_zed_darwin_workflow_is_one_macos_runner_and_not_update() -> None:
     assert "strategy" not in workflow["jobs"]["zed-family"]
 
 
+def test_update_native_callers_grant_every_requested_token_scope() -> None:
+    """A called workflow cannot raise the caller's GITHUB_TOKEN.
+
+    Job permissions replace the workflow block. A caller that omits the
+    key inherits the workflow block. An omitted scope inside a block is
+    ``none``.
+    """
+    native = yaml.load(
+        (ROOT / ".github/workflows/update-native.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    requested = native["permissions"]
+    assert requested == {"actions": "read", "contents": "read"}
+    rank = {"none": 0, "read": 1, "write": 2}
+    callers: list[str] = []
+    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+        workflow = yaml.load(path.read_text(), Loader=yaml.BaseLoader)
+        for name, job in (workflow.get("jobs") or {}).items():
+            if not isinstance(job, dict):
+                continue
+            if job.get("uses") != "./.github/workflows/update-native.yml":
+                continue
+            callers.append(f"{path.name}:{name}")
+            raw = (
+                job["permissions"]
+                if "permissions" in job
+                else workflow.get("permissions")
+            )
+            granted = raw if isinstance(raw, dict) else {}
+            for scope, level in requested.items():
+                actual = granted.get(scope, "none")
+                assert rank[actual] >= rank[level], (
+                    f"{path.name}:{name} grants {scope}={actual}"
+                )
+    assert "zed-darwin.yml:zed-family" in callers
+    assert len(callers) > 1
+
+
 def test_repair_validation_mode_reaches_first_native_preparation() -> None:
     """Explicit dispatch scope enters the candidate once; later stages inherit it."""
     workflow = yaml.load(
