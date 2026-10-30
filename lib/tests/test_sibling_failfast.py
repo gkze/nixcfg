@@ -157,6 +157,44 @@ def test_sibling_stop_does_not_treat_a_longer_job_id_as_the_same_job() -> None:
     )
 
 
+def test_darwin_prepare_shards_stay_in_the_prepare_stop_group() -> None:
+    """A numbered shard is prepare-darwin; its retry is not that name."""
+    shard = sibling_stop("prepare", [_job("prepare-darwin-2 / native")])
+    assert shard == SiblingStop(
+        group="prepare",
+        job="prepare-darwin-2 / native",
+        conclusion="failure",
+        failed_step="",
+    )
+    retry = sibling_stop("prepare", [_job("prepare-darwin-retry-4 / native")])
+    assert retry is not None
+    assert retry.job == "prepare-darwin-retry-4 / native"
+    assert (
+        sibling_stop(
+            "prepare",
+            [_job("prepare-darwin-retry-0 / native", conclusion="success")],
+        )
+        is None
+    )
+    assert sibling_stop("prepare", [_job("prepare-darwin-merge / native")]) is None
+    assert (
+        sibling_stop(
+            "prepare",
+            [_job("prepare-darwin-1 / native", conclusion="success")],
+        )
+        is None
+    )
+    mixed = sibling_stop(
+        "prepare",
+        [
+            _job("prepare-darwin-retry-0 / native", conclusion="success"),
+            _job("prepare-darwin-3 / native"),
+        ],
+    )
+    assert mixed is not None
+    assert mixed.job == "prepare-darwin-3 / native"
+
+
 def test_matrix_cell_failure_stops_that_matrix_only() -> None:
     rust = _job(
         "validate-darwin-warm-rust (0) / native",

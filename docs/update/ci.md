@@ -108,7 +108,11 @@ updater process and leaves the Cachix flush in place. GitHub
 `strategy.fail-fast` stays off because cancellation skips that flush.
 
 `prepare-darwin`, `prepare-arm`, `prepare-x86`, and `prepare-darwin-retry`
-watch each other. `prepare-pins` does not: later stages have not started.
+watch each other. `prepare-darwin-<digits>` is the same watch name as
+`prepare-darwin`, and `prepare-darwin-retry-<digits>` is
+`prepare-darwin-retry`. Those ids are the public-pool Darwin prepare shards.
+`prepare-darwin-merge` is not in the group. `prepare-pins` does not watch:
+later stages have not started.
 Linux prepare is the short hash check, and a failure there means Darwin's
 remaining hashes cannot merge. Run 40577174548
 had prepare-x86 fail at 11 minutes on gitbutler while prepare-darwin kept

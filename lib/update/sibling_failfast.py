@@ -45,6 +45,9 @@ _REAL_FAILURES = frozenset({"failure", "timed_out", "startup_failure"})
 _PREPARE_SYSTEMS = frozenset({"aarch64-darwin", "aarch64-linux", "x86_64-linux"})
 _LINUX_SYSTEMS = frozenset({"aarch64-linux", "x86_64-linux"})
 _REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+# Public-pool Darwin prepare uses explicit jobs, not a matrix. The retry
+# alternative is first so prepare-darwin-retry-0 is not prepare-darwin.
+_DARWIN_PREPARE_SHARD = re.compile(r"^(prepare-darwin(?:-retry)?)-\d+$")
 _RUN_ID = re.compile(r"^[0-9]{1,20}$")
 _PAGE_SIZE = 100
 _MAX_PAGES = 10
@@ -224,9 +227,20 @@ def fetch_workflow_jobs(
 
 
 def _job_matches(api_name: str, watched: frozenset[str]) -> bool:
-    """Match a caller job id, including a matrix suffix, but not a longer id."""
+    """Match a caller job id, including a matrix suffix, but not a longer id.
+
+    ``prepare-darwin-<digits>`` is the public-pool shard of ``prepare-darwin``.
+    ``prepare-darwin-retry-<digits>`` is that shard's device-fault retry.
+    ``prepare-darwin-merge`` stays outside the group.
+    """
     caller = api_name.split(" / ", 1)[0]
-    return any(caller == name or caller.startswith(f"{name} (") for name in watched)
+    shard = _DARWIN_PREPARE_SHARD.fullmatch(caller)
+    aliases = (caller,) if shard is None else (caller, shard.group(1))
+    return any(
+        alias == name or caller.startswith(f"{name} (")
+        for name in watched
+        for alias in aliases
+    )
 
 
 def _parse_job(item: object) -> WorkflowJob | None:
