@@ -33,6 +33,7 @@ import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
@@ -1187,6 +1188,195 @@ def slot_warmup_paths(
             *rest,
             *(member for member in layer if slot == owner and member in family),
         )
+    )
+
+
+def warmup_drv_owners(
+    layers: Sequence[Sequence[str]],
+    output_drvs: Mapping[str, str],
+    *,
+    width: int = RUST_WARMUP_SLOTS,
+    pinned: Collection[str] = (),
+) -> dict[str, int]:
+    """Return the matrix slot that owns each planned rust-warmup ``.drv``."""
+    owners: dict[str, int] = {}
+    for slot in range(width):
+        for path in slot_warmup_paths(
+            layers, slot, width=width, pinned=pinned, output_drvs=output_drvs
+        ):
+            if drv := output_drvs.get(path):
+                owners.setdefault(drv, slot)
+    return owners
+
+
+def is_intentional_rebuild_drv(path: str) -> bool:
+    """Return whether every slot rebuilds *path* locally on purpose.
+
+    SVH families compile under ``--no-substitute`` and GitButler runs its
+    own probe-then-compile, so neither waits for another slot's copy.
+    """
+    return is_svh_sensitive_store_path(path) or is_gitbutler_family_store_path(path)
+
+
+# 41178394324 slot 2 compiled rust_autocfg, rust_serde_core,
+# rust_tracing-core, rust_potential_utf and rust_vsimd that other slots
+# own, because their outputs were not in gkze yet. buildRustCrate rlibs
+# are not reproducible (nixpkgs#482646), so a second copy can E0463 any
+# dependent that also links the owner's Cachix copy. Wait for the owner.
+FOREIGN_INPUT_POLL_SECONDS = 30.0
+FOREIGN_INPUT_WAIT_SECONDS = 20 * 60.0
+FOREIGN_INPUT_BUDGET_SECONDS = 60 * 60.0
+
+
+@dataclass
+class ForeignInputGate:
+    """Hold a slot's rust-warmup batch until other slots' planned inputs land.
+
+    Batches go in plan-layer order. A batch only waits for inputs from lower
+    layers, and every slot realizes its lower layers first, so waits cannot
+    form a cycle. Each batch waits at most ``wait_seconds``, the whole slot
+    at most ``budget_seconds``. An input that misses is never waited for
+    again and is built locally as before (fail open).
+    """
+
+    slot: int
+    owners: Mapping[str, int]
+    drv_outputs: Mapping[str, tuple[str, ...]]
+    drv_layers: Mapping[str, int]
+    present: Callable[[Sequence[str]], frozenset[str]]
+    requisites: Callable[[Sequence[str]], Sequence[str]]
+    clock: Callable[[], float] = time.monotonic
+    sleep: Callable[[float], None] = time.sleep
+    poll_seconds: float = FOREIGN_INPUT_POLL_SECONDS
+    wait_seconds: float = FOREIGN_INPUT_WAIT_SECONDS
+    budget_seconds: float = FOREIGN_INPUT_BUDGET_SECONDS
+    exempt: Callable[[str], bool] = is_intentional_rebuild_drv
+    given_up: set[str] = field(default_factory=set)
+    landed: set[str] = field(default_factory=set)
+    _deadline: float | None = None
+
+    def layer_batches(self, drvs: Sequence[str]) -> tuple[tuple[str, ...], ...]:
+        """Group *drvs* by plan layer, lowest first; unplanned drvs go last."""
+        groups: dict[int, list[str]] = {}
+        last = max(self.drv_layers.values(), default=0) + 1
+        for drv in dict.fromkeys(drvs):
+            groups.setdefault(self.drv_layers.get(drv, last), []).append(drv)
+        return tuple(tuple(groups[layer]) for layer in sorted(groups))
+
+    def foreign_inputs(self, drvs: Sequence[str]) -> tuple[str, ...]:
+        """Return planned inputs of *drvs* that another slot owns and builds."""
+        batch = frozenset(drvs)
+        try:
+            requisites = self.requisites(tuple(drvs))
+        except WarmupError, OSError, subprocess.SubprocessError:
+            return ()
+        return tuple(
+            drv
+            for drv in dict.fromkeys(requisites)
+            if drv not in batch
+            and drv not in self.given_up
+            and drv not in self.landed
+            and self.owners.get(drv, self.slot) != self.slot
+            and drv in self.drv_outputs
+            and not self.exempt(drv)
+        )
+
+    def wait(self, drvs: Sequence[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        """Return (inputs now substitutable, inputs that missed the wait)."""
+        pending = list(self.foreign_inputs(drvs))
+        if not pending:
+            return (), ()
+        now = self.clock()
+        if self._deadline is None:
+            self._deadline = now + self.budget_seconds
+        stop = min(now + self.wait_seconds, self._deadline)
+        ready: list[str] = []
+        while True:
+            have = self._present(
+                tuple(path for drv in pending for path in self.drv_outputs[drv])
+            )
+            done = [
+                drv
+                for drv in pending
+                if all(path in have for path in self.drv_outputs[drv])
+            ]
+            ready.extend(done)
+            pending = [drv for drv in pending if drv not in done]
+            remaining = stop - self.clock()
+            if not pending or remaining <= 0:
+                break
+            self.sleep(min(self.poll_seconds, remaining))
+        self.given_up.update(pending)
+        self.landed.update(ready)
+        return tuple(ready), tuple(pending)
+
+    def _present(self, paths: Sequence[str]) -> frozenset[str]:
+        try:
+            return self.present(paths)
+        except WarmupError, OSError, subprocess.SubprocessError:
+            return frozenset()
+
+
+def locally_valid_paths(
+    store_paths: Sequence[str],
+    *,
+    run: _StoreRun | None = None,
+) -> frozenset[str]:
+    """Return the subset of *store_paths* already valid in the local store."""
+    unique = tuple(dict.fromkeys(store_paths))
+    if not unique:
+        return frozenset()
+    runner = subprocess.run if run is None else run
+    result = runner(
+        ["nix-store", "--check-validity", "--print-invalid", *unique],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode:
+        return frozenset()
+    stdout = result.stdout
+    text = stdout.decode() if isinstance(stdout, bytes) else stdout
+    invalid = {line.strip() for line in text.splitlines()}
+    return frozenset(path for path in unique if path not in invalid)
+
+
+def gkze_or_local_paths(
+    store_paths: Sequence[str],
+    *,
+    run: _StoreRun | None = None,
+) -> frozenset[str]:
+    """Return *store_paths* that are local already or substitutable from gkze."""
+    local = locally_valid_paths(store_paths, run=run)
+    rest = tuple(path for path in store_paths if path not in local)
+    if not rest:
+        return local
+    return local | paths_on_store(rest, _GKZE_CACHE, run=run)
+
+
+def foreign_input_gate(
+    layers: Sequence[Sequence[str]],
+    output_drvs: Mapping[str, str],
+    slot: int,
+    *,
+    pinned: Collection[str] = (),
+    run: _StoreRun | None = None,
+) -> ForeignInputGate:
+    """Build the slot's gate from the warmup plan's layers and drv owners."""
+    drv_outputs: dict[str, list[str]] = {}
+    drv_layers: dict[str, int] = {}
+    for index, layer in enumerate(layers):
+        for path in layer:
+            if drv := output_drvs.get(path):
+                drv_outputs.setdefault(drv, []).append(path)
+                drv_layers.setdefault(drv, index)
+    return ForeignInputGate(
+        slot=slot,
+        owners=warmup_drv_owners(layers, output_drvs, pinned=pinned),
+        drv_outputs={drv: tuple(paths) for drv, paths in drv_outputs.items()},
+        drv_layers=drv_layers,
+        present=lambda paths: gkze_or_local_paths(paths, run=run),
+        requisites=lambda drvs: drv_input_requisites(drvs, run=run),
     )
 
 

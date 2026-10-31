@@ -6901,3 +6901,41 @@ def test_export_and_publish_warmup_overlaps(
     monkeypatch.setattr(pipeline, "export_warmup_drvs", fail_export)
     with pytest.raises(WarmupError, match="missing warmup"):
         pipeline._export_and_publish_warmup(plan, tmp_path / "drvs")
+
+
+def test_rust_warmup_others_substitute_other_slots_inputs_before_building(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """41178394324 slot 2 built rust_autocfg itself; slot 1 owned it."""
+    from lib.update.ci.warmup import ForeignInputGate
+
+    autocfg = "/nix/store/" + "a" * 32 + "-rust_autocfg-1.4.0.drv"
+    mine_low = "/nix/store/" + "b" * 32 + "-rust_num-traits-0.2.19.drv"
+    mine_high = "/nix/store/" + "c" * 32 + "-rust_mermaid_render-0.1.0.drv"
+    calls: list[tuple[tuple[str, ...], bool]] = []
+
+    def realize(paths: tuple[str, ...], **kwargs: object) -> tuple[()]:
+        calls.append((tuple(paths), bool(kwargs.get("substitute_only"))))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", realize)
+    gate = ForeignInputGate(
+        slot=0,
+        owners={autocfg: 1, mine_low: 0, mine_high: 0},
+        drv_outputs={
+            drv: (drv.removesuffix(".drv"),) for drv in (autocfg, mine_low, mine_high)
+        },
+        drv_layers={autocfg: 0, mine_low: 1, mine_high: 2},
+        present=lambda paths: frozenset(paths),
+        requisites=lambda drvs: (*drvs, autocfg),
+        sleep=lambda _seconds: None,
+    )
+    failures = pipeline._realize_rust_warmup_others(
+        (mine_high, mine_low), flake_root=tmp_path, gate=gate
+    )
+    assert failures == ()
+    assert calls == [
+        ((autocfg,), True),
+        ((mine_low,), False),
+        ((mine_high,), False),
+    ]
