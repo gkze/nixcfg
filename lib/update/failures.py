@@ -74,6 +74,12 @@ NIX_NETWORK_TRANSIENT_MARKERS = (
     # turned substituters off for that invocation, and reported cache.nixos.org
     # llvm outputs as builds that ``--max-jobs 0`` then refused.
     "you don't have Internet access",
+    # macOS ENOBUFS: the kernel ran out of socket buffers for one write.
+    # 40606669118 hit it in a crate2nix git fetch. 41165477135 prepare-darwin-3
+    # hit it in zon2nix's nix-prefetch-git store add for zigfsm. The second
+    # had no retry, so neutils failed the shard. Every fetch caller shares
+    # this marker now; a fresh attempt gets new buffers.
+    "No buffer space available",
 )
 
 # Transfer timeouts. These are deliberately *not* part of the Nix network set:

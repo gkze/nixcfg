@@ -763,6 +763,26 @@ def test_zig_bad_http_status_is_a_transient_zon2nix_failure() -> None:
     assert updater._is_transient_zon2nix_text(_ZON2NIX_BAD_HTTP_STATUS)
 
 
+_ZON2NIX_ENOBUFS = (
+    "warn(zig): cache_path: /tmp/neutils-zon2nix/.cache/zig/p/"
+    "zigfsm-0.2.0-9VW4uQY7AQBrx9lNrVJ3PNRPvAX56jJnLBFOL8-vUN25\n"
+    "err(nix): nix-prefetch-git errors: From https://github.com/cryptocode/zigfsm\n"
+    "err(nix): nix-prefetch-git errors: removing `.git'...\n"
+    "err(nix): nix-prefetch-git errors: error: write of 32200 bytes: "
+    "No buffer space available\n"
+    "err(nix): nix-prefetch-git errors: maybe try again with "
+    "`nix-prefetch-git --no-add-path <...>' ?\n"
+    "err(default): NixHashFile\n"
+)
+
+
+def test_macos_enobufs_is_a_transient_zon2nix_failure() -> None:
+    """41165477135 prepare-darwin-3: zigfsm store add hit ENOBUFS, then no retry."""
+    module = _load_module("neutils_enobufs_is_transient")
+    updater = module.NeutilsUpdater()
+    assert updater._is_transient_zon2nix_text(_ZON2NIX_ENOBUFS)
+
+
 def test_codeberg_zig_overlay_503_is_a_transient_zon2nix_failure() -> None:
     """Update 37162169861 died resolving zon2nix when Codeberg returned 503."""
     module = _load_module("neutils_codeberg_503_is_transient")

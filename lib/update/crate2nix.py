@@ -115,7 +115,6 @@ _RETRYABLE_CRATE2NIX_TRANSIENT_MARKERS = (
     "The requested URL returned error: 5",
     "cannot create the lock file",
     "Directory not empty",
-    "No buffer space available",
     "No such file or directory",
     # 40623890748 prepare-darwin-retry: cargo metadata reused a corrupt
     # windows-capture git db ("packfile does not match index", commit graph
