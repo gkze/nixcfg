@@ -3004,7 +3004,7 @@ def test_unsloth_rejects_invalid_backend_upload_time(value: str) -> None:
 
 @pytest.mark.parametrize(
     "version",
-    ["0.1.902-beta", "0.1.909-beta", "0.1.910-beta", "0.1.911-beta"],
+    ["0.1.902-beta", "0.1.909-beta", "0.1.910-beta", "0.1.911-beta", "0.1.913-beta"],
 )
 def test_unsloth_build_toolchain_override_is_updater_owned(version: str) -> None:
     """A release whose own lockfile needs a newer compiler is recorded, not restated in Nix."""
