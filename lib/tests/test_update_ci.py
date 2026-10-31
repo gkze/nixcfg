@@ -4230,6 +4230,57 @@ def test_cleanup_preserves_active_xcode_aliases_and_unselected_data(
         assert not any(call[:2] == ("xcrun", "simctl") for call in calls)
 
 
+# 41172807038 plan-darwin-closures: 72G cow-root host, free after cleanup.
+_SMALL_LINUX_HOST_FREE = 32_038_752_256
+# 41157698790 plan-darwin-closures: usual 145G host, free after cleanup.
+_USUAL_LINUX_HOST_FREE = 109_833_338_880
+
+
+def test_small_linux_host_gets_a_min_free_it_can_keep_through_peak_growth(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """41172807038: min-free above free made the installer GC its own nss-cacert."""
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    output_file = tmp_path / "github-output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output_file))
+    monkeypatch.setattr(jobs.sys, "platform", "linux")
+    monkeypatch.setattr(jobs, "_UNUSED_IMAGE_PATHS", {"linux": ()})
+    monkeypatch.setattr(jobs, "runner_free_bytes", lambda: _SMALL_LINUX_HOST_FREE)
+    monkeypatch.setattr(jobs, "record_runner_storage", lambda _label: None)
+    assert jobs.main("clean-image") == 0
+    outputs = dict(line.split("=", 1) for line in output_file.read_text().splitlines())
+    min_free = int(outputs["nix_min_free"])
+    assert int(outputs["nix_max_free"]) == jobs._NIX_MAX_FREE_BYTES
+    # Auto-GC fires only below min-free: not at install, not through peak growth.
+    assert min_free < _SMALL_LINUX_HOST_FREE
+    assert min_free <= _SMALL_LINUX_HOST_FREE - jobs._LINUX_PEAK_STORE_GROWTH_BYTES
+    assert f"min-free={min_free}" in capsys.readouterr().out
+
+
+def test_usual_linux_host_and_darwin_keep_the_32_gib_min_free() -> None:
+    assert jobs.nix_gc_thresholds(_USUAL_LINUX_HOST_FREE, "linux") == (
+        jobs._NIX_MIN_FREE_BYTES,
+        jobs._NIX_MAX_FREE_BYTES,
+    )
+    # Darwin image cleanup fails closed below headroom; its values never move.
+    assert jobs.nix_gc_thresholds(_SMALL_LINUX_HOST_FREE, "darwin") == (
+        jobs._NIX_MIN_FREE_BYTES,
+        jobs._NIX_MAX_FREE_BYTES,
+    )
+
+
+def test_linux_min_free_never_drops_below_its_floor() -> None:
+    min_free, _ = jobs.nix_gc_thresholds(4 * 1024 * 1024 * 1024, "linux")
+    assert min_free == jobs._LINUX_MIN_FREE_FLOOR_BYTES
+
+
+def test_measured_linux_peak_growth_fits_the_linux_reservation() -> None:
+    """Peak Linux growth after cleanup: prepare-x86 27 GB, validate-arm 23 GB."""
+    for growth in (27_000_000_000, 23_000_000_000):
+        assert growth <= jobs._LINUX_PEAK_STORE_GROWTH_BYTES
+
+
 def test_image_cleanup_skips_xcode_for_light_non_building_jobs(
     tmp_path, monkeypatch, capsys
 ) -> None:
@@ -4670,8 +4721,8 @@ def test_hosted_update_runtime_reserves_store_headroom_for_root_closures() -> No
             "DeterminateSystems/determinate-nix-action@"
         )
     )
-    assert "min-free = 34359738368" in extra_conf
-    assert "max-free = 68719476736" in extra_conf
+    assert "min-free = ${{ steps.reclaim.outputs.nix_min_free }}" in extra_conf
+    assert "max-free = ${{ steps.reclaim.outputs.nix_max_free }}" in extra_conf
     assert "eval-cores = 2" in extra_conf
     assert "eval-cores = 0" not in extra_conf
     assert jobs._NIX_MIN_FREE_BYTES == 34359738368

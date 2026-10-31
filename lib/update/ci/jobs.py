@@ -122,9 +122,19 @@ _STORAGE_MOUNTS = ("/", "/nix", "/nix/store")
 # Live-written on hosted macOS; rmtree can lose a race (ENOTEMPTY) after children
 # are gone. Cleanup is disk reclaim, not a correctness gate for these trees.
 _VOLATILE_IMAGE_LEAVES = frozenset({"Caches", "hostedtoolcache"})
-# Must match .github/actions/update-runtime/action.yml extra-conf.
+# update-runtime passes these to Nix through the clean-image step outputs.
 _NIX_MIN_FREE_BYTES = 34359738368
 _NIX_MAX_FREE_BYTES = 68719476736
+# Hosted Linux has no image headroom gate, and most hosts leave ~110 GB after
+# cleanup, so the 32 GiB min-free never fires there. 41172807038
+# plan-darwin-closures drew a 72G cow-root host: 14 GB free, 32.04 GB after
+# cleanup, below min-free. The installer's own auto-GC then deleted the
+# unrooted nss-cacert it was adding to the default profile, and Nix install
+# failed. Linux min-free shrinks to what the host can keep through the
+# job's peak growth. Peak Linux growth after cleanup: prepare-x86
+# 39166099302 27 GB, validate-arm 41157698790 23 GB. Rounded up to 28 GiB.
+_LINUX_PEAK_STORE_GROWTH_BYTES = 28 * 1024 * 1024 * 1024
+_LINUX_MIN_FREE_FLOOR_BYTES = 1024 * 1024 * 1024
 # Store GC before root closures is skipped once free covers max-free + min-free.
 _STORE_GC_SKIP_BYTES = _NIX_MAX_FREE_BYTES + _NIX_MIN_FREE_BYTES
 # Peak store growth of one heavy hosted Darwin job, measured as free bytes
@@ -566,7 +576,36 @@ def clean_runner_image() -> None:
             "for Darwin root-closure headroom"
         )
         raise ImageCleanupError(msg)
+    _emit_nix_gc_thresholds(after)
     record_runner_storage("after-image-cleanup")
+
+
+def _emit_nix_gc_thresholds(free_after_cleanup: int) -> None:
+    """Log and export the Nix GC thresholds update-runtime installs with."""
+    min_free, max_free = nix_gc_thresholds(free_after_cleanup, sys.platform)
+    sys.stdout.write(f"Nix GC thresholds: min-free={min_free} max-free={max_free}\n")
+    if os.environ.get("GITHUB_OUTPUT"):
+        _outputs(nix_min_free=str(min_free), nix_max_free=str(max_free))
+
+
+def nix_gc_thresholds(free_after_cleanup: int, platform: str) -> tuple[int, int]:
+    """Return Nix ``min-free`` and ``max-free`` for a host after image cleanup.
+
+    Darwin keeps the fixed values; image cleanup fails closed unless they
+    hold through peak growth. Linux lowers min-free only when the host
+    cannot keep 32 GiB through its peak growth, so auto-GC never fires
+    during Nix install or mid-job on a small host.
+    """
+    if platform == "darwin":
+        return _NIX_MIN_FREE_BYTES, _NIX_MAX_FREE_BYTES
+    min_free = min(
+        _NIX_MIN_FREE_BYTES,
+        max(
+            _LINUX_MIN_FREE_FLOOR_BYTES,
+            free_after_cleanup - _LINUX_PEAK_STORE_GROWTH_BYTES,
+        ),
+    )
+    return min_free, _NIX_MAX_FREE_BYTES
 
 
 def _image_cleanup_best_effort(path: Path) -> bool:
