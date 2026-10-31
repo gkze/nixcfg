@@ -225,6 +225,17 @@ def test_zig_bad_http_status_is_retryable_network_failure() -> None:
     assert is_retryable_nix_network_failure(stdout="", stderr=stderr)
 
 
+def test_macos_enobufs_is_retryable_network_failure() -> None:
+    """41165477135 prepare-darwin-3: nix-prefetch-git store add hit ENOBUFS."""
+    stderr = (
+        "err(nix): nix-prefetch-git errors: removing `.git'...\n"
+        "err(nix): nix-prefetch-git errors: error: write of 32200 bytes: "
+        "No buffer space available\n"
+        "err(default): NixHashFile"
+    )
+    assert is_retryable_nix_network_failure(stdout="", stderr=stderr)
+
+
 def test_goproxy_http2_internal_error_is_retryable_network_failure() -> None:
     """39435878398 prepare-x86: Go GOPROXY printed stream INTERNAL_ERROR, not curl HTTP/2."""
     stderr = (

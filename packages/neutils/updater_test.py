@@ -763,6 +763,43 @@ def test_zig_bad_http_status_is_a_transient_zon2nix_failure() -> None:
     assert updater._is_transient_zon2nix_text(_ZON2NIX_BAD_HTTP_STATUS)
 
 
+_ZON2NIX_ENOBUFS = (
+    "warn(zig): cache_path: /tmp/neutils-zon2nix/.cache/zig/p/"
+    "zigfsm-0.2.0-9VW4uQY7AQBrx9lNrVJ3PNRPvAX56jJnLBFOL8-vUN25\n"
+    "err(nix): nix-prefetch-git errors: From https://github.com/cryptocode/zigfsm\n"
+    "err(nix): nix-prefetch-git errors: removing `.git'...\n"
+    "err(nix): nix-prefetch-git errors: error: write of 32200 bytes: "
+    "No buffer space available\n"
+    "err(nix): nix-prefetch-git errors: maybe try again with "
+    "`nix-prefetch-git --no-add-path <...>' ?\n"
+    "err(default): NixHashFile\n"
+)
+
+
+def test_macos_enobufs_is_a_transient_zon2nix_failure() -> None:
+    """41165477135 prepare-darwin-3: zigfsm store add hit ENOBUFS, then no retry."""
+    module = _load_module("neutils_enobufs_is_transient")
+    updater = module.NeutilsUpdater()
+    assert updater._is_transient_zon2nix_text(_ZON2NIX_ENOBUFS)
+
+
+_ZON2NIX_ZIG_HTTP_TIMEOUT = "err(default): Timeout\n"
+
+
+def test_zig_http_timeout_is_a_transient_zon2nix_failure() -> None:
+    """41168467356 prepare-darwin-0: zon2nix's retry failed on its own fetch timeout."""
+    module = _load_module("neutils_zig_http_timeout_is_transient")
+    updater = module.NeutilsUpdater()
+    assert updater._is_transient_zon2nix_text(_ZON2NIX_ZIG_HTTP_TIMEOUT)
+
+
+def test_zon2nix_non_timeout_error_name_is_not_transient() -> None:
+    """A zon2nix error name that is not a fetch fault still fails at once."""
+    module = _load_module("neutils_zig_non_timeout_is_permanent")
+    updater = module.NeutilsUpdater()
+    assert not updater._is_transient_zon2nix_text("err(default): HashMismatch\n")
+
+
 def test_codeberg_zig_overlay_503_is_a_transient_zon2nix_failure() -> None:
     """Update 37162169861 died resolving zon2nix when Codeberg returned 503."""
     module = _load_module("neutils_codeberg_503_is_transient")

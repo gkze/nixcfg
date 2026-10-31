@@ -78,6 +78,13 @@ class NeutilsUpdater(GitHubReleaseUpdater):
     _ZON2NIX_TIMEOUT_MARKERS: ClassVar[tuple[str, ...]] = (
         "Command timed out",
         "timed out",
+        # zon2nix's own std.http fetch (fetchPlain) returns error.Timeout when
+        # a plain-URL dependency stalls, and main prints only the error name.
+        # PR #306 prepare-darwin-0 (run 41168467356) hit ConnectionTimedOut on
+        # attempt 1, then this on attempt 2, and neutils failed the shard.
+        # Kept here, not in the shared Nix set: a bare "Timeout" is too broad
+        # outside a pure-fetch command.
+        "err(default): Timeout",
     )
 
     @classmethod
