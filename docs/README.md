@@ -28,7 +28,7 @@ flowchart TD
 | ---------------------------------------------------------- | ------------------------------------------------------------------ |
 | [architecture.md](architecture.md)                         | Repository layout, flake outputs, module layers, and the CLI       |
 | [framework.md](framework.md)                               | Public API version 2, exported modules, and downstream usage       |
-| [development.md](development.md)                           | Dev shell, formatting, quality gates, and the validation ladder    |
+| [development.md](development.md)                           | Dev shell, formatting, quality gates, and the test strategy        |
 | [packaging.md](packaging.md)                               | Package and overlay discovery, crate2nix packages, app packaging   |
 | [source-modifications.md](source-modifications.md)         | Decision ladder for editing unpacked upstream source trees         |
 | [interactive-toolchains.md](interactive-toolchains.md)     | Go, uv, and Python toolchains selected for George's Darwin profile |
@@ -52,6 +52,9 @@ Use one of these paths to reach the relevant document quickly:
   [update/README.md](update/README.md), then open
   [update/ci.md](update/ci.md) for hosted builders or
   [update/runtime.md](update/runtime.md) for local execution.
+- **Add or change a test.** Read the testing strategy in
+  [development.md](development.md) first: Nix logic is tested in `tests/nix/`,
+  Python in pytest, and configuration data is not tested at all.
 - **Review update safety.** Read [update/safety.md](update/safety.md) before
   changing any code that the invariants name.
 - **Consume this flake elsewhere.** Read [framework.md](framework.md).

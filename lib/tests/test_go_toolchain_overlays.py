@@ -5,7 +5,7 @@ from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.tests._assertions import expect_instance
-from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding
+from lib.tests._nix_ast import assert_nix_ast_equal, binding_map, expect_binding
 from lib.tests._nix_source import nix_file_expr
 from lib.update.paths import REPO_ROOT
 
@@ -24,7 +24,7 @@ def test_gogcli_uses_go_1_27_without_weakening_upstreams_floor() -> None:
         expect_binding(arguments.values, "go").value,
         "final.go_1_27",
     )
-    assert "postPatch" not in arguments.values
+    assert "postPatch" not in binding_map(arguments.values)
 
 
 def test_crush_overrides_nixpkgs_versioned_go_builder() -> None:

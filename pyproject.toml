@@ -97,7 +97,6 @@ exclude = [
   # Generated patchers embed upstream bytes verbatim (docstrings, TSX), so
   # hand-written line-length and quote rules cannot hold for them.
   "packages/hermes-desktop/patch_nix_managed.py",
-  "packages/sculptor/updater.py",
   "packages/unsloth/patch_nix_managed.py",
   # Build-time validators run under nixpkgs' default python3, which predates
   # unparenthesized multi-exception handlers.

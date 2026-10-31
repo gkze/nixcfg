@@ -14,12 +14,7 @@ let
     };
   };
 
-  assertEq =
-    label: expected: actual:
-    if expected == actual then
-      true
-    else
-      throw "${label}: expected ${builtins.toJSON expected}, got ${builtins.toJSON actual}";
+  inherit (import ./lib.nix) assertEq;
 
   sidecars = discovery.discoverSidecarEntries {
     root = fixtures + "/sidecars";

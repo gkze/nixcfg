@@ -3,12 +3,7 @@ let
   inherit (self.inputs.nixpkgs) lib;
   volume = import ../../../darwin/george/build-volume-identity.nix;
   env = import ../../../darwin/george/build-volume-env.nix;
-  assertEq =
-    label: expected: actual:
-    if expected == actual then
-      true
-    else
-      throw "${label}: expected ${builtins.toJSON expected}, got ${builtins.toJSON actual}";
+  inherit (import ../lib.nix) assertEq;
 
   argus = self.darwinConfigurations.argus.config;
   home = argus.home-manager.users.george;

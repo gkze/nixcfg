@@ -37,12 +37,7 @@ let
   };
   fixtureChecks = fixtureRepoChecks.checks;
   includes = check: path: builtins.elem (src + "/${path}") checks.${check}.source;
-  assertEq =
-    label: expected: actual:
-    if expected == actual then
-      true
-    else
-      throw "${label}: expected ${builtins.toJSON expected}, got ${builtins.toJSON actual}";
+  inherit (import ./lib.nix) assertEq;
   results = [
     (assertEq "local dependency trees are excluded from Python inputs" [
       (fixtureSrc + "/__init__.py")

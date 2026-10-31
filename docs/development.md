@@ -92,7 +92,97 @@ uv run cosmic-ray exec cosmic-ray.toml .cosmic-ray.sqlite
 uv run cr-report .cosmic-ray.sqlite
 ```
 
-## Python test philosophy
+## Testing strategy
+
+Tests are split by the language of the code that can be wrong. There is one
+crossing point: Python that *emits* Nix. Everywhere else, a test lives in the
+language of the implementation.
+
+| Lane              | Code                                                                                     | Owned by                          | Form                                              |
+| ----------------- | ---------------------------------------------------------------------------------------- | --------------------------------- | ------------------------------------------------- |
+| Nix unit          | `lib/*.nix`, `modules/**`, `overlays/_lib/**`, `darwin/george/dock-lib.nix`              | `tests/nix/*.nix`                 | evaluation against synthetic fixtures             |
+| Nix configuration | `darwin/*.nix`, `darwin/<host>/**`, `home/george/**`, package lists                      | the host build                    | `nix flake check`, `nh darwin switch`             |
+| Python unit       | `lib/update/**`, `lib/nix/**`, `lib/macos/**`, `lib/recover/**`, `lib/schema_codegen/**` | `lib/tests/*.py`                  | pure pytest with `tmp_path` and mocked boundaries |
+| Package updater   | `packages/**/updater.py`, `overlays/**/*updater*.py`                                     | `packages/<name>/updater_test.py` | mocked upstream calls, ASTs of generated Nix      |
+| Emission contract | Python that writes Nix                                                                   | `lib/tests/*.py`                  | parse the emitted output, compare ASTs            |
+| Reader contract   | Python that reads repo Nix structure                                                     | one `nix_eval` test per reader    | cross-check the parser against Nix                |
+
+### The boundary
+
+**Do not test configuration data.** A host or user configuration file is data.
+Its correctness is established by evaluating and activating the host, and by
+review. A test that duplicates a config value only guarantees that every config
+edit costs a second edit.
+
+The rule that follows from this:
+
+- No pytest module in the suite may read a `.nix` file under `darwin/` or
+  `home/george/`, or name one of those directories. That covers `lib/tests/`
+  and the package- and overlay-owned `updater_test.py` files;
+  `lib/tests/test_suite_boundary.py` fails the run if one does.
+- Configuration edits must never require a test edit. If they do, the test is
+  wrong even when it currently passes.
+- When a configuration really needs a guard, assert an *invariant* that holds
+  for any valid configuration, not a *snapshot* of the current one. Compare
+  `tests/nix/mac-apps/dock-declarations.nix` (every Dock entry is a system app
+  or a resolved bundle) with a list of every Dock entry.
+- Assertions must be able to fail. A negative guard whose subject is absent, or
+  a membership test against the wrong container, passes silently forever. Prove
+  a new assertion fails when you break the code.
+
+`lib/tests/test_mac_apps_nix.py` now holds only what belongs in Python:
+
+- behaviour of the Python activation helper,
+- scripts the test renders and then executes,
+- structural assertions on generated bash through `lib/tests/_shell_ast.py`,
+  because Nix has no bash parser,
+- a few decisions no build can express: one unified ChatGPT bundle, the Twilight
+  AutoConfig path that keeps its quit dialog working, and the Zed Nightly
+  dynamic-pipe installer.
+
+Everything that asserted the *shape* of a Nix expression now lives in
+`tests/nix/mac-apps/`. One exception remains:
+`test_prebuilt_app_helpers_preserve_signed_resources_by_default` reads the
+default of a helper's `dontFixup` formal. Nix cannot observe a default argument
+without applying the builder to a full `stdenv` stub, which would assert the
+stub rather than the helper.
+
+When you add a test, ask which file you would have to edit to break it without
+changing anything a user notices. If the answer is a Nix declaration, the test
+belongs in `tests/nix/`.
+
+### Nix test rules
+
+- Prefer an eval-only check. A check that needs a build must justify the build.
+- Import shared assertions from `tests/nix/lib.nix`; do not paste `assertEq`.
+- Assert on evaluated values: option values, rendered scripts parsed with
+  `lib/tests/_shell_ast.py`, or an expected `throw` via `assertThrows`.
+- Do not assert on the source text of the module under test. A `let`-binding
+  name is not a contract.
+- A library test builds its own fixture. It does not import a real host.
+- Never hash rendered output. A golden hash fails on a cosmetic edit and reports
+  no diff; assert the property the hash was standing in for.
+- Every test is reachable. A file under `tests/nix/` that no flake check, hook,
+  or document names is dead weight and rots silently.
+
+### Opt-in integration probes
+
+A few probes build a complete package graph and are far too expensive for the
+default check graph. They live beside the package and run on demand:
+
+```bash
+nix eval --offline --impure --option allow-import-from-derivation false --json \
+  --file packages/gitbutler/tests/native-input-cache-boundary.nix
+nix eval --offline --impure --option allow-import-from-derivation false --json \
+  --file packages/gitbutler/tests/native-override-policy.nix
+nix eval --offline --impure --option allow-import-from-derivation false --json \
+  --file packages/zed-editor-nightly/tests/native-override-policy.nix
+```
+
+Keep this list accurate. Anything not named here should become a wired check or
+be removed; a probe that no longer evaluates is deleted, not left behind.
+
+### Python test rules
 
 Python tests are the executable specification for maintained Python behavior.
 Cover success paths, failure paths, and edge cases. Treat an uncovered branch as
@@ -101,11 +191,9 @@ a missing test or a design smell.
 Use this order:
 
 1. Pure Python unit tests.
-1. Nix AST assertions with `nix-manipulator`.
+1. Nix AST assertions with `nix-manipulator`, on Nix that Python produced.
 1. Mocked Python-side subprocess or wrapper tests.
 1. Real Nix evaluation only when the property cannot be established above.
-
-Additional rules:
 
 - Test generated Nix structurally. Prefer AST equality over string equality,
   unless the rendered text is itself the contract.
@@ -119,6 +207,8 @@ Additional rules:
   AST builders.
 - Mock `run_nix`, `run_nix_json`, or `subprocess.run` to cover control flow,
   argument construction, parsing, timeouts, and failures.
+- A package-owned updater test belongs beside its package as
+  `packages/<name>/updater_test.py`.
 
 A test that needs real Nix evaluation uses the shared `lib.tests._nix_eval`
 helper and declares `@pytest.mark.nix_eval(reason="Why evaluation is necessary")` locally. The helper rejects unmarked execution and enforces a

@@ -200,12 +200,7 @@ let
     inherit (flake) darwinModules homeModules nixosModules;
   };
 
-  assertEq =
-    label: expected: actual:
-    if expected == actual then
-      true
-    else
-      throw "${label}: expected ${builtins.toJSON expected}, got ${builtins.toJSON actual}";
+  inherit (import ../lib.nix) assertEq;
 
   checks = [
     (import ./constructors.nix { inherit src; })

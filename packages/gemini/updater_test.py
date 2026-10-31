@@ -478,34 +478,6 @@ def test_gemini_package_preserves_the_vendor_bundle() -> None:
     assert "codesignApp" not in bindings
 
 
-def test_gemini_system_route_refuses_future_downgrades() -> None:
-    """A vendor self-update must not be replaced by a stale managed pin."""
-    routing = expect_instance(
-        nix_source_fragment_expr(
-            "home/george/work.nix",
-            "  routing = ",
-            ";\n  projection =",
-        ),
-        AttributeSet,
-    )
-    gemini = expect_instance(
-        expect_binding(routing.values, "gemini").value, AttributeSet
-    )
-
-    assert_nix_ast_equal(
-        expect_binding(gemini.values, "package").value,
-        "pkgs.gemini",
-    )
-    assert_nix_ast_equal(
-        expect_binding(gemini.values, "scope").value,
-        StringPrimitive(value="system"),
-    )
-    assert_nix_ast_equal(
-        expect_binding(gemini.values, "preventDowngrade").value,
-        Primitive(value=True),
-    )
-
-
 def test_gemini_sources_pin_the_official_release_artifact() -> None:
     """Checked-in metadata must remain a complete official Omaha-selected pin."""
     source = SourceEntry.model_validate_json(

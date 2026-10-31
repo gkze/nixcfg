@@ -9,12 +9,7 @@ let
     outputs = { };
     pkgsFor = { };
   };
-  assertEq =
-    label: expected: actual:
-    if expected == actual then
-      true
-    else
-      throw "${label}: expected ${builtins.toJSON expected}, got ${builtins.toJSON actual}";
+  inherit (import ./lib.nix) assertEq;
   strings = builtins.fromJSON ''["\b", "\f", "\u0001", "\t\r\n", "\\\"", "Frappé"]'';
   checks =
     map (
