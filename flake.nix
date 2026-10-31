@@ -914,6 +914,33 @@
                   src = ./.;
                 };
 
+              "test-nix-dock-declarations" =
+                { pkgs, ... }:
+                import ./tests/nix/mac-apps/dock-declarations.nix {
+                  inherit (pkgs) lib;
+                  src = ./.;
+                };
+
+              "test-nix-mac-app-passthru" =
+                _:
+                import ./tests/nix/mac-apps/passthru.nix {
+                  src = ./.;
+                };
+
+              "test-nix-mac-app-overlap" =
+                { pkgs, ... }:
+                import ./tests/nix/mac-apps/overlap.nix {
+                  inherit (pkgs.stdenv.hostPlatform) system;
+                };
+
+              "test-nix-mac-app-cli" = _: import ./tests/nix/mac-apps/cli.nix { };
+
+              "test-nix-merge-layers" =
+                _:
+                import ./tests/nix/merge-layers.nix {
+                  src = ./.;
+                };
+
               "test-nix-language-path-modules" =
                 { pkgs, ... }:
                 import ./tests/nix/language-path-modules.nix {

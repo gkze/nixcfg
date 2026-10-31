@@ -2,59 +2,60 @@
   config,
   src ? ../..,
 }:
+# Properties of the rendered keymap artifacts, not of their contents.
+#
+# Golden hashes over rendered text would fail on any cosmetic edit and report
+# no diff, so they are replaced by the invariants that actually matter: every
+# declared scope is documented, every scope and section is well formed, and
+# every keymap entry names a key.
 let
   data = import (src + "/home/george/nvim-keymaps.nix");
 
-  assertEq =
-    label: expected: actual:
-    if expected == actual then
-      true
-    else
-      throw "${label}: expected ${builtins.toJSON expected}, got ${builtins.toJSON actual}";
+  inherit (import ./lib.nix) assertEq;
 
-  hash = value: builtins.hashString "sha256" (builtins.toJSON value);
-  itemMode = scope: item: item.mode or (scope.mode or "n");
-  normalizeScope =
-    scope:
-    (builtins.removeAttrs scope [ "mode" ])
-    // {
-      sections = map (
-        section:
-        section
-        // {
-          items = map (item: item // { mode = itemMode scope item; }) section.items;
-        }
-      ) scope.sections;
-    };
+  inherit (data) scopes;
+  scopeIds = map (scope: scope.id) scopes;
+  sections = builtins.concatMap (scope: scope.sections) scopes;
+  items = builtins.concatMap (section: section.items) sections;
+
+  # `replaceStrings` with an empty replacement shortens the haystack exactly
+  # when the needle is present, which is all a substring probe needs.
+  hasString =
+    needle: haystack:
+    builtins.stringLength (builtins.replaceStrings [ needle ] [ "" ] haystack)
+    != builtins.stringLength haystack;
+
+  unique =
+    values:
+    builtins.attrNames (
+      builtins.listToAttrs (
+        map (name: {
+          inherit name;
+          value = null;
+        }) values
+      )
+    );
+
+  doc = config.home.file.".config/nvim/doc/nvim-keymaps.md".text;
+  picker = config.home.file.".config/nvim/lua/nvim-keymaps.lua".text;
+
+  missingLabels = builtins.filter (scope: !(hasString scope.label doc)) scopes;
 
   checks = [
-    (assertEq "canonical keymap scope order" [
-      "global"
-      "lsp"
-      "treesitter-textobjects-legend"
-      "treesitter-selection"
-      "treesitter-textobjects-move"
-      "treesitter-textobjects-select"
-      "blink-cmp"
-      "telescope"
-      "gitlinker"
-      "alpha"
-    ] (map (scope: scope.id) data.scopes))
-    (assertEq "normalized keymap semantics"
-      "0c6502b7a99b218fb84434427df1aedf779458f8a82aee4e2f50f9925e0bbb3d"
-      (hash (map normalizeScope data.scopes))
-    )
-    (assertEq "rendered keymap documentation"
-      "15a10a825d9aba84097a0c3800802d12e12246557805a290d0277d0695eb360a"
-      (hash config.home.file.".config/nvim/doc/nvim-keymaps.md".text)
-    )
-    (assertEq "rendered keymap picker module"
-      "f01f14c128ef652a0781ceefe6c25c44fede533469dea764c1f6fa90422a162b"
-      (hash config.home.file.".config/nvim/lua/nvim-keymaps.lua".text)
-    )
-    (assertEq "rendered Alpha layout" "554687120549cd1239f47b50980c76445fc23841bd9e3be84a4ab3508a1c6ebd"
-      (hash config.programs.nixvim.plugins.alpha.settings.layout)
-    )
+    (assertEq "every scope declares an id" [ ] (builtins.filter (id: id == "" || id == null) scopeIds))
+    (assertEq "scope ids are unique" (builtins.length scopeIds) (builtins.length (unique scopeIds)))
+    (assertEq "every scope declares a label" [ ] (
+      builtins.filter (scope: (scope.label or "") == "") scopes
+    ))
+    (assertEq "every section declares a title and at least one item" [ ] (
+      builtins.filter (section: (section.title or "") == "" || section.items == [ ]) sections
+    ))
+    (assertEq "every keymap entry names a key" [ ] (
+      builtins.filter (item: (item.key or "") == "") items
+    ))
+    (assertEq "the documentation covers every scope label" [ ] (map (scope: scope.id) missingLabels))
+    (assertEq "the documentation renders" true (builtins.stringLength doc > 0))
+    (assertEq "the picker module renders" true (builtins.stringLength picker > 0))
   ];
 in
 builtins.deepSeq checks true

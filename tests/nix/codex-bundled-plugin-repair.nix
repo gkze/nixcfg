@@ -60,12 +60,7 @@ let
   repairAgent = homeModule.launchd.agents.codex-bundled-plugin-repair.config;
   repairProgram = builtins.elemAt repairAgent.ProgramArguments 0;
 
-  assertEq =
-    label: expected: actual:
-    if expected == actual then
-      true
-    else
-      throw "${label}: expected ${builtins.toJSON expected}, got ${builtins.toJSON actual}";
+  inherit (import ./lib.nix) assertEq;
 
   launchdChecks = [
     (assertEq "polling interval removed" false (repairAgent ? StartInterval))

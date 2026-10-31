@@ -26,7 +26,6 @@ from lib.tests._nix_ast import (
     expect_binding,
     parse_nix_expr,
 )
-from lib.tests._nix_source import nix_file_expr, nix_source_fragment_expr
 from lib.tests._package_registry import (
     is_darwin_overlay_export,
     registry_override_metadata,
@@ -1315,32 +1314,7 @@ def test_hq_registry_exports_only_on_arm64_darwin() -> None:
     assert registry_override_metadata(registry_output)["hq"] == {
         "constraint": ["aarch64-darwin"]
     }
-
-
-def test_hq_overlay_and_system_route_replace_the_unmanaged_app() -> None:
-    """The completed package must own the existing system application path."""
-    registry = expect_instance(
-        nix_file_expr("packages/registry.nix"), FunctionDefinition
-    )
-    assert is_darwin_overlay_export(
-        expect_instance(registry.output, AttributeSet), "hq"
-    )
-
-    routing = expect_instance(
-        nix_source_fragment_expr(
-            "home/george/work.nix",
-            "  routing = ",
-            ";\n  projection =",
-        ),
-        AttributeSet,
-    )
-    hq_route = expect_instance(
-        expect_binding(routing.values, "hq").value,
-        FunctionCall,
-    )
-    assert_nix_ast_equal(hq_route.name, "systemApp")
-    assert hq_route.argument is not None
-    assert_nix_ast_equal(hq_route.argument, "pkgs.hq")
+    assert is_darwin_overlay_export(registry_output, "hq")
 
 
 @pytest.mark.parametrize(

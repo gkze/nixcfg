@@ -297,10 +297,30 @@ prefer dedicated `.nix` test files or flake checks. Do not embed multiline Nix
 programs in Python. Only use inline Nix strings in Python when they are
 clearly simpler and better for the task at hand.
 
-## Python Test Philosophy
+## Test Philosophy and Boundaries
 
-Apply this guidance to all maintained Python surfaces in this repo. The
-surfaces are `nixcfg.py`, `lib/**/*.py`, `packages/**/*.py`,
+Tests belong to the language of the code that can be wrong. Nix library and
+module logic is tested with Nix evaluation in `tests/nix/`; Python behaviour is
+tested with pytest in `lib/tests/` and package-owned `updater_test.py` files.
+The only crossing point is Python that *emits* Nix, where pytest asserts on the
+emitted AST. See [Development](docs/development.md).
+
+Do not test configuration data. A file under `darwin/` or `home/george/` is
+data; the host build proves it, and a test that duplicates its contents only
+makes every config edit cost a test edit.
+
+- A pytest test may not read a `.nix` file under `darwin/` or `home/george/`, or
+  name one of those directories. This covers `lib/tests/` and the package- and
+  overlay-owned `updater_test.py` files; `lib/tests/test_suite_boundary.py`
+  fails the suite if one does.
+- When configuration needs a guard, assert an invariant that holds for any
+  valid configuration, not a snapshot of the current one.
+- Never hash rendered output as a golden value; assert the property instead.
+- Every assertion must be able to fail. Prove it by breaking the code before
+  you trust the test.
+
+Apply the Python guidance below to all maintained Python surfaces in this repo.
+The surfaces are `nixcfg.py`, `lib/**/*.py`, `packages/**/*.py`,
 `overlays/**/*.py`, `modules/**/*.py`, and extensionless Python entrypoints.
 
 Treat Python tests as the executable spec for maintained Python behavior. Aim

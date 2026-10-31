@@ -139,12 +139,7 @@ let
         }
       ];
     }).config.launchd.user.agents.set-opencode-env;
-  assertEq =
-    label: expected: actual:
-    if expected == actual then
-      true
-    else
-      throw "${label}: expected ${builtins.toJSON expected}, got ${builtins.toJSON actual}";
+  inherit (import ./lib.nix) assertEq;
   profileChecks =
     lib.concatMap
       (

@@ -33,7 +33,7 @@ from lib.tests._nix_ast import (
     expect_binding,
     parse_nix_expr,
 )
-from lib.tests._nix_source import nix_file_expr, nix_source_fragment_expr
+from lib.tests._nix_source import nix_file_expr
 from lib.tests._package_registry import (
     is_darwin_overlay_export,
     registry_override_metadata,
@@ -423,26 +423,6 @@ def test_unsloth_binary_darwin_overlay_exports_the_audited_package() -> None:
     assert is_darwin_overlay_export(
         expect_instance(registry.output, AttributeSet), "unsloth"
     )
-
-
-def test_unsloth_is_routed_as_a_system_application() -> None:
-    """The promoted package must replace the unmanaged /Applications bundle."""
-    routing = expect_instance(
-        nix_source_fragment_expr(
-            "home/george/work.nix",
-            "  routing = ",
-            ";\n  projection =",
-        ),
-        AttributeSet,
-    )
-
-    unsloth_route = expect_instance(
-        expect_binding(routing.values, "unsloth").value,
-        FunctionCall,
-    )
-    assert_nix_ast_equal(unsloth_route.name, "systemApp")
-    assert unsloth_route.argument is not None
-    assert_nix_ast_equal(unsloth_route.argument, "pkgs.unsloth")
 
 
 def test_unsloth_desktop_cargo_consistency_patches_are_shared_with_vendoring() -> None:

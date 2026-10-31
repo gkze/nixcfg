@@ -25,7 +25,7 @@ from lib.tests._nix_ast import (
     nix_attrset_call,
     parse_nix_expr,
 )
-from lib.tests._nix_source import nix_file_expr, nix_source_fragment_expr
+from lib.tests._nix_source import nix_file_expr
 from lib.tests._package_registry import (
     is_darwin_overlay_export,
     registry_override_metadata,
@@ -4113,7 +4113,7 @@ def test_buzz_internal_nix_foundation_promotes_only_the_validated_candidate() ->
 
 
 def test_buzz_enters_the_effective_arm64_darwin_app_graph() -> None:
-    """Discovery, overlay export, and system routing must promote the same app."""
+    """Discovery and overlay export must promote the same app."""
     assert_nix_ast_equal(
         (_PACKAGE_DIR / "default.nix").read_text(encoding="utf-8"),
         "import ./package.nix",
@@ -4166,19 +4166,3 @@ def test_buzz_enters_the_effective_arm64_darwin_app_graph() -> None:
     assert is_darwin_overlay_export(
         expect_instance(registry.output, AttributeSet), "buzz"
     )
-
-    routing = expect_instance(
-        nix_source_fragment_expr(
-            "home/george/work.nix",
-            "  routing = ",
-            ";\n  projection =",
-        ),
-        AttributeSet,
-    )
-    buzz_route = expect_instance(
-        expect_binding(routing.values, "buzz").value,
-        FunctionCall,
-    )
-    assert_nix_ast_equal(buzz_route.name, "systemApp")
-    assert buzz_route.argument is not None
-    assert_nix_ast_equal(buzz_route.argument, "pkgs.buzz")
