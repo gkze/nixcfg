@@ -17,6 +17,7 @@ import tempfile
 import tomllib
 import urllib.parse
 import zlib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Protocol, cast
 
@@ -61,7 +62,7 @@ from lib.update.updaters import (
 from lib.update.updaters.materialization import MaterializesArtifactsMixin
 from lib.update.updaters.metadata import metadata_as_mapping
 from packages.unsloth.patch_nix_managed import (
-    OXC_VALIDATOR_PATCH_SEAM,
+    OXC_VALIDATOR_PATCH_VARIANTS,
     OXC_VALIDATOR_PATH,
 )
 
@@ -108,6 +109,8 @@ _RUST_TOOLCHAIN_BUILD_OVERRIDES: dict[str, str] = {
     "0.1.910-beta": "1.90.0",
     # tauri 2.12.4 and muda 0.20.0 require rustc 1.90; rust-version stays 1.89.
     "0.1.911-beta": "1.90.0",
+    # tauri 2.12.5 and muda 0.20.0 still require rustc 1.90; rust-version 1.89.
+    "0.1.913-beta": "1.90.0",
 }
 _OXC_PACKAGE_PATH = "studio/backend/core/data_recipe/oxc-validator/package.json"
 _OXC_LOCK_PATH = "studio/backend/core/data_recipe/oxc-validator/package-lock.json"
@@ -199,9 +202,7 @@ _SETUP_PS1_OXC_NPM_LINES = (
 # 0.1.902-beta chooses the lockfile install verb and retries through the
 # upstream mirror helper. Managed-mode setup is still disabled by the patcher.
 # Audit the verb assignments and retry calls too, not only literal npm calls.
-_SETUP_SH_OXC_LOCKED_NPM_LINES = (
-    _SETUP_SH_OXC_INSTALL_COMMENT,
-    _SETUP_SH_OXC_GUARD,
+_SETUP_SH_OXC_CI = (
     "_NPM_INSTALL=install",
     "[ -f package-lock.json ] && _NPM_INSTALL=ci",
     'run_quiet_no_exit "npm $_NPM_INSTALL (oxc validator runtime)" '
@@ -210,15 +211,54 @@ _SETUP_SH_OXC_LOCKED_NPM_LINES = (
     "|| _oxc_install_rc=$?",
     'if [ "$_oxc_install_rc" -ne 0 ] && _npm_mirror_retry '
     '"npm $_NPM_INSTALL (oxc validator runtime)"; then',
-    _SETUP_SH_OXC_SKIP_COMMENT,
-    _SETUP_SH_OXC_SKIP,
 )
-_SETUP_PS1_OXC_LOCKED_NPM_LINES = (
-    '$NpmInstallVerb = if (Test-Path "package-lock.json") { "ci" } else { "install" }',
+_SETUP_PS1_OXC_CI_VERB = (
+    '$NpmInstallVerb = if (Test-Path "package-lock.json") { "ci" } else { "install" }'
+)
+_SETUP_PS1_OXC_CI = (
     "$oxcInstallExit = Invoke-SetupCommand { npm $NpmInstallVerb @NpmRegistryArgs }",
     "if ($oxcInstallExit -ne 0 -and (Invoke-NpmMirrorRetry)) { $oxcInstallExit = 0 }",
     'Write-StudioLine "[ERROR] OXC validator npm $NpmInstallVerb failed '
     '(exit code $oxcInstallExit)" -ForegroundColor Red',
+)
+_SETUP_SH_OXC_LOCKED_NPM_LINES = (
+    _SETUP_SH_OXC_INSTALL_COMMENT,
+    _SETUP_SH_OXC_GUARD,
+    *_SETUP_SH_OXC_CI,
+    _SETUP_SH_OXC_SKIP_COMMENT,
+    _SETUP_SH_OXC_SKIP,
+)
+_SETUP_PS1_OXC_LOCKED_NPM_LINES = (
+    _SETUP_PS1_OXC_CI_VERB,
+    *_SETUP_PS1_OXC_CI,
+    _SETUP_PS1_OXC_SKIP,
+)
+# 0.1.913-beta skips that same `npm ci` when oxc-validator/install-stamp.mjs
+# `check` matches the stamp its `write` recorded after a successful `npm ci`.
+# The helper only hashes package.json, the lock, npmrc files, and the
+# node_modules tree; it installs nothing and touches no network.
+_SETUP_STAMP_REMOVAL_COMMENT = (
+    "# Gone before npm touches the tree, so an interrupted install is never trusted."
+)
+_SETUP_SH_OXC_STAMPED_NPM_LINES = (
+    _SETUP_SH_OXC_INSTALL_COMMENT,
+    'if [ -d "$_OXC_DIR" ] && [ "${NODE_SOURCE:-}" != skip ] '
+    "&& command -v npm &>/dev/null \\",
+    'elif [ -d "$_OXC_DIR" ] && [ "${NODE_SOURCE:-}" != skip ] '
+    "&& command -v npm &>/dev/null; then",
+    _SETUP_STAMP_REMOVAL_COMMENT,
+    *_SETUP_SH_OXC_CI,
+    '[ "$_NPM_INSTALL" != ci ] || node "$_OXC_DIR/install-stamp.mjs" write '
+    ">/dev/null 2>&1 || :",
+    _SETUP_SH_OXC_SKIP_COMMENT,
+    _SETUP_SH_OXC_SKIP,
+)
+_SETUP_PS1_OXC_STAMPED_NPM_LINES = (
+    _SETUP_PS1_OXC_CI_VERB,
+    'if ($NpmInstallVerb -eq "ci" -and (Invoke-OxcInstallStamp -Mode check)) {',
+    _SETUP_STAMP_REMOVAL_COMMENT,
+    *_SETUP_PS1_OXC_CI,
+    'if ($NpmInstallVerb -eq "ci") { $null = Invoke-OxcInstallStamp -Mode write }',
     _SETUP_PS1_OXC_SKIP,
 )
 _OXC_LOCKFILE_VERSION = 3
@@ -446,6 +486,96 @@ def _audit_oxc_lock(
             )
 
 
+@dataclass(frozen=True)
+class _OxcTimeoutContract:
+    """Exact marker counts that bound one validator protocol end to end.
+
+    The validator must budget every oxlint spawn, and the caller using that
+    protocol must bound and abandon every request on ``_OXC_TIMEOUT_S``.
+    """
+
+    validator: dict[str, int]
+    caller: dict[str, int]
+
+
+def _markers_match(source: str, markers: dict[str, int]) -> bool:
+    return all(source.count(marker) == count for marker, count in markers.items())
+
+
+_OXC_VALIDATOR_BUDGET_MARKERS = {
+    'import { performance } from "node:perf_hooks";': 1,
+    "const OXLINT_DEFAULT_BUDGET_MS = 30_000;": 1,
+    "const OXLINT_BUDGET_MARGIN_MS = 2_000;": 1,
+    "const OXLINT_MIN_TIMEOUT_MS = 1_000;": 1,
+    (
+        "return Number.isFinite(parsed) && parsed > 0 "
+        "? Math.floor(parsed) : OXLINT_DEFAULT_BUDGET_MS;"
+    ): 1,
+    "if (timeoutMs < OXLINT_MIN_TIMEOUT_MS) {": 1,
+    "oxlint skipped: validation budget exhausted": 1,
+    "timeout: timeoutMs,": 1,
+    'killSignal: "SIGKILL",': 1,
+    "const oxlintBudgetMs = mapBudgetMs(payload?.timeout_ms);": 1,
+}
+_OXC_CALLER_BUDGET_MARKERS = {
+    "_OXC_TIMEOUT_S = 30": 1,
+    '"timeout_ms": int(_OXC_TIMEOUT_S * 1000),': 1,
+    "timeout = _OXC_TIMEOUT_S,": 1,
+    '"OXC validation timed out"': 1,
+}
+# One Node process per batch, budgeted from process start.
+_OXC_ONE_SHOT_TIMEOUT_CONTRACT = _OxcTimeoutContract(
+    validator={
+        **_OXC_VALIDATOR_BUDGET_MARKERS,
+        "budgetMs - OXLINT_BUDGET_MARGIN_MS - performance.now()": 1,
+        "runLintBatch(entries, oxlintBudgetMs)": 1,
+        "runLintBatch(lintTargets, oxlintBudgetMs)": 1,
+        "runValidation({ codes, lang, mode, codeShape, oxlintBudgetMs })": 2,
+    },
+    caller={
+        **_OXC_CALLER_BUDGET_MARKERS,
+        "except subprocess.TimeoutExpired:": 1,
+    },
+)
+# 0.1.913-beta keeps one `validate.mjs --serve` per data-recipe job. Each
+# request is budgeted from its own start (the first from process start). The
+# caller kills a worker whose request outlives the deadline and reports the
+# batch as timed out; other worker failures fall back to the one-shot run,
+# which keeps the original subprocess timeout.
+_OXC_PERSISTENT_WORKER_TIMEOUT_CONTRACT = _OxcTimeoutContract(
+    validator={
+        **_OXC_VALIDATOR_BUDGET_MARKERS,
+        "budgetMs - OXLINT_BUDGET_MARGIN_MS - (performance.now() - startedAtMs)": 1,
+        "runLintBatch(entries, oxlintBudgetMs, startedAtMs)": 1,
+        "runLintBatch(lintTargets, oxlintBudgetMs, startedAtMs)": 1,
+        (
+            "runValidation({ codes, lang, mode, codeShape, oxlintBudgetMs, "
+            "startedAtMs })"
+        ): 2,
+        "process.stdout.write(validatePayload(payload, 0));": 1,
+        "const startedAtMs = servedRequests++ === 0 ? 0 : performance.now();": 1,
+    },
+    caller={
+        **_OXC_CALLER_BUDGET_MARKERS,
+        "deadline = time.monotonic() + _OXC_TIMEOUT_S": 1,
+        "writer.join(_OXC_TIMEOUT_S)": 1,
+        (
+            "if result is _WORKER_TIMED_OUT:\n"
+            "                self._drop_worker(kill = True)"
+        ): 1,
+        (
+            "raise subprocess.TimeoutExpired(cmd = node_executable, "
+            "timeout = _OXC_TIMEOUT_S)"
+        ): 1,
+        "except subprocess.TimeoutExpired:": 2,
+    },
+)
+_OXC_TIMEOUT_CONTRACTS = (
+    _OXC_ONE_SHOT_TIMEOUT_CONTRACT,
+    _OXC_PERSISTENT_WORKER_TIMEOUT_CONTRACT,
+)
+
+
 def _npm_source_lines(block: str) -> tuple[str, ...]:
     return tuple(
         line.strip()
@@ -469,6 +599,7 @@ def _audit_oxc_runtime_sources(payloads: dict[str, bytes]) -> None:
     if setup_sh_installs not in (
         _SETUP_SH_OXC_NPM_LINES,
         _SETUP_SH_OXC_LOCKED_NPM_LINES,
+        _SETUP_SH_OXC_STAMPED_NPM_LINES,
     ):
         msg = "Unsloth OXC setup.sh npm install mutation drifted"
         raise RuntimeError(msg)
@@ -492,12 +623,14 @@ def _audit_oxc_runtime_sources(payloads: dict[str, bytes]) -> None:
     if setup_ps1_installs not in (
         _SETUP_PS1_OXC_NPM_LINES,
         _SETUP_PS1_OXC_LOCKED_NPM_LINES,
+        _SETUP_PS1_OXC_STAMPED_NPM_LINES,
     ):
         msg = "Unsloth OXC setup.ps1 npm install mutation drifted"
         raise RuntimeError(msg)
 
     validator = payloads[_OXC_VALIDATE_PATH].decode("utf-8")
-    if validator.count(OXC_VALIDATOR_PATCH_SEAM) != 1:
+    # Mirrors the patcher: exactly one reviewed seam shape, exactly once.
+    if sum(validator.count(seam) for seam, _ in OXC_VALIDATOR_PATCH_VARIANTS) != 1:
         msg = "Unsloth OXC validator patch seam is ambiguous or incompatible"
         raise RuntimeError(msg)
     validator_contract = (
@@ -509,41 +642,20 @@ def _audit_oxc_runtime_sources(payloads: dict[str, bytes]) -> None:
         msg = "Unsloth OXC validator entrypoint drifted"
         raise RuntimeError(msg)
 
-    timeout_contract = {
-        'import { performance } from "node:perf_hooks";': 1,
-        "const OXLINT_DEFAULT_BUDGET_MS = 30_000;": 1,
-        "const OXLINT_BUDGET_MARGIN_MS = 2_000;": 1,
-        "const OXLINT_MIN_TIMEOUT_MS = 1_000;": 1,
+    contract = next(
         (
-            "return Number.isFinite(parsed) && parsed > 0 "
-            "? Math.floor(parsed) : OXLINT_DEFAULT_BUDGET_MS;"
-        ): 1,
-        "budgetMs - OXLINT_BUDGET_MARGIN_MS - performance.now()": 1,
-        "if (timeoutMs < OXLINT_MIN_TIMEOUT_MS) {": 1,
-        "oxlint skipped: validation budget exhausted": 1,
-        "timeout: timeoutMs,": 1,
-        'killSignal: "SIGKILL",': 1,
-        "runLintBatch(entries, oxlintBudgetMs)": 1,
-        "runLintBatch(lintTargets, oxlintBudgetMs)": 1,
-        "const oxlintBudgetMs = mapBudgetMs(payload?.timeout_ms);": 1,
-        "runValidation({ codes, lang, mode, codeShape, oxlintBudgetMs })": 2,
-    }
-    if any(
-        validator.count(marker) != expected_count
-        for marker, expected_count in timeout_contract.items()
-    ):
+            contract
+            for contract in _OXC_TIMEOUT_CONTRACTS
+            if _markers_match(validator, contract.validator)
+        ),
+        None,
+    )
+    if contract is None:
         msg = "Unsloth OXC validator timeout contract drifted"
         raise RuntimeError(msg)
 
     caller = payloads[_OXC_CALLER_PATH].decode("utf-8")
-    caller_timeout_contract = (
-        "_OXC_TIMEOUT_S = 30",
-        '"timeout_ms": int(_OXC_TIMEOUT_S * 1000),',
-        "timeout = _OXC_TIMEOUT_S,",
-        "except subprocess.TimeoutExpired:",
-        '"OXC validation timed out"',
-    )
-    if any(caller.count(marker) != 1 for marker in caller_timeout_contract):
+    if not _markers_match(caller, contract.caller):
         msg = "Unsloth OXC caller timeout contract drifted"
         raise RuntimeError(msg)
 

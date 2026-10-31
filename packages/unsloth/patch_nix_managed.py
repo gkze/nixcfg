@@ -817,6 +817,48 @@ OXC_VALIDATOR_PATCH_REPLACEMENT = """    const oxlintBin = process.execPath;
     const oxlintArgs = [
       join(TOOL_DIR, "node_modules", "oxlint", "bin", "oxlint"),
 """
+# 0.1.913-beta already runs oxlint's bin entry through Node, but only on Windows.
+OXC_VALIDATOR_WINDOWS_ENTRY_SEAM = """    const oxlintBin = IS_WINDOWS
+      ? process.execPath
+      : join(TOOL_DIR, "node_modules", ".bin", "oxlint");
+    const oxlintBaseArgs = [
+      ...(IS_WINDOWS ? [OXLINT_ENTRY] : []),
+"""
+OXC_VALIDATOR_WINDOWS_ENTRY_REPLACEMENT = """    const oxlintBin = process.execPath;
+    const oxlintBaseArgs = [
+      join(TOOL_DIR, "node_modules", "oxlint", "bin", "oxlint"),
+"""
+OXC_VALIDATOR_PATCH_VARIANTS = (
+    (OXC_VALIDATOR_PATCH_SEAM, OXC_VALIDATOR_PATCH_REPLACEMENT),
+    (OXC_VALIDATOR_WINDOWS_ENTRY_SEAM, OXC_VALIDATOR_WINDOWS_ENTRY_REPLACEMENT),
+)
+
+
+def _sd_cpp_install_guard(finder: str, preflight_comment: str) -> _SourcePatch:
+    """Return before an sd.cpp installer's lock, keeping only usable store binaries.
+
+    0.1.912-beta runs a ROCm-to-Vulkan preflight between the ``allow_install``
+    return and the lock; the guard still precedes both.
+    """
+    early_return = "    if not allow_install:\n        return found\n"
+    install = f"    with _install_lock:\n        found = {finder}()\n"
+    preflight = (
+        f"{preflight_comment}    accelerator = _skip_unloadable_rocm(accelerator)\n"
+    )
+    guard = (
+        '    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":\n'
+        "        return found if usable else None\n"
+    )
+    return _SourcePatch(
+        Path("studio/backend/core/inference/sd_cpp_backend.py"),
+        early_return + install,
+        guard + early_return + install,
+        alternatives=((
+            early_return + preflight + install,
+            guard + early_return + preflight + install,
+        ),),
+    )
+
 
 _BACKEND_PATCHES = (
     _SourcePatch(
@@ -833,6 +875,7 @@ _BACKEND_PATCHES = (
         OXC_VALIDATOR_PATH,
         OXC_VALIDATOR_PATCH_SEAM,
         OXC_VALIDATOR_PATCH_REPLACEMENT,
+        alternatives=OXC_VALIDATOR_PATCH_VARIANTS[1:],
     ),
     _SourcePatch(
         Path("unsloth/chat_templates.py"),
@@ -1734,20 +1777,12 @@ _BACKEND_PATCHES = (
 """,
         ),),
     ),
-    _SourcePatch(
-        Path("studio/backend/core/inference/sd_cpp_backend.py"),
-        """    if not allow_install:
-        return found
-    with _install_lock:
-""",
-        """    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
-        return found if usable else None
-    if not allow_install:
-        return found
-    with _install_lock:
-""",
-        expected_matches=2,
+    _sd_cpp_install_guard(
+        "find_sd_cpp_binary",
+        "    # Only once a fetch is due: an installed build may carry its runtime "
+        "beside the binary.\n",
     ),
+    _sd_cpp_install_guard("find_sd_server_binary", ""),
     _SourcePatch(
         Path("studio/setup.sh"),
         """set -euo pipefail
