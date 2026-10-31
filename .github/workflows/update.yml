@@ -67,8 +67,10 @@ jobs:
   # without hashes is an illegal persist, so the pin job refreshes
   # refs/versions and keeps existing hashes. Darwin hashing is split
   # across the five public macos-15 runners. Each shard keeps the same
-  # target set and hashes a disjoint slice of the plan. prepare-darwin-merge
-  # on ubuntu proves every plan name was hashed exactly once and publishes
+  # target set and hashes one prerequisite component slice, so a companion
+  # parent or aggregate member is not hashed against the baseline parent.
+  # prepare-darwin-merge on ubuntu proves every plan name was hashed once,
+  # on its own component, and publishes
   # prepare-aarch64-darwin. Arm, x86, and that Darwin candidate then fold
   # in prepare-merge. plan-darwin-closures still waits for prepare-merge
   # because root-out-paths and certify bind to the complete three-system
