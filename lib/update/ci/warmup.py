@@ -2373,6 +2373,11 @@ _SOURCE_FETCH_ARCHIVES = (
     ".zip",
     ".crate",
 )
+# crane ``downloadCargoPackage`` names its crates.io fetchurl
+# ``cargo-src-<crate>-<version>`` with no archive suffix. 41207662691
+# slot 3: curl timed out on cargo-src-cfg_aliases-0.2.1 and the mirror
+# line aborted the slot before the DNS-gated retry crate2nix tarballs get.
+_CRANE_SOURCE_FETCH_PREFIX = "cargo-src-"
 
 
 def is_source_fetch_store_path(path: str) -> bool:
@@ -2389,7 +2394,7 @@ def is_source_fetch_store_path(path: str) -> bool:
         return True
     if name == "source" or name.endswith(("-src", "-source")):
         return True
-    return name.startswith("rusty_v8-")
+    return name.startswith(("rusty_v8-", _CRANE_SOURCE_FETCH_PREFIX))
 
 
 # Known 1-drv Unix helpers that miss cache.nixos.org on the CVE-patched
@@ -2454,6 +2459,7 @@ def is_source_fetch_mirror_line(line: str) -> bool:
     same source-FOD miss as Cannot-build, not a rustc/bmake bootstrap
     mirror failure. 38344741255 slot 1: ``clang-sys-1.9.1.tar.gz`` is
     the same class; a bare ``clang-`` prefix must not hide it.
+    41207662691 slot 3: crane's ``cargo-src-cfg_aliases-0.2.1`` is too.
     """
     match = _MIRROR_DOWNLOAD.search(line)
     if match is None:
@@ -2461,7 +2467,9 @@ def is_source_fetch_mirror_line(line: str) -> bool:
     name = match.group(1)
     if _compiler_must_substitute_name(name):
         return False
-    if name.endswith(_SOURCE_FETCH_ARCHIVES):
+    if name.endswith(_SOURCE_FETCH_ARCHIVES) or name.startswith(
+        _CRANE_SOURCE_FETCH_PREFIX
+    ):
         return True
     stem = name.rsplit(".", 1)[0]
     return stem == "source" or stem.endswith(("-src", "-source"))
