@@ -30,6 +30,14 @@ from lib.update.paths import REPO_ROOT
 _PACKAGE_DIR = REPO_ROOT / "packages/paseo"
 _ORIGINAL_MANIFEST = _PACKAGE_DIR / "native-manifest.txt"
 _LATEST_MANIFEST = _PACKAGE_DIR / "native-manifest-abseil-20260817.txt"
+_RELEASE_MANIFEST = _PACKAGE_DIR / "native-manifest-0.14.0.txt"
+_RELEASE_LATEST_MANIFEST = _PACKAGE_DIR / "native-manifest-0.14.0-abseil-20260817.txt"
+_PINNED_RELEASE = "0.9.1"
+_CANDIDATE_RELEASE = "0.14.0"
+_REVIEWED_MANIFESTS = {
+    _PINNED_RELEASE: (_ORIGINAL_MANIFEST, _LATEST_MANIFEST),
+    _CANDIDATE_RELEASE: (_RELEASE_MANIFEST, _RELEASE_LATEST_MANIFEST),
+}
 _EXPECTED_ENTITLEMENTS = {
     "com.apple.security.cs.allow-jit": True,
     "com.apple.security.cs.allow-unsigned-executable-memory": True,
@@ -348,9 +356,16 @@ def test_paseo_signature_policy_rejects_drifted_evidence(
         )
 
 
-@pytest.mark.parametrize("manifest", [_ORIGINAL_MANIFEST, _LATEST_MANIFEST])
+@pytest.mark.parametrize(
+    ("release", "manifest"),
+    [
+        (release, manifest)
+        for release, manifests in _REVIEWED_MANIFESTS.items()
+        for manifest in manifests
+    ],
+)
 def test_paseo_signature_validator_accepts_only_the_reviewed_bundle_inventory(
-    tmp_path: Path, manifest: Path
+    tmp_path: Path, release: str, manifest: Path
 ) -> None:
     """The realized bundle must cross every audited count and nested-signature gate."""
     module = _load_signature_validator()
@@ -363,11 +378,16 @@ def test_paseo_signature_validator_accepts_only_the_reviewed_bundle_inventory(
         entitled_paths=entitled_paths,
     )
 
-    module.validate_bundle(app, native_manifest=manifest, runner=runner)
+    module.validate_bundle(
+        app, native_manifest=manifest, paseo_version=release, runner=runner
+    )
 
     file_calls = [call for call in calls if call[0] == "/usr/bin/file"]
     codesign_calls = [call for call in calls if call[0] == "/usr/bin/codesign"]
-    assert module.expected_nonexecutable_count(manifest) == nonexecutable_count
+    assert (
+        module.expected_nonexecutable_count(manifest, paseo_version=release)
+        == nonexecutable_count
+    )
     assert len(file_calls) == 9 + nonexecutable_count
     macho_paths = {call[-1] for call in file_calls}
     assert macho_paths & entitled_paths == {
@@ -386,14 +406,27 @@ def test_paseo_signature_validator_accepts_only_the_reviewed_bundle_inventory(
 
 
 @pytest.mark.parametrize(
-    ("manifest", "actual_nonexecutable_count", "expected_shape"),
+    ("release", "manifest", "actual_nonexecutable_count", "expected_shape"),
     [
-        (_ORIGINAL_MANIFEST, 96, "expected 104/9/95, got 105/9/96"),
-        (_LATEST_MANIFEST, 95, "expected 105/9/96, got 104/9/95"),
+        (_PINNED_RELEASE, _ORIGINAL_MANIFEST, 96, "expected 104/9/95, got 105/9/96"),
+        (_PINNED_RELEASE, _LATEST_MANIFEST, 95, "expected 105/9/96, got 104/9/95"),
+        (
+            _CANDIDATE_RELEASE,
+            _RELEASE_MANIFEST,
+            95,
+            "expected 105/9/96, got 104/9/95",
+        ),
+        (
+            _CANDIDATE_RELEASE,
+            _RELEASE_LATEST_MANIFEST,
+            96,
+            "expected 106/9/97, got 105/9/96",
+        ),
     ],
 )
 def test_paseo_signature_profiles_are_not_interchangeable(
     tmp_path: Path,
+    release: str,
     manifest: Path,
     actual_nonexecutable_count: int,
     expected_shape: str,
@@ -408,7 +441,9 @@ def test_paseo_signature_profiles_are_not_interchangeable(
         entitled_paths=entitled_paths,
     )
     with pytest.raises(ValueError, match=expected_shape):
-        module.validate_bundle(app, native_manifest=manifest, runner=runner)
+        module.validate_bundle(
+            app, native_manifest=manifest, paseo_version=release, runner=runner
+        )
 
 
 @pytest.mark.parametrize("payload", [b"", b"invalid\n", b"1\tunexpected-path\n"])
@@ -425,7 +460,61 @@ def test_paseo_signature_validator_rejects_unknown_manifest_before_commands(
         entitled_paths=entitled_paths,
     )
     with pytest.raises(ValueError, match="native manifest is not reviewed"):
-        module.validate_bundle(app, native_manifest=manifest, runner=runner)
+        module.validate_bundle(
+            app,
+            native_manifest=manifest,
+            paseo_version=_PINNED_RELEASE,
+            runner=runner,
+        )
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("release", "manifest"),
+    [
+        (_PINNED_RELEASE, _RELEASE_MANIFEST),
+        (_PINNED_RELEASE, _RELEASE_LATEST_MANIFEST),
+        (_CANDIDATE_RELEASE, _ORIGINAL_MANIFEST),
+        (_CANDIDATE_RELEASE, _LATEST_MANIFEST),
+    ],
+)
+def test_paseo_signature_validator_rejects_another_releases_manifest(
+    tmp_path: Path, release: str, manifest: Path
+) -> None:
+    """A reviewed manifest authorizes only the release it was reviewed for."""
+    module = _load_signature_validator()
+    app, executable_paths, entitled_paths = _materialize_reviewed_bundle(tmp_path)
+    runner, calls = _successful_codesign_runner(
+        executable_paths=executable_paths,
+        entitled_paths=entitled_paths,
+    )
+    with pytest.raises(
+        ValueError, match=rf"native manifest is not reviewed for {release} signatures"
+    ):
+        module.validate_bundle(
+            app, native_manifest=manifest, paseo_version=release, runner=runner
+        )
+    assert calls == []
+
+
+@pytest.mark.parametrize("release", ["0.13.2", "", "0.14"])
+def test_paseo_signature_validator_rejects_an_unknown_release_before_commands(
+    tmp_path: Path, release: str
+) -> None:
+    """The built release, not a reviewed manifest digest, selects the profile set."""
+    module = _load_signature_validator()
+    app, executable_paths, entitled_paths = _materialize_reviewed_bundle(tmp_path)
+    runner, calls = _successful_codesign_runner(
+        executable_paths=executable_paths,
+        entitled_paths=entitled_paths,
+    )
+    with pytest.raises(ValueError, match="release is not reviewed for signatures"):
+        module.validate_bundle(
+            app,
+            native_manifest=_ORIGINAL_MANIFEST,
+            paseo_version=release,
+            runner=runner,
+        )
     assert calls == []
 
 
@@ -433,12 +522,42 @@ def test_paseo_signature_profiles_cover_all_reviewed_manifests() -> None:
     """Every checked-in manifest must have one exact signature inventory profile."""
     module = _load_signature_validator()
     expected = {
-        sha256(manifest.read_bytes()).hexdigest(): _reviewed_nonexecutable_count(
-            manifest
-        )
-        for manifest in (_ORIGINAL_MANIFEST, _LATEST_MANIFEST)
+        release: {
+            sha256(manifest.read_bytes()).hexdigest(): _reviewed_nonexecutable_count(
+                manifest
+            )
+            for manifest in manifests
+        }
+        for release, manifests in _REVIEWED_MANIFESTS.items()
     }
     assert expected == module.EXPECTED_NONEXECUTABLE_COUNTS
+    assert {
+        manifest.name
+        for manifests in _REVIEWED_MANIFESTS.values()
+        for manifest in manifests
+    } == {path.name for path in _PACKAGE_DIR.glob("native-manifest*.txt")}
+
+
+def test_paseo_candidate_release_adds_one_nonexecutable_signature_leaf() -> None:
+    """0.14.0 adds one non-executable leaf; the executable set is unchanged."""
+    module = _load_signature_validator()
+    for pinned, candidate in zip(
+        _REVIEWED_MANIFESTS[_PINNED_RELEASE],
+        _REVIEWED_MANIFESTS[_CANDIDATE_RELEASE],
+        strict=True,
+    ):
+        assert module.expected_nonexecutable_count(
+            candidate, paseo_version=_CANDIDATE_RELEASE
+        ) == (
+            module.expected_nonexecutable_count(pinned, paseo_version=_PINNED_RELEASE)
+            + 1
+        )
+        assert _reviewed_physical_native_paths(
+            candidate
+        ) - _reviewed_physical_native_paths(pinned) == {
+            "Contents/Resources/app.asar.unpacked/node_modules/@msgpackr-extract/"
+            "msgpackr-extract-darwin-arm64/node.napi.glibc.node"
+        }
 
 
 def test_paseo_signature_cli_uses_system_tools_and_ignores_non_macho_resources(
@@ -476,6 +595,8 @@ def test_paseo_signature_cli_uses_system_tools_and_ignores_non_macho_resources(
             str(app),
             "--native-manifest",
             str(_ORIGINAL_MANIFEST),
+            "--paseo-version",
+            _PINNED_RELEASE,
         ],
     )
 
@@ -507,7 +628,10 @@ def test_paseo_signature_validator_rejects_wrong_counts_and_nested_inventories(
     )
     with pytest.raises(ValueError, match="expected 104/9/95, got 103/9/94"):
         module.validate_bundle(
-            count_app, native_manifest=_ORIGINAL_MANIFEST, runner=count_runner
+            count_app,
+            native_manifest=_ORIGINAL_MANIFEST,
+            paseo_version=_PINNED_RELEASE,
+            runner=count_runner,
         )
 
     entitlement_app, entitlement_executable, entitlement_paths = (
@@ -531,6 +655,7 @@ def test_paseo_signature_validator_rejects_wrong_counts_and_nested_inventories(
         module.validate_bundle(
             entitlement_app,
             native_manifest=_ORIGINAL_MANIFEST,
+            paseo_version=_PINNED_RELEASE,
             runner=entitlement_runner,
         )
 
@@ -551,7 +676,10 @@ def test_paseo_signature_validator_rejects_wrong_counts_and_nested_inventories(
     )
     with pytest.raises(ValueError, match="unexpected Paseo executable inventory"):
         module.validate_bundle(
-            executable_app, native_manifest=_ORIGINAL_MANIFEST, runner=executable_runner
+            executable_app,
+            native_manifest=_ORIGINAL_MANIFEST,
+            paseo_version=_PINNED_RELEASE,
+            runner=executable_runner,
         )
 
     framework_app, framework_executable, framework_entitled = (
@@ -564,7 +692,10 @@ def test_paseo_signature_validator_rejects_wrong_counts_and_nested_inventories(
     )
     with pytest.raises(ValueError, match="unexpected Paseo framework inventory"):
         module.validate_bundle(
-            framework_app, native_manifest=_ORIGINAL_MANIFEST, runner=framework_runner
+            framework_app,
+            native_manifest=_ORIGINAL_MANIFEST,
+            paseo_version=_PINNED_RELEASE,
+            runner=framework_runner,
         )
 
     helper_app, helper_executable, helper_entitled = _materialize_reviewed_bundle(
@@ -577,7 +708,10 @@ def test_paseo_signature_validator_rejects_wrong_counts_and_nested_inventories(
     )
     with pytest.raises(ValueError, match="unexpected Paseo helper inventory"):
         module.validate_bundle(
-            helper_app, native_manifest=_ORIGINAL_MANIFEST, runner=helper_runner
+            helper_app,
+            native_manifest=_ORIGINAL_MANIFEST,
+            paseo_version=_PINNED_RELEASE,
+            runner=helper_runner,
         )
 
 
@@ -599,7 +733,10 @@ def test_paseo_signature_validator_propagates_command_and_entitlement_failures(
 
     with pytest.raises(ValueError, match="command failed.*invalid signature"):
         module.validate_bundle(
-            app, native_manifest=_ORIGINAL_MANIFEST, runner=failing_runner
+            app,
+            native_manifest=_ORIGINAL_MANIFEST,
+            paseo_version=_PINNED_RELEASE,
+            runner=failing_runner,
         )
 
     missing_entitlement = str(app / _EXPECTED_ENTITLED_MACHOS[0])
@@ -610,7 +747,10 @@ def test_paseo_signature_validator_propagates_command_and_entitlement_failures(
     )
     with pytest.raises(ValueError, match="lacks required entitlements"):
         module.validate_bundle(
-            app, native_manifest=_ORIGINAL_MANIFEST, runner=no_entitlement_runner
+            app,
+            native_manifest=_ORIGINAL_MANIFEST,
+            paseo_version=_PINNED_RELEASE,
+            runner=no_entitlement_runner,
         )
 
     entitled_paths.add(missing_entitlement)
@@ -621,7 +761,10 @@ def test_paseo_signature_validator_propagates_command_and_entitlement_failures(
     )
     with pytest.raises(ValueError, match="unexpectedly has entitlements"):
         module.validate_bundle(
-            app, native_manifest=_ORIGINAL_MANIFEST, runner=over_entitled_runner
+            app,
+            native_manifest=_ORIGINAL_MANIFEST,
+            paseo_version=_PINNED_RELEASE,
+            runner=over_entitled_runner,
         )
 
 
@@ -632,7 +775,11 @@ def test_paseo_signature_validator_requires_an_application_directory(
     module = _load_signature_validator()
 
     with pytest.raises(ValueError, match="app is not a directory"):
-        module.validate_bundle(tmp_path / "missing", native_manifest=_ORIGINAL_MANIFEST)
+        module.validate_bundle(
+            tmp_path / "missing",
+            native_manifest=_ORIGINAL_MANIFEST,
+            paseo_version=_PINNED_RELEASE,
+        )
 
 
 def test_paseo_package_signs_bottom_up_and_validates_before_runtime() -> None:
@@ -712,6 +859,8 @@ def test_paseo_package_signs_bottom_up_and_validates_before_runtime() -> None:
             "__NIX_INTERP__",
             '"$app"',
             "--native-manifest",
+            "__NIX_INTERP__",
+            "--paseo-version",
             "__NIX_INTERP__",
         ]
     )

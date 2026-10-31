@@ -6,6 +6,7 @@ upstream releases can advance without pinning unrelated provider source bytes.
 
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -74,8 +75,9 @@ _CLAUDE_SESSION_RESOLVER_WIRING = """\
     this.queryFactory = options.queryFactory;
     this.resolveBinary = options.resolveBinary;
 """
-# Session construction and model discovery forward this resolver; 0.9.1 has the
-# two call sites, and the six-space token still matches the indented one.
+# Session construction forwards this resolver, and newer releases forward it
+# from model discovery too. The discovery call is indented further, and the
+# six-space token still matches it.
 _CLAUDE_RESOLVER_FORWARDING = "      resolveBinary: this.resolveBinary,\n"
 # Current model discovery resolves the Claude Code version through the same
 # resolver as the sessions, so it reaches the Nix-provided executable.
@@ -110,11 +112,68 @@ export async function resolveClaudeCodeVersion(
   });
   const availability = await checkProviderLaunchAvailable(launch);
 """
-_CLAUDE_BUILD_OPTIONS_SIGNATURE = (
-    "\n\n  private async buildOptions(): Promise<ClaudeOptions> {"
-)
 _CLAUDE_BINARY_RESOLUTION = "    const claudeBinary = await this.resolveBinary();\n"
 _CLAUDE_OPTIONS_HANDOFF = "      pathToClaudeCodeExecutable: claudeBinary,\n"
+_NPM_GLOBAL_CLI_PATH = "packages/server/src/server/session/daemon/npm-global-cli.ts"
+_NPM_INSTALL_LATEST_REFUSAL = f"""\
+  installLatest(): Promise<CommandResult> {{
+    return Promise.resolve({{
+      exitCode: 1,
+      stdout: \"\",
+      stderr: \"{_MANAGED_MESSAGE}\",
+    }});
+  }}
+"""
+
+
+@dataclass(frozen=True, slots=True)
+class _ReleaseLayout:
+    """The reviewed shape of every seam that varies between supported releases.
+
+    One release's seams are coupled so a tree cannot mix reviewed shapes from
+    different releases.
+    """
+
+    build_options_signature: str
+    resolver_forwarding_count: int
+    install_latest: str
+
+
+# The build applies this codemod to the pinned source while Update validates
+# the newer candidate with the same file, so both layouts stay supported until
+# Update promotes the 0.14.0 pin. Then the 0.9.1 layout must be dropped.
+_RELEASE_LAYOUTS = {
+    "0.14.0": _ReleaseLayout(
+        build_options_signature=(
+            "\n\n  private async buildOptions(permissionMode: PermissionMode): "
+            "Promise<ClaudeOptions> {"
+        ),
+        resolver_forwarding_count=3,
+        install_latest="""\
+  installLatest(options: NpmGlobalOptions = {}): Promise<CommandResult> {
+    const prefixArgs = options.prefix ? ["--prefix", options.prefix] : [];
+    return this.runCommand("npm", ["install", "-g", `${PASEO_CLI_PACKAGE}@latest`, ...prefixArgs], {
+      timeout: NPM_INSTALL_TIMEOUT_MS,
+      maxBuffer: NPM_MAX_BUFFER_BYTES,
+    });
+  }
+""",
+    ),
+    "0.9.1": _ReleaseLayout(
+        build_options_signature=(
+            "\n\n  private async buildOptions(): Promise<ClaudeOptions> {"
+        ),
+        resolver_forwarding_count=2,
+        install_latest="""\
+  installLatest(): Promise<CommandResult> {
+    return this.runCommand("npm", ["install", "-g", `${PASEO_CLI_PACKAGE}@latest`], {
+      timeout: NPM_INSTALL_TIMEOUT_MS,
+      maxBuffer: NPM_MAX_BUFFER_BYTES,
+    });
+  }
+""",
+    ),
+}
 
 
 _PATCHES = (
@@ -227,27 +286,9 @@ function nixOwnsUpdates(): boolean {{
 """,
     ),
     SourcePatch(
-        "packages/server/src/server/session/daemon/npm-global-cli.ts",
+        _NPM_GLOBAL_CLI_PATH,
         "const NPM_INSTALL_TIMEOUT_MS = 300_000;\n",
         "",
-    ),
-    SourcePatch(
-        "packages/server/src/server/session/daemon/npm-global-cli.ts",
-        """  installLatest(): Promise<CommandResult> {
-    return this.runCommand("npm", ["install", "-g", `${PASEO_CLI_PACKAGE}@latest`], {
-      timeout: NPM_INSTALL_TIMEOUT_MS,
-      maxBuffer: NPM_MAX_BUFFER_BYTES,
-    });
-  }
-""",
-        f"""  installLatest(): Promise<CommandResult> {{
-    return Promise.resolve({{
-      exitCode: 1,
-      stdout: \"\",
-      stderr: \"{_MANAGED_MESSAGE}\",
-    }});
-  }}
-""",
     ),
     SourcePatch(
         "packages/desktop/electron-builder.yml",
@@ -284,14 +325,30 @@ _ANCHORS = (
         "  const { shellUpdated } = await ensurePathInShellRc();\n",
     ),
     SourceAnchor(
-        "packages/server/src/server/session/daemon/npm-global-cli.ts",
+        _NPM_GLOBAL_CLI_PATH,
         'export const PASEO_CLI_PACKAGE = "@getpaseo/cli";\n',
     ),
 )
 
 
-def validate_claude_provider_source(source: str) -> None:
-    """Validate only the Claude launch and executable-handoff control flow."""
+def validate_claude_provider_source(source: str) -> str:
+    """Validate only the Claude launch and executable-handoff control flow.
+
+    Return the label of the one reviewed release layout the source matches.
+    """
+    matching = [
+        label
+        for label, candidate in _RELEASE_LAYOUTS.items()
+        if source.count(candidate.build_options_signature) == 1
+    ]
+    if len(matching) != 1:
+        msg = (
+            "expected exactly one reviewed Claude buildOptions layout "
+            f"({', '.join(_RELEASE_LAYOUTS)}), found {', '.join(matching) or 'none'}"
+        )
+        raise RuntimeError(msg)
+    label = matching[0]
+    layout = _RELEASE_LAYOUTS[label]
     count = source.count(_CLAUDE_RESOLVER_FUNCTION)
     if count != 1:
         msg = f"expected 1 reviewed Claude resolver function, found {count}"
@@ -313,13 +370,12 @@ def validate_claude_provider_source(source: str) -> None:
         (_CLAUDE_CLIENT_RESOLVER_WIRING, 1),
         (_CLAUDE_SESSION_CLASS, 1),
         (_CLAUDE_SESSION_RESOLVER_WIRING, 1),
-        (_CLAUDE_RESOLVER_FORWARDING, 2),
+        (_CLAUDE_RESOLVER_FORWARDING, layout.resolver_forwarding_count),
         (_CLAUDE_CATALOG_VERSION_WIRING, 1),
         (_CLAUDE_AVAILABILITY_LAUNCH, 1),
         (_CLAUDE_DIAGNOSTIC_LAUNCH, 1),
         (_CLAUDE_VERSION_LAUNCH, 1),
         ("resolveProviderLaunch(", 4),
-        (_CLAUDE_BUILD_OPTIONS_SIGNATURE, 1),
         (_CLAUDE_BINARY_RESOLUTION, 1),
         (_CLAUDE_OPTIONS_HANDOFF, 1),
     )
@@ -327,11 +383,12 @@ def validate_claude_provider_source(source: str) -> None:
         msg = "reviewed Claude executable wiring drifted"
         raise RuntimeError(msg)
 
-    build_start = source.index(_CLAUDE_BUILD_OPTIONS_SIGNATURE)
+    signature = layout.build_options_signature
+    build_start = source.index(signature)
     binary_resolution = source.index(_CLAUDE_BINARY_RESOLUTION, build_start)
     options_handoff = source.index(_CLAUDE_OPTIONS_HANDOFF, binary_resolution)
     tail = source.index(_CLAUDE_BUILD_OPTIONS_TAIL, options_handoff)
-    before_tail = source[build_start + len(_CLAUDE_BUILD_OPTIONS_SIGNATURE) : tail]
+    before_tail = source[build_start + len(signature) : tail]
     build_options_flow = source[binary_resolution:tail]
     if (
         not build_start < binary_resolution < options_handoff < tail
@@ -340,13 +397,13 @@ def validate_claude_provider_source(source: str) -> None:
     ):
         msg = "reviewed Claude executable data flow drifted"
         raise RuntimeError(msg)
+    return label
 
 
 def _patch_claude_provider(source: str, executable: str) -> str:
     if not Path(executable).is_absolute():
         msg = "Claude Code executable must be an absolute path"
         raise ValueError(msg)
-    validate_claude_provider_source(source)
     patched_tail = replace_once(
         _CLAUDE_BUILD_OPTIONS_TAIL,
         _CLAUDE_BUILD_OPTIONS_RETURN,
@@ -374,9 +431,18 @@ def patch_tree(
     """Patch an exact Paseo source tree, or only validate with ``check``."""
     pending = plan_patches(source_root, _PATCHES, anchors=_ANCHORS)
     claude_provider = source_root / _CLAUDE_PROVIDER_PATH
+    claude_source = claude_provider.read_text(encoding="utf-8")
+    layout = _RELEASE_LAYOUTS[validate_claude_provider_source(claude_source)]
     pending[claude_provider] = _patch_claude_provider(
-        claude_provider.read_text(encoding="utf-8"),
+        claude_source,
         claude_code_executable,
+    )
+    npm_global_cli = source_root / _NPM_GLOBAL_CLI_PATH
+    pending[npm_global_cli] = replace_once(
+        pending[npm_global_cli],
+        layout.install_latest,
+        _NPM_INSTALL_LATEST_REFUSAL,
+        context=str(npm_global_cli),
     )
     if not check:
         write_planned(pending)

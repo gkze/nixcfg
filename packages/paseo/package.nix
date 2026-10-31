@@ -797,7 +797,8 @@ let
         ${lib.escapeShellArg appExecutableName}
 
       ${lib.getExe python3} ${paseoSignatureValidator} "$app" \
-        --native-manifest ${expectedNativeManifest}
+        --native-manifest ${expectedNativeManifest} \
+        --paseo-version ${lib.escapeShellArg version}
 
       # Run the native addons inside the exact packaged Electron runtime without
       # starting the GUI. This checks the locked Electron ABI, not just lipo output.

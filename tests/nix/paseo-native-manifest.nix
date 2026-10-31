@@ -8,27 +8,39 @@ let
     inherit version;
     propagatedBuildInputs = dependencies;
   };
-  rejected =
-    value:
+  current = protobuf "32.1" [ (abseil "20260107.1") ];
+  latest = protobuf "32.1" [ (abseil "20260817.0") ];
+  selected =
+    paseoVersion: value:
+    builtins.baseNameOf (manifestFor {
+      inherit paseoVersion;
+      protobuf = value;
+    });
+  rejectedFor =
+    paseoVersion: value:
     !(builtins.tryEval (
       builtins.toString (manifestFor {
+        inherit paseoVersion;
         protobuf = value;
       })
     )).success;
+  rejected = rejectedFor "0.9.1";
 in
 {
-  current = builtins.baseNameOf (manifestFor {
-    protobuf = protobuf "32.1" [ (abseil "20260107.1") ];
-  });
-  latest = builtins.baseNameOf (manifestFor {
-    protobuf = protobuf "32.1" [ (abseil "20260817.0") ];
-  });
-  unrelatedDependency = builtins.baseNameOf (manifestFor {
-    protobuf = protobuf "32.1" [
+  current = selected "0.9.1" current;
+  latest = selected "0.9.1" latest;
+  releaseCurrent = selected "0.14.0" current;
+  releaseLatest = selected "0.14.0" latest;
+  unrelatedDependency = selected "0.9.1" (
+    protobuf "32.1" [
       { pname = "zlib"; }
       (abseil "20260817.0")
-    ];
-  });
+    ]
+  );
+  unknownRelease = rejectedFor "0.13.2" latest;
+  missingRelease = rejectedFor null latest;
+  nonStringRelease = rejectedFor 14 latest;
+  releaseUnknownAbseil = rejectedFor "0.14.0" (protobuf "32.1" [ (abseil "20260901.0") ]);
   missingDependencies = rejected { version = "32.1"; };
   emptyDependencies = rejected (protobuf "32.1" [ ]);
   duplicateDependencies = rejected (
