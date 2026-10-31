@@ -22,10 +22,11 @@ diagram follows the `needs:` graph in `.github/workflows/update.yml`.
 ```mermaid
 flowchart TD
   Trigger[Schedule, dispatch, or push to main] --> PINS[prepare-pins: Linux x86_64]
-  PINS --> PD[prepare-darwin]
+  PINS --> PD[prepare-darwin-0..4: public macos-15]
   PINS --> PA[prepare-arm]
   PINS --> PX[prepare-x86]
-  PD --> MERGE[prepare-merge: merge-candidates]
+  PD --> DM[prepare-darwin-merge: exact hash coverage]
+  DM --> MERGE[prepare-merge: merge-candidates]
   PA --> MERGE
   PX --> MERGE
   MERGE --> VA[validate-arm]
@@ -72,10 +73,20 @@ Three stages own the work: preparation, validation, and certification.
 
 `prepare-pins` refreshes flake references and versions on Linux x86_64 and
 keeps the existing hashes. A version bump without its hashes is not a legal
-persist. The three native `prepare` jobs then compute their native hashes in
-parallel from that pinned candidate. `prepare-merge` combines the three
-results into one candidate. Each native job keeps the release metadata that
-`prepare-pins` selected.
+persist. Darwin hashing then runs as five `prepare-darwin-0` … `prepare-darwin-4`
+jobs on the public `macos-15` pool. Each job keeps the same requested target
+set as the pin and hashes one slice of prerequisite components. A companion
+parent and an aggregate member stay with their consumer, transitively, so
+the consumer is hashed against the updated parent. Independent components
+are packed largest-first, and names inside a shard stay in plan order.
+`prepare-darwin-merge` on `ubuntu-24.04` accepts those artifacts only when
+the coverage sidecars are that assignment and no prerequisite edge crosses
+shards, so every plan name is hashed once against the same inputs as an
+unsharded run. It publishes one `prepare-aarch64-darwin` candidate.
+`prepare-arm` and `prepare-x86` still hash every target from the pin, in
+parallel with the Darwin shards. `prepare-merge` folds that Darwin candidate with the two Linux
+candidates. Each native job keeps the release metadata that `prepare-pins`
+selected.
 
 ### Validation
 
@@ -387,10 +398,14 @@ error makes the runner's store untrusted:
 - The job pushes no prefetch receipts. It kills the Cachix daemon without
   draining it, and `flush-cachix` publishes nothing.
 - The job reports `device_fault=true` with a warning annotation. Its candidate
-  uploads as `prepare-aarch64-darwin-device-fault`, a name that no stage
-  downloads.
-- `prepare-darwin-retry` reruns the identical stage once on a fresh VM.
-  `prepare-merge` accepts only a fault-free attempt.
+  uploads as `prepare-aarch64-darwin-shard-N-device-fault`, a name that no
+  stage downloads.
+- `prepare-darwin-retry-N` reruns that same shard once on a fresh VM. The
+  retry uses the same target set and the same shard index. It starts only
+  after that shard finishes, so the run still uses at most five `macos-15`
+  runners. `prepare-darwin-merge` accepts a shard when the first attempt or
+  its retry succeeded without a device fault. `prepare-merge` then folds that
+  one Darwin candidate with Linux.
 
 Any other preparation failure is still a failure. A device fault on the retry
 also leaves preparation incomplete, so the run fails. The PR update-prepare

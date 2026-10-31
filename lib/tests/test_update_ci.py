@@ -18,7 +18,6 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from lib.system_policy import supported_systems
 from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._update_workspace_helpers import init_update_workspace_repo
 from lib.update.candidate import git
@@ -1898,6 +1897,47 @@ def _assert_warmup_scope_native_args(
         jobs._native_args("validate", artifacts)
 
 
+def test_native_args_prepare_shard_and_same_platform_merge(
+    native_job, monkeypatch
+) -> None:
+    """Shard flags precede targets; pins cannot shard; the fold reads a directory."""
+    env, _checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    plain = jobs._native_args("prepare", artifacts)
+    assert "--prepare-shard" not in plain
+    monkeypatch.setenv("NIXCFG_PREPARE_SHARD", "2")
+    monkeypatch.setenv("NIXCFG_PREPARE_SHARD_COUNT", "5")
+    monkeypatch.setenv("NIXCFG_UPDATE_TARGETS", "alpha beta")
+    sharded = jobs._native_args("prepare", artifacts)
+    assert sharded[sharded.index("--prepare-shard") + 1] == "2"
+    assert sharded[sharded.index("--prepare-shard-count") + 1] == "5"
+    assert sharded[-3:] == ["--", "alpha", "beta"]
+    assert sharded.index("--prepare-shard") < sharded.index("--")
+    with pytest.raises(ValueError, match="native hash"):
+        jobs._native_args("prepare-pins", artifacts)
+    monkeypatch.setenv("NIXCFG_PREPARE_SHARD_COUNT", "4")
+    with pytest.raises(ValueError, match="public macOS pool"):
+        jobs._native_args("prepare", artifacts)
+    monkeypatch.setenv("NIXCFG_PREPARE_SHARD_COUNT", "5")
+    monkeypatch.delenv("NIXCFG_PREPARE_SHARD")
+    with pytest.raises(ValueError, match="both be set"):
+        jobs._native_args("prepare", artifacts)
+    monkeypatch.setenv("NIXCFG_PREPARE_SHARD", "01")
+    monkeypatch.setenv("NIXCFG_PREPARE_SHARD_COUNT", "5")
+    with pytest.raises(ValueError, match="integers"):
+        jobs._native_args("prepare", artifacts)
+    monkeypatch.delenv("NIXCFG_PREPARE_SHARD")
+    monkeypatch.delenv("NIXCFG_PREPARE_SHARD_COUNT")
+    with pytest.raises(ValueError, match="NIXCFG_PREPARE_SHARDS"):
+        jobs._native_args("merge-prepare-shards", artifacts)
+    monkeypatch.setenv("NIXCFG_PREPARE_SHARDS", "/tmp/prepare-shards")
+    folded = jobs._native_args("merge-prepare-shards", artifacts)
+    assert folded[1:4] == ["ci", "update", "merge-prepare-shards"]
+    assert folded[folded.index("--shards") + 1] == "/tmp/prepare-shards"
+
+
 def test_native_args_merge_candidates_and_canary_validate(
     native_job, monkeypatch
 ) -> None:
@@ -2075,7 +2115,9 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
     )
     assert (
         " ".join(
-            workflow["jobs"]["prepare-darwin"]["with"]["validate_all_packages"].split()
+            workflow["jobs"]["prepare-darwin-0"]["with"][
+                "validate_all_packages"
+            ].split()
         )
         == "${{ github.event_name == 'push' || inputs.validate_all_packages || false }}"
     )
@@ -2126,6 +2168,22 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
     ]
     assert any(step.get("if") == "inputs.warmup_artifact != ''" for step in downloads)
     assert any(step.get("if") == "inputs.scope == 'closures'" for step in downloads)
+    shard_downloads = [
+        step["with"]["name"]
+        for step in downloads
+        if step.get("if") == "inputs.stage == 'merge-prepare-shards'"
+    ]
+    assert shard_downloads == [
+        f"prepare-aarch64-darwin-shard-{index}" for index in range(5)
+    ]
+    assert all("device-fault" not in name for name in shard_downloads)
+    assert step["env"]["NIXCFG_PREPARE_SHARD"] == "${{ inputs.prepare_shard }}"
+    assert (
+        step["env"]["NIXCFG_PREPARE_SHARD_COUNT"] == "${{ inputs.prepare_shard_count }}"
+    )
+    assert "NIXCFG_PREPARE_SHARDS" in step["env"]
+    assert "prepare_shard" in native["on"]["workflow_call"]["inputs"]
+    assert "prepare_shard_count" in native["on"]["workflow_call"]["inputs"]
     assert native["on"]["workflow_call"]["inputs"]["scope"]["default"] == "all"
     assert "closure_yield" not in native["on"]["workflow_call"]["inputs"]
     assert "closure_complete" not in native["on"]["workflow_call"]["outputs"]
@@ -2182,7 +2240,18 @@ def test_native_fault_evidence_and_artifact_contract() -> None:
     )
     assert "inputs.shard" in artifact
     assert "inputs.stage == 'merge-candidates' && 'prepare-x86_64-linux'" in artifact
+    assert (
+        "inputs.stage == 'merge-prepare-shards' && 'prepare-aarch64-darwin'" in artifact
+    )
     assert "inputs.stage == 'prepare-pins' && 'prepare-pins'" in artifact
+    assert "inputs.prepare_shard != ''" in artifact
+    assert (
+        "format('{0}-{1}-shard-{2}', inputs.stage, inputs.system, inputs.prepare_shard)"
+        in artifact
+    )
+    assert artifact.index("inputs.prepare_shard != ''") < artifact.index(
+        "inputs.scope == 'all'"
+    )
     # A faulted runner's candidate can never be downloaded as prepare-*.
     assert artifact.startswith("${{ format('{0}{1}', ")
     assert artifact.endswith(
@@ -2192,57 +2261,74 @@ def test_native_fault_evidence_and_artifact_contract() -> None:
 
 
 def _assert_device_fault_retry(jobs: dict) -> None:
-    """Only a device-faulted Darwin prepare reruns, on a fresh VM, unchanged."""
-    retry = jobs["prepare-darwin-retry"]
-    assert retry["needs"] == ["prepare-pins", "prepare-darwin"]
-    assert retry["uses"] == jobs["prepare-darwin"]["uses"]
-    assert retry["with"] == jobs["prepare-darwin"]["with"]
-    assert retry["secrets"] == "inherit"
-    assert " ".join(retry["if"].split()) == (
-        "always() && !cancelled() && needs.prepare-pins.result == 'success' && "
-        "needs.prepare-darwin.outputs.device_fault == 'true'"
-    )
-    merge = " ".join(jobs["prepare-merge"]["if"].split())
-    assert (
-        "(needs.prepare-darwin.result == 'success' && "
-        "needs.prepare-darwin.outputs.device_fault != 'true' || "
-        "needs.prepare-darwin-retry.result == 'success' && "
-        "needs.prepare-darwin-retry.outputs.device_fault != 'true')"
-    ) in merge
+    """Only a device-faulted Darwin shard reruns, on a fresh VM, unchanged."""
+    folded = jobs["prepare-darwin-merge"]
+    folded_if = " ".join(folded["if"].split())
+    for index in range(5):
+        shard_name = f"prepare-darwin-{index}"
+        retry_name = f"prepare-darwin-retry-{index}"
+        shard = jobs[shard_name]
+        retry = jobs[retry_name]
+        assert retry["needs"] == ["prepare-pins", shard_name]
+        assert retry["uses"] == shard["uses"]
+        assert retry["with"] == shard["with"]
+        assert retry["secrets"] == "inherit"
+        assert shard["with"]["prepare_shard"] == str(index)
+        assert shard["with"]["prepare_shard_count"] == "5"
+        assert shard["with"]["runner"] == "macos-15"
+        assert " ".join(retry["if"].split()) == (
+            "always() && !cancelled() && needs.prepare-pins.result == 'success' && "
+            f"needs.{shard_name}.outputs.device_fault == 'true'"
+        )
+        assert (
+            f"(needs.{shard_name}.result == 'success' && "
+            f"needs.{shard_name}.outputs.device_fault != 'true' || "
+            f"needs.{retry_name}.result == 'success' && "
+            f"needs.{retry_name}.outputs.device_fault != 'true')"
+        ) in folded_if
+    assert folded["with"]["stage"] == "merge-prepare-shards"
+    assert folded["with"]["runner"] == "ubuntu-24.04"
+    assert "prepare-darwin" not in jobs
+    assert "prepare-darwin-retry" not in jobs
 
 
 def _assert_parallel_linux_prepare(jobs: dict, matrix: list[dict]) -> None:
-    """Pin job first; all three native prepares hash that pin in parallel."""
+    """Pin first; five Darwin shards and both Linux prepares hash that pin."""
     pins = jobs["prepare-pins"]
     assert "needs" not in pins
     assert pins["with"]["stage"] == "prepare-pins"
     assert pins["with"]["system"] == "x86_64-linux"
-    natives = [
-        (name, job)
-        for name, job in jobs.items()
-        if name in {"prepare-darwin", "prepare-arm", "prepare-x86"}
-    ]
-    assert [job["with"]["system"] for _, job in natives] == list(supported_systems())
-    assert {job["with"]["system"]: job["with"]["runner"] for _, job in natives} == {
-        row["system"]: row["runner"] for row in matrix
-    }
-    assert [name for name, _ in natives] == [
-        "prepare-darwin",
-        "prepare-arm",
-        "prepare-x86",
-    ]
-    for name in ("prepare-darwin", "prepare-arm", "prepare-x86"):
+    darwin = [jobs[f"prepare-darwin-{index}"] for index in range(5)]
+    assert all(job["needs"] == "prepare-pins" for job in darwin)
+    assert all(job["with"]["previous"] == "prepare-pins" for job in darwin)
+    assert all(job["with"]["system"] == "aarch64-darwin" for job in darwin)
+    for name in ("prepare-arm", "prepare-x86"):
         assert jobs[name]["needs"] == "prepare-pins"
         assert jobs[name]["with"]["previous"] == "prepare-pins"
+    assert {
+        "aarch64-darwin": jobs["prepare-darwin-0"]["with"]["runner"],
+        "aarch64-linux": jobs["prepare-arm"]["with"]["runner"],
+        "x86_64-linux": jobs["prepare-x86"]["with"]["runner"],
+    } == {row["system"]: row["runner"] for row in matrix}
     merge = jobs["prepare-merge"]
     assert set(merge["needs"]) == {
-        "prepare-darwin",
-        "prepare-darwin-retry",
+        "prepare-darwin-merge",
         "prepare-arm",
         "prepare-x86",
     }
+    assert " ".join(merge["if"].split()) == (
+        "always() && !cancelled() && "
+        "needs.prepare-darwin-merge.result == 'success' && "
+        "needs.prepare-arm.result == 'success' && "
+        "needs.prepare-x86.result == 'success'"
+    )
     _assert_device_fault_retry(jobs)
-    assert "prepare-darwin-retry" in jobs["repair"]["needs"]
+    repair_needs = set(jobs["repair"]["needs"])
+    for index in range(5):
+        assert f"prepare-darwin-{index}" in repair_needs
+        assert f"prepare-darwin-retry-{index}" in repair_needs
+    assert "prepare-darwin-merge" in repair_needs
+    assert "prepare-darwin" not in repair_needs
     assert merge["with"]["stage"] == "merge-candidates"
     assert merge["with"]["previous"] == "prepare-aarch64-darwin"
     assert merge["with"]["previous_extra"] == "prepare-aarch64-linux"
@@ -2712,7 +2798,7 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     assert workflow["permissions"] == {"actions": "read", "contents": "read"}
     assert (
         "github.event_name == 'push'"
-        in (workflow["jobs"]["prepare-darwin"]["with"]["validate_all_packages"])
+        in (workflow["jobs"]["prepare-darwin-0"]["with"]["validate_all_packages"])
     )
     jobs = workflow["jobs"]
     matrix = json.loads(CliRunner().invoke(app, ["matrix"]).stdout)["include"]
@@ -2801,7 +2887,12 @@ def test_canary_dispatch_event_graph_produces_current_plan_and_skips_publish() -
     jobs = workflow["jobs"]
     producers = (
         "prepare-pins",
-        "prepare-darwin",
+        "prepare-darwin-0",
+        "prepare-darwin-1",
+        "prepare-darwin-2",
+        "prepare-darwin-3",
+        "prepare-darwin-4",
+        "prepare-darwin-merge",
         "prepare-arm",
         "prepare-x86",
         "prepare-merge",

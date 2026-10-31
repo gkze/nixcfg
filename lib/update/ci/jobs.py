@@ -34,6 +34,7 @@ if not __package__:
 from lib.update import sibling_failfast
 from lib.update.nix_policy import NO_IMPORT_FROM_DERIVATION_ARGS
 from lib.update.paths import local_flake_url
+from lib.update.prepare_shard import hosted_prepare_shard
 
 _BINARY_CACHE = "gkze"
 _VALIDATION_SCOPES = frozenset({
@@ -1395,10 +1396,55 @@ def _validate_native_args(args: list[str], artifacts: Path, previous: str) -> li
 _PREPARE_STAGES = frozenset({"prepare", "prepare-pins"})
 
 
-def _native_args(stage: str, artifacts: Path) -> list[str]:
-    """Return the updater argv for one hosted native stage."""
+def _merge_prepare_shard_args(artifacts: Path) -> list[str]:
+    """Return argv that folds same-platform prepare shards."""
+    shards = os.environ.get("NIXCFG_PREPARE_SHARDS", "")
+    if not shards:
+        msg = "Same-platform prepare merge requires NIXCFG_PREPARE_SHARDS"
+        raise ValueError(msg)
+    return [
+        _runtime(),
+        "ci",
+        "update",
+        "merge-prepare-shards",
+        "--shards",
+        shards,
+        "--output",
+        str(artifacts / "candidate.json"),
+    ]
+
+
+def _append_prepare_shard_args(args: list[str], stage: str) -> None:
+    """Add the public-pool slice flags before the target separator."""
+    parsed = hosted_prepare_shard(
+        os.environ.get("NIXCFG_PREPARE_SHARD", ""),
+        os.environ.get("NIXCFG_PREPARE_SHARD_COUNT", ""),
+    )
+    if parsed is None:
+        return
+    if stage != "prepare":
+        msg = "Prepare shards are only valid for the native hash stage"
+        raise ValueError(msg)
+    shard, count = parsed
+    args.extend((
+        "--prepare-shard",
+        str(shard),
+        "--prepare-shard-count",
+        str(count),
+    ))
+
+
+def _merged_native_args(stage: str, artifacts: Path) -> list[str]:
+    """Return argv for a candidate fold that does not hash."""
     if stage == "merge-candidates":
         return _merge_candidate_args(artifacts)
+    return _merge_prepare_shard_args(artifacts)
+
+
+def _native_args(stage: str, artifacts: Path) -> list[str]:
+    """Return the updater argv for one hosted native stage."""
+    if stage in {"merge-candidates", "merge-prepare-shards"}:
+        return _merged_native_args(stage, artifacts)
     args = [_runtime(), "ci", "update", stage]
     previous = os.environ.get("NIXCFG_PREVIOUS_CANDIDATE", "")
     if stage in _PREPARE_STAGES:
@@ -1410,6 +1456,7 @@ def _native_args(stage: str, artifacts: Path) -> list[str]:
             args.append("--pins-only")
         if os.environ.get("NIXCFG_VALIDATE_ALL_PACKAGES") == "true":
             args.append("--validate-all-packages")
+        _append_prepare_shard_args(args, stage)
         raw_targets = os.environ.get("NIXCFG_UPDATE_TARGETS", "")
         targets = raw_targets.split()
         if (
@@ -2936,6 +2983,7 @@ def main(stage: str) -> int:
         "assert-cached-boundary",
         "assert-coverage",
         "merge-candidates",
+        "merge-prepare-shards",
     }
     if stage in native_stages:
         # Capture CLI JSON inside the environment, after any devshell startup output.

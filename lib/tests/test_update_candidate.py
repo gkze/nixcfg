@@ -36,8 +36,14 @@ from lib.update.derivation_validation import (
     ValidationIncompleteError,
 )
 from lib.update.persistence import IsolatedUpdateWorkspace
+from lib.update.planner import prepare_plan_prerequisites
+from lib.update.prepare_shard import (
+    PrepareShardCoverage,
+    coverage_from_json,
+    partition_prepare_targets,
+)
 from lib.update.ui_consumer import consume_events
-from lib.update.updaters import Updater, VersionInfo
+from lib.update.updaters import Updater, VersionInfo, ensure_updaters_loaded
 from lib.update.updaters.metadata import GitHubReleaseMetadata, MappingMetadata
 
 _HASH = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
@@ -281,6 +287,366 @@ def test_pin_then_parallel_native_matches_serial_darwin_then_linux(
         )
     assert result.version == "2"
     assert set(result.hashes.mapping) == set(pipeline.supported_systems())
+
+
+def test_darwin_prepare_shards_hash_every_target_once_then_merge(
+    prepared_run, tmp_path: Path
+) -> None:
+    """Five Darwin slices keep one target set; the three-system fold still hashes all."""
+    root, operations, state = prepared_run
+    state["system"] = "x86_64-linux"
+    pin, pin_status = pipeline.prepare_candidate(("example",), pins_only=True)
+    assert pin_status == 0
+    assert pin.systems == ()
+    operations.clear()
+    shards: list[Candidate] = []
+    coverages = []
+    for shard in range(5):
+        state["system"] = "aarch64-darwin"
+        coverage_path = tmp_path / f"shard-{shard}" / "prepare-coverage.json"
+        candidate, status = pipeline.prepare_candidate(
+            ("example",),
+            previous=pin,
+            prepare_shard=shard,
+            prepare_shard_count=5,
+            coverage_path=coverage_path,
+        )
+        assert status == 0
+        assert candidate.prepared
+        assert candidate.targets == ("example",)
+        assert candidate.systems == ("aarch64-darwin",)
+        coverage = coverage_from_json(coverage_path.read_text(encoding="utf-8"))
+        assert coverage.plan == ("example",)
+        assert coverage.hashed == partition_prepare_targets(
+            ("example",), shard=shard, count=5
+        )
+        shards.append(candidate)
+        coverages.append(coverage)
+    assert operations == ["hash:aarch64-darwin"]
+    darwin = pipeline.merge_same_platform_partials(
+        tuple(shards), tuple(coverages), repo=root
+    )
+    assert darwin.systems == ("aarch64-darwin",)
+    assert darwin.targets == ("example",)
+    for system in ("aarch64-linux", "x86_64-linux"):
+        state["system"] = system
+        native = pipeline.prepare_candidate(("example",), previous=pin)[0]
+        darwin = pipeline.merge_prepared_candidates(darwin, native, repo=root)
+    assert set(darwin.systems) == set(pipeline.supported_systems())
+    with IsolatedUpdateWorkspace(root) as workspace:
+        darwin.apply(workspace.root)
+        result = SourceEntry.model_validate_json(
+            (workspace.root / "packages/example/sources.json").read_bytes()
+        )
+    assert result.version == "2"
+    assert set(result.hashes.mapping) == set(pipeline.supported_systems())
+    shard_root = tmp_path / "shards"
+    for index, (candidate, coverage) in enumerate(zip(shards, coverages, strict=True)):
+        directory = shard_root / str(index)
+        directory.mkdir(parents=True)
+        (directory / "candidate.json").write_text(
+            candidate.model_dump_json(indent=2) + "\n", encoding="utf-8"
+        )
+        (directory / "prepare-coverage.json").write_text(
+            coverage.to_json(), encoding="utf-8"
+        )
+    merged_out = tmp_path / "merged.json"
+    merged = CliRunner().invoke(
+        pipeline.app,
+        [
+            "merge-prepare-shards",
+            "--shards",
+            str(shard_root),
+            "--output",
+            str(merged_out),
+        ],
+    )
+    assert merged.exit_code == 0, merged.output
+    loaded = Candidate.model_validate_json(merged_out.read_bytes())
+    assert loaded.tree == shards[0].tree
+    assert loaded.systems == ("aarch64-darwin",)
+    assert loaded.targets == ("example",)
+
+
+def _goose_chain_registry(
+    state: dict[str, str],
+    *,
+    companion_of: str,
+    aggregate_into: tuple[str, ...],
+    cli_hash: str,
+    desktop_new: str,
+    desktop_old: str,
+    runtime_new: str,
+    runtime_old: str,
+) -> dict[str, type[Updater]]:
+    """Hash the real goose edges, recording whether the parent was updated."""
+
+    def seen(entry: SourceEntry) -> str | None:
+        mapping = entry.hashes.mapping
+        if mapping is None:
+            return None
+        return mapping.get(state["system"])
+
+    class GooseCli(Updater):
+        name = "goose-cli"
+
+        async def fetch_latest(self, session, *, context):
+            _ = session, context
+            return VersionInfo(version="2", metadata=GitHubReleaseMetadata(tag="v2"))
+
+        async def fetch_hashes(self, info, session, *, context, emit):
+            _ = info, session, emit
+            context.hashes_fully_computed = False
+            return {state["system"]: cli_hash}
+
+    parent_name = companion_of
+    destinations = aggregate_into
+
+    class GooseDesktop(Updater):
+        name = "goose-desktop"
+        companion_of = parent_name
+        aggregate_into = destinations
+
+        async def fetch_latest(self, session, *, context):
+            _ = session, context
+            return VersionInfo(version="2", metadata=GitHubReleaseMetadata(tag="v2"))
+
+        async def fetch_hashes(self, info, session, *, context, emit):
+            _ = info, session, emit
+            context.hashes_fully_computed = False
+            parent = context.effective_sources["goose-cli"]
+            hashed = desktop_new if seen(parent) == cli_hash else desktop_old
+            return {state["system"]: hashed}
+
+    class ElectronRuntimes(Updater):
+        name = "electron-runtimes"
+
+        async def fetch_latest(self, session, *, context):
+            _ = session, context
+            return VersionInfo(version="2", metadata=GitHubReleaseMetadata(tag="v2"))
+
+        async def fetch_hashes(self, info, session, *, context, emit):
+            _ = info, session, emit
+            context.hashes_fully_computed = False
+            parent = context.effective_sources["goose-desktop"]
+            hashed = runtime_new if seen(parent) == desktop_new else runtime_old
+            return {state["system"]: hashed}
+
+    return {
+        "goose-cli": GooseCli,
+        "goose-desktop": GooseDesktop,
+        "electron-runtimes": ElectronRuntimes,
+    }
+
+
+def _patch_goose_chain_prepare(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    root: Path,
+    chain: tuple[str, ...],
+    state: dict[str, str],
+    registry: dict[str, type[Updater]],
+) -> None:
+    """Point prepare at the chain workspace and the real goose edges."""
+
+    def plan(_opts: object) -> object:
+        built = make_run_plan(source_names=chain, dry_run=True)
+        for name in chain:
+            built.sources.entries[name] = SourceEntry.model_validate_json(
+                Path(f"packages/{name}/sources.json").read_bytes()
+            )
+        return built
+
+    monkeypatch.setattr(cli, "get_repo_root", lambda: root)
+    monkeypatch.setattr(cli, "_build_run_plan", plan)
+    monkeypatch.setattr(cli, "_get_updaters", lambda: registry)
+    monkeypatch.setattr(source_runner, "_get_updaters", lambda: registry)
+    monkeypatch.setattr(cli, "consume_events", drain_events)
+    monkeypatch.setattr(cli, "_handle_required_tool_check", lambda _opts: None)
+    monkeypatch.setattr(pipeline, "get_current_nix_platform", lambda: state["system"])
+    monkeypatch.setattr(pipeline, "get_repo_root", lambda: root)
+    monkeypatch.setattr(pipeline, "ensure_updaters_loaded", lambda: registry)
+
+
+def _darwin_chain_shards(
+    tmp_path: Path,
+    chain: tuple[str, ...],
+    pin: Candidate,
+    registry: dict[str, type[Updater]],
+) -> tuple[tuple[Candidate, ...], tuple[PrepareShardCoverage, ...]]:
+    """Run the five public-pool shards and check each recorded slice."""
+    shards: list[Candidate] = []
+    coverages: list[PrepareShardCoverage] = []
+    edges = prepare_plan_prerequisites(chain, registry)
+    for shard in range(5):
+        coverage_path = tmp_path / f"shard-{shard}" / "prepare-coverage.json"
+        candidate, status = pipeline.prepare_candidate(
+            chain,
+            previous=pin,
+            prepare_shard=shard,
+            prepare_shard_count=5,
+            coverage_path=coverage_path,
+        )
+        assert status == 0, candidate
+        coverage = coverage_from_json(
+            coverage_path.read_text(encoding="utf-8"),
+            prerequisites=edges,
+        )
+        assert coverage.hashed == partition_prepare_targets(
+            coverage.plan, shard=shard, count=5, prerequisites=edges
+        )
+        shards.append(candidate)
+        coverages.append(coverage)
+    return tuple(shards), tuple(coverages)
+
+
+def test_sharded_goose_chain_matches_the_unsharded_candidate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """goose-cli, goose-desktop, and electron-runtimes hash as one component.
+
+    Index slices put goose-cli on a different runner from goose-desktop. The
+    desktop hash would then record the pin's baseline parent. The component
+    shard and the unsharded prepare both record the updated parent.
+    """
+    real = ensure_updaters_loaded()
+    desktop_cls = real["goose-desktop"]
+    assert desktop_cls.companion_of == "goose-cli"
+    assert desktop_cls.aggregate_into == ("electron-runtimes",)
+    chain = ("electron-runtimes", "goose-cli", "goose-desktop")
+    index_owners = {name: index % 5 for index, name in enumerate(chain)}
+    assert len(set(index_owners.values())) == 3
+    root = tmp_path / "live"
+    initial = SourceEntry(version="1", hashes={}).model_dump_json(by_alias=True)
+    init_update_workspace_repo(
+        root,
+        tracked_files={f"packages/{name}/sources.json": initial for name in chain},
+    )
+    state = {"system": "aarch64-darwin"}
+    cli_hash = _HASH
+    desktop_new = _HASH.replace("B", "C")
+    runtime_new = _HASH.replace("B", "E")
+    registry = _goose_chain_registry(
+        state,
+        companion_of=desktop_cls.companion_of,
+        aggregate_into=desktop_cls.aggregate_into,
+        cli_hash=cli_hash,
+        desktop_new=desktop_new,
+        desktop_old=_HASH.replace("B", "D"),
+        runtime_new=runtime_new,
+        runtime_old=_HASH.replace("B", "F"),
+    )
+
+    _patch_goose_chain_prepare(
+        monkeypatch, root=root, chain=chain, state=state, registry=registry
+    )
+    state["system"] = "x86_64-linux"
+    pin, pin_status = pipeline.prepare_candidate(chain, pins_only=True)
+    assert pin_status == 0
+    state["system"] = "aarch64-darwin"
+    whole, whole_status = pipeline.prepare_candidate(chain, previous=pin)
+    assert whole_status == 0
+    shards, coverages = _darwin_chain_shards(tmp_path, chain, pin, registry)
+    owners = {
+        name: coverage.shard for coverage in coverages for name in coverage.hashed
+    }
+    assert owners["goose-cli"] == owners["goose-desktop"] == owners["electron-runtimes"]
+    folded = pipeline.merge_same_platform_partials(
+        tuple(shards), tuple(coverages), repo=root
+    )
+    assert folded.tree == whole.tree
+    with IsolatedUpdateWorkspace(root) as workspace:
+        folded.apply(workspace.root)
+        desktop = SourceEntry.model_validate_json(
+            (workspace.root / "packages/goose-desktop/sources.json").read_bytes()
+        )
+        runtime = SourceEntry.model_validate_json(
+            (workspace.root / "packages/electron-runtimes/sources.json").read_bytes()
+        )
+    assert desktop.hashes.mapping is not None
+    assert runtime.hashes.mapping is not None
+    assert desktop.hashes.mapping["aarch64-darwin"] == desktop_new
+    assert runtime.hashes.mapping["aarch64-darwin"] == runtime_new
+
+
+def test_prepare_shard_coverage_is_only_written_for_a_prepared_slice(
+    prepared_run, tmp_path: Path
+) -> None:
+    """A failed shard and an unsharded prepare leave no coverage sidecar."""
+    _root, _operations, state = prepared_run
+    plain = tmp_path / "plain" / "prepare-coverage.json"
+    candidate, status = pipeline.prepare_candidate(("example",), coverage_path=plain)
+    assert status == 0
+    assert candidate.prepared
+    assert not plain.exists()
+    state["fail"] = True
+    failed = tmp_path / "failed" / "prepare-coverage.json"
+    candidate, status = pipeline.prepare_candidate(
+        ("example",),
+        prepare_shard=0,
+        prepare_shard_count=5,
+        coverage_path=failed,
+    )
+    assert status == 1
+    assert not candidate.prepared
+    assert not failed.exists()
+
+
+def test_prepare_command_writes_and_rejects_shard_flags(
+    prepared_run, tmp_path: Path
+) -> None:
+    """The CI prepare command records the slice and refuses a partial shard."""
+    _root, _operations, state = prepared_run
+    state["system"] = "x86_64-linux"
+    pin_out = tmp_path / "pin.json"
+    pinned = CliRunner().invoke(
+        pipeline.app,
+        ["prepare", "--output", str(pin_out), "--pins-only", "example"],
+    )
+    assert pinned.exit_code == 0, pinned.output
+    assert not (tmp_path / "prepare-coverage.json").exists()
+    state["system"] = "aarch64-darwin"
+    out = tmp_path / "candidate.json"
+    result = CliRunner().invoke(
+        pipeline.app,
+        [
+            "prepare",
+            "--output",
+            str(out),
+            "--previous",
+            str(pin_out),
+            "--prepare-shard",
+            "0",
+            "--prepare-shard-count",
+            "5",
+            "example",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    coverage = coverage_from_json(
+        (tmp_path / "prepare-coverage.json").read_text(encoding="utf-8")
+    )
+    assert coverage == coverage_from_json(coverage.to_json())
+    assert coverage.hashed == ("example",)
+    assert coverage.count == 5
+    assert Candidate.model_validate_json(out.read_bytes()).targets == ("example",)
+    for args in (
+        ["prepare", "--output", str(out), "--prepare-shard", "0", "example"],
+        ["prepare", "--output", str(out), "--prepare-shard-count", "5", "example"],
+        [
+            "prepare",
+            "--output",
+            str(out),
+            "--pins-only",
+            "--prepare-shard",
+            "0",
+            "--prepare-shard-count",
+            "5",
+            "example",
+        ],
+    ):
+        rejected = CliRunner().invoke(pipeline.app, args)
+        assert rejected.exit_code != 0
 
 
 def test_preparation_streams_progress_separately_from_json(

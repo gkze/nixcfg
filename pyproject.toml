@@ -79,6 +79,7 @@ extend-include = ["home/george/bin/git-ignore", "modules/home/zen/zentool"]
 # Actions invokes this bootstrap before Nix supplies the Python 3.14 runtime.
 # sibling_failfast is imported by that entrypoint, so it stays on 3.12 too.
 "lib/update/ci/jobs.py" = "py312"
+"lib/update/prepare_shard.py" = "py312"
 "lib/update/sibling_failfast.py" = "py312"
 
 [tool.ruff.format]
