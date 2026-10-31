@@ -2,6 +2,8 @@
 
 import json
 import subprocess
+import threading
+import time
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
@@ -51,6 +53,7 @@ from lib.update.ci.warmup import (
     default_cache_present,
     default_cache_present_many,
     drv_input_references,
+    drv_input_requisites,
     dry_run_will_be_built_count,
     eval_darwin_package_graph,
     eval_root_darwin_outputs,
@@ -988,6 +991,41 @@ def test_plan_defaults_to_subprocess_and_cache_helpers(
     assert empty.warmup_outputs == ()
     assert empty.rust_layers == ()
     assert empty.per_root == {}
+
+
+def test_substitute_only_realize_runs_drvs_concurrently(tmp_path: Path) -> None:
+    """41178394324: 658 serial --max-jobs 0 realizes cost the canary 10.7m."""
+    drvs = tuple(f"/nix/store/{index:032d}-dep-{index}.drv" for index in range(24))
+    lock = threading.Lock()
+    active = 0
+    peak = 0
+    calls: list[list[str]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal active, peak
+        with lock:
+            calls.append(args)
+            active += 1
+            peak = max(peak, active)
+        time.sleep(0.02)
+        with lock:
+            active -= 1
+        failed = any(arg.startswith(drvs[5]) for arg in args)
+        return subprocess.CompletedProcess(args, int(failed), "", "boom" * failed)
+
+    failures = realize_warmup_outputs(
+        drvs, flake_root=tmp_path, run=run, substitute_only=True
+    )
+    builds = [call for call in calls if call[:2] == ["nix", "build"]]
+    assert len(builds) >= len(drvs)
+    assert all("--max-jobs" in call for call in builds)
+    assert 1 < peak <= 8
+    assert [failure.installable for failure in failures] == [f"{drvs[5]}^*"]
+    peak = 0
+    realize_warmup_outputs(drvs[:4], flake_root=tmp_path, run=run, keep_going=True)
+    assert peak == 1
+    with pytest.raises(WarmupError, match="workers"):
+        realize_warmup_outputs(drvs, flake_root=tmp_path, run=run, workers=0)
 
 
 def test_realize_warmup_outputs_batches_store_paths(
@@ -2753,6 +2791,36 @@ def test_warmup_fatal_skips_tainted_source_fod_hash_mismatch() -> None:
 
 def test_realize_source_fetch_drvs_is_noop_without_drvs(tmp_path: Path) -> None:
     assert realize_source_fetch_drvs((), flake_root=tmp_path) == ()
+
+
+def test_drv_graph_queries_batch_parents_into_few_processes() -> None:
+    """41178394324: one --requisites per parent cost 14.3m of plan-shards."""
+    parents = tuple(
+        f"/nix/store/{index:032d}-rust_crate-{index}.drv" for index in range(1100)
+    )
+    shared = "/nix/store/ssssssssssssssssssssssssssssssss-rustc-1.98.1.drv"
+    calls: list[list[str]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        batch = args[3:]
+        return subprocess.CompletedProcess(
+            args, 0, "\n".join((shared, *batch)) + "\n", ""
+        )
+
+    assert drv_input_requisites((*parents, parents[0]), run=run) == (
+        shared,
+        *parents,
+    )
+    assert [len(call) - 3 for call in calls] == [512, 512, 76]
+    assert all(call[:3] == ["nix-store", "--query", "--requisites"] for call in calls)
+    with pytest.raises(WarmupError, match=r"rust_crate-0\.drv \(\+511\)"):
+        drv_input_references(
+            parents,
+            run=lambda args, **_kwargs: subprocess.CompletedProcess(
+                args, 1, "", "nix-store: dead"
+            ),
+        )
 
 
 def test_drv_input_references_ignore_non_drv_query_lines() -> None:
