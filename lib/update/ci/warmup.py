@@ -1980,18 +1980,31 @@ def extension_host_family_warmup_outputs(
     return _warmup_outputs_matching(layers, is_extension_host_family_store_path)
 
 
+# Parents per ``nix-store --query`` process: about 40 KiB of argv, far below
+# macOS and Linux ARG_MAX.
+_DRV_GRAPH_QUERY_BATCH = 512
+
+
 def _query_drv_graph(
     parent_drvs: Sequence[str],
     operation: Literal["references", "requisites"],
     *,
     run: _StoreRun | None = None,
 ) -> tuple[str, ...]:
-    """Return ``.drv`` ``--references`` or ``--requisites`` of *parent_drvs*."""
+    """Return ``.drv`` ``--references`` or ``--requisites`` of *parent_drvs*.
+
+    ``nix-store --query`` prints the union for many paths, so parents go
+    _DRV_GRAPH_QUERY_BATCH per process. Update run 41178394324 spent 14.3
+    of plan-darwin-closures' 50 minutes running one ``--requisites`` process
+    per rust warmup ``.drv``, each walking a mostly shared closure.
+    """
     runner = subprocess.run if run is None else run
     found: dict[str, None] = {}
-    for drv in dict.fromkeys(parent_drvs):
+    parents = tuple(dict.fromkeys(parent_drvs))
+    for start in range(0, len(parents), _DRV_GRAPH_QUERY_BATCH):
+        batch = parents[start : start + _DRV_GRAPH_QUERY_BATCH]
         result = runner(
-            ["nix-store", "--query", f"--{operation}", drv],
+            ["nix-store", "--query", f"--{operation}", *batch],
             check=False,
             capture_output=True,
             text=True,
@@ -2000,7 +2013,8 @@ def _query_drv_graph(
             detail = _store_command_detail(
                 result, fallback=f"nix-store --query --{operation} failed"
             )
-            msg = f"failed to query rust crate inputs of {drv}: {detail}"
+            subject = batch[0] if len(batch) == 1 else f"{batch[0]} (+{len(batch) - 1})"
+            msg = f"failed to query rust crate inputs of {subject}: {detail}"
             raise WarmupError(msg)
         stdout = result.stdout
         text = stdout.decode() if isinstance(stdout, bytes) else stdout

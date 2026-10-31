@@ -51,6 +51,7 @@ from lib.update.ci.warmup import (
     default_cache_present,
     default_cache_present_many,
     drv_input_references,
+    drv_input_requisites,
     dry_run_will_be_built_count,
     eval_darwin_package_graph,
     eval_root_darwin_outputs,
@@ -2753,6 +2754,36 @@ def test_warmup_fatal_skips_tainted_source_fod_hash_mismatch() -> None:
 
 def test_realize_source_fetch_drvs_is_noop_without_drvs(tmp_path: Path) -> None:
     assert realize_source_fetch_drvs((), flake_root=tmp_path) == ()
+
+
+def test_drv_graph_queries_batch_parents_into_few_processes() -> None:
+    """41178394324: one --requisites per parent cost 14.3m of plan-shards."""
+    parents = tuple(
+        f"/nix/store/{index:032d}-rust_crate-{index}.drv" for index in range(1100)
+    )
+    shared = "/nix/store/ssssssssssssssssssssssssssssssss-rustc-1.98.1.drv"
+    calls: list[list[str]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        batch = args[3:]
+        return subprocess.CompletedProcess(
+            args, 0, "\n".join((shared, *batch)) + "\n", ""
+        )
+
+    assert drv_input_requisites((*parents, parents[0]), run=run) == (
+        shared,
+        *parents,
+    )
+    assert [len(call) - 3 for call in calls] == [512, 512, 76]
+    assert all(call[:3] == ["nix-store", "--query", "--requisites"] for call in calls)
+    with pytest.raises(WarmupError, match=r"rust_crate-0\.drv \(\+511\)"):
+        drv_input_references(
+            parents,
+            run=lambda args, **_kwargs: subprocess.CompletedProcess(
+                args, 1, "", "nix-store: dead"
+            ),
+        )
 
 
 def test_drv_input_references_ignore_non_drv_query_lines() -> None:
