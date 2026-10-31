@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 
+from lib.update.prepare_shard import partition_prepare_targets
 from lib.update.updaters.metadata import MappingMetadata, VersionInfo
 
 if TYPE_CHECKING:
@@ -120,12 +121,17 @@ class Preparation:
     previous: Candidate | None = None
     validate_all_packages: bool = False
     pins_only: bool = False
+    prepare_shard: int | None = None
+    prepare_shard_count: int | None = None
+    prepare_plan: tuple[str, ...] = ()
+    prepare_hashed: tuple[str, ...] = ()
     resolutions: dict[str, ResolvedVersion] = field(default_factory=dict)
     dependent_sources: set[str] = field(default_factory=set)
     candidate: Candidate | None = None
 
     def __post_init__(self) -> None:
         """Require each native stage to extend the same successful request."""
+        self._require_prepare_shard()
         if self.previous is not None:
             self.validate_all_packages |= self.previous.validate_all_packages
             if not self.previous.prepared:
@@ -138,6 +144,20 @@ class Preparation:
                 msg = "Candidate target selection cannot change between platforms"
                 raise ValueError(msg)
             self.resolutions.update(self.previous.resolutions)
+
+    def _require_prepare_shard(self) -> None:
+        """Require a complete shard pair and leave the requested targets unchanged."""
+        shard = self.prepare_shard
+        count = self.prepare_shard_count
+        if shard is None and count is None:
+            return
+        if shard is None or count is None:
+            msg = "Prepare shard index and count must both be set"
+            raise ValueError(msg)
+        if self.pins_only:
+            msg = "Pin refresh cannot be sharded"
+            raise ValueError(msg)
+        partition_prepare_targets((), shard=shard, count=count)
 
     def resolved(self, name: str) -> VersionInfo | None:
         """Dependent metadata is recomputed from pinned prerequisite outputs."""

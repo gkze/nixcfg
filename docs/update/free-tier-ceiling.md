@@ -108,7 +108,9 @@ roots from the previous green run):
 
 Expected warm wall: **about 2h30m–2h50m**, which can meet or beat the
 skip-shards baseline **without skipping shards**. The remaining ceiling
-is plan-shards eval plus Darwin prepare hashing.
+is plan-shards eval plus Darwin prepare hashing. Darwin prepare hashing
+is now split across the five public `macos-15` runners; the expected
+saving below is unmeasured until five Update runs after that change.
 
 **Absolute floor** if prepare Darwin and plan-shards also hit cache
 (no pin/hash work, reused graphs): certify + coverage + a short
@@ -146,6 +148,36 @@ Expected additional cut on a similarly shaped cold run: **about 14–21m**.
 so eval-cores is a warning fix, not a claimed 27m win. Per-path df after
 each purge is diagnostic only.
 
+## Darwin prepare across the public macOS pool
+
+One `macos-15` runner hashed every Darwin target. The other four public
+macOS runners were idle for that whole job. Measured Darwin prepare was
+**39m** on the no-skip run 39166099302 and **50–95m** on later runs where
+prepare was the long pole (including 40577174548 at about 56m after a
+short Linux prepare).
+
+The five `prepare-darwin-N` jobs hash disjoint prerequisite components of
+that same plan. Each keeps the requested target set. Companion parents and
+aggregate members stay on one runner, so `electron-runtimes` is hashed with
+`goose-desktop` and `goose-cli` instead of against the baseline parent.
+`prepare-darwin-merge` is a short ubuntu git/json fold: it checks the
+coverage sidecars, rejects a prerequisite edge that crosses shards, and
+does not hash again. Linux prepare still hashes every target and still
+runs beside the shards.
+
+If independent hash work splits evenly, a 50–95m Darwin prepare becomes
+about **10–19m** of shard wall, which is about **40–76m** off the critical
+path before the ubuntu fold. The 39m green run would fall by about **31m**
+on that same even split. That figure is an upper bound: the
+`electron-runtimes` cluster cannot be split, a target that dominates its
+shard is a floor, and every runner still resolves the plan. The fold itself
+is a few minutes, not another hash.
+
+**Unmeasured** until five Update runs after this change. Paid
+`macos-15-xlarge` stays out of scope. Plan-shards stays serial. This uses
+the idle public macOS runners during Darwin prepare; it does not drop,
+sample, or skip a target.
+
 ## What not to do
 
 - Do not skip Darwin shards, rust-warmup, cascade, coverage, or
@@ -161,3 +193,22 @@ each purge is diagnostic only.
 - Do not buy `macos-15-xlarge`. Do not drop the combined closures proof.
 - Do not remove canaries. Do not overlap cascade canary with the cascade
   5-wide stripe (duplicate buzz compile / 6 macos vs a 5 pool).
+- Do not turn on `strategy.fail-fast`. Cancellation skips the Cachix flush.
+  A completed real sibling failure stops the doomed job from
+  `lib/update/sibling_failfast.py` instead, and flush still runs.
+
+## Sibling stop and the remaining prepare gap
+
+Measured failure runs through 2026-10-30 still spend their wall clock in
+prepare and, when they get that far, in rust-warmup. Linux prepare often
+fails in about 11 to 15 minutes while Darwin keeps hashing. Plan can fail in
+minutes while Linux validate keeps building. A rust slot can fail hours in
+while the other slots run to the 360-minute cap. The sibling stop ends that
+tail. It does not shorten a green run, and no after-change wall clock is
+claimed here.
+
+The unpaid ceiling for a green run is still the one in the tables above, plus
+one idle-runner gap those tables do not close: Darwin prepare uses a single
+`macos-15` while four public macOS runners sit idle. Splitting it requires a
+same-platform partial candidate merge. The current merge rejects that shape.
+Do not sample targets to get there.

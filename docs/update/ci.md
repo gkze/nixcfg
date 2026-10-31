@@ -22,10 +22,11 @@ diagram follows the `needs:` graph in `.github/workflows/update.yml`.
 ```mermaid
 flowchart TD
   Trigger[Schedule, dispatch, or push to main] --> PINS[prepare-pins: Linux x86_64]
-  PINS --> PD[prepare-darwin]
+  PINS --> PD[prepare-darwin-0..4: public macos-15]
   PINS --> PA[prepare-arm]
   PINS --> PX[prepare-x86]
-  PD --> MERGE[prepare-merge: merge-candidates]
+  PD --> DM[prepare-darwin-merge: exact hash coverage]
+  DM --> MERGE[prepare-merge: merge-candidates]
   PA --> MERGE
   PX --> MERGE
   MERGE --> VA[validate-arm]
@@ -72,10 +73,20 @@ Three stages own the work: preparation, validation, and certification.
 
 `prepare-pins` refreshes flake references and versions on Linux x86_64 and
 keeps the existing hashes. A version bump without its hashes is not a legal
-persist. The three native `prepare` jobs then compute their native hashes in
-parallel from that pinned candidate. `prepare-merge` combines the three
-results into one candidate. Each native job keeps the release metadata that
-`prepare-pins` selected.
+persist. Darwin hashing then runs as five `prepare-darwin-0` … `prepare-darwin-4`
+jobs on the public `macos-15` pool. Each job keeps the same requested target
+set as the pin and hashes one slice of prerequisite components. A companion
+parent and an aggregate member stay with their consumer, transitively, so
+the consumer is hashed against the updated parent. Independent components
+are packed largest-first, and names inside a shard stay in plan order.
+`prepare-darwin-merge` on `ubuntu-24.04` accepts those artifacts only when
+the coverage sidecars are that assignment and no prerequisite edge crosses
+shards, so every plan name is hashed once against the same inputs as an
+unsharded run. It publishes one `prepare-aarch64-darwin` candidate.
+`prepare-arm` and `prepare-x86` still hash every target from the pin, in
+parallel with the Darwin shards. `prepare-merge` folds that Darwin candidate with the two Linux
+candidates. Each native job keeps the release metadata that `prepare-pins`
+selected.
 
 ### Validation
 
@@ -98,6 +109,34 @@ same way: realized paths stay in `gkze` and the next shard substitutes them. A
 real derivation failure (`error: builder for`, `error: Cannot build`, or a
 failed dependency) still fails the shard. The last shard does not yield. An
 unfinished closure or a store fault that survives the retry fails the run.
+
+A completed real failure of a required sibling stops the jobs that can no
+longer reach publish. `lib/update/sibling_failfast.py` owns that decision.
+The watched conclusions are `failure`, `timed_out`, and `startup_failure`.
+`cancelled` and `skipped` do not stop anyone. A device-faulted Darwin prepare
+still completes successfully so the fresh VM can retry it. The stop exits the
+updater process and leaves the Cachix flush in place. GitHub
+`strategy.fail-fast` stays off because cancellation skips that flush.
+
+`prepare-darwin`, `prepare-arm`, `prepare-x86`, and `prepare-darwin-retry`
+watch each other. `prepare-darwin-<digits>` is the same watch name as
+`prepare-darwin`, and `prepare-darwin-retry-<digits>` is
+`prepare-darwin-retry`. Those ids are the public-pool Darwin prepare shards.
+`prepare-darwin-merge` is not in the group. `prepare-pins` does not watch:
+later stages have not started.
+Linux prepare is the short hash check, and a failure there means Darwin's
+remaining hashes cannot merge. Run 40577174548
+had prepare-x86 fail at 11 minutes on gitbutler while prepare-darwin kept
+hashing that target for another 35 minutes. `plan-darwin-closures` failure
+stops `validate-arm` and `validate-x86`. Run 40494342241 planned for 6.5
+minutes and validate-x86 kept building for 134. A validate failure does not
+stop plan. Rust-warmup slots, cascade-warmup slots, and Darwin root shards
+stop their own matrix cells. Run 39912925016 rust slot 0 failed at 262
+minutes and the other slots ran until the 360-minute cap. A canary-rust
+failure does not fail-close the 5-wide rust stripe. Prebuild and
+cascade-canary failures stay non-gates. The poll interval is 60 seconds.
+Publish still requires every validation job, the coverage assertion, and
+certification. A green run still builds every closure.
 
 Every declared package platform and every native root is still built. Shards
 are serial because the closure's slow graph is shared. Parallel host builds
@@ -359,10 +398,14 @@ error makes the runner's store untrusted:
 - The job pushes no prefetch receipts. It kills the Cachix daemon without
   draining it, and `flush-cachix` publishes nothing.
 - The job reports `device_fault=true` with a warning annotation. Its candidate
-  uploads as `prepare-aarch64-darwin-device-fault`, a name that no stage
-  downloads.
-- `prepare-darwin-retry` reruns the identical stage once on a fresh VM.
-  `prepare-merge` accepts only a fault-free attempt.
+  uploads as `prepare-aarch64-darwin-shard-N-device-fault`, a name that no
+  stage downloads.
+- `prepare-darwin-retry-N` reruns that same shard once on a fresh VM. The
+  retry uses the same target set and the same shard index. It starts only
+  after that shard finishes, so the run still uses at most five `macos-15`
+  runners. `prepare-darwin-merge` accepts a shard when the first attempt or
+  its retry succeeded without a device fault. `prepare-merge` then folds that
+  one Darwin candidate with Linux.
 
 Any other preparation failure is still a failure. A device fault on the retry
 also leaves preparation incomplete, so the run fails. The PR update-prepare
@@ -531,6 +574,37 @@ Preparation requires one native stage per configured system before validation.
 Candidates only apply to their exact original source tree. Reports describe
 prepared trees, not successful promotion or deployment. Local DBOS runs stay
 local and retain their original resume constraints.
+
+## Free-tier closure speed
+
+The pipeline is **not** at the maximum free-tier speed for these closures. It
+is arranged around the free-tier limits that already held, and this sibling
+stop removes wasted runner time after a real failure. It does not make a
+green run shorter. No after-change wall clock has been measured.
+
+What already matches the free tier:
+
+- Standard `ubuntu-24.04`, `ubuntu-24.04-arm`, and `macos-15` only. No larger
+  paid runners.
+- At most five `macos-15` jobs at once for the rust and cascade stripes.
+- Prepare hashes overlap one build per hosted core (pull request 277).
+- Heavy Darwin leaves prebuild during the plan window (pull request 280).
+- Linux-deps overlap cascade. The rust canary overlaps the rust stripe.
+- Coverage is the first publish step. Closures still run the cached-boundary
+  check before the aggregate proof.
+- Every declared package platform and every Darwin root is still built.
+  Shards, warmups, coverage, and publish gating stay required.
+
+The remaining gap is Darwin prepare. It is one `macos-15` job, about 50 to 95
+minutes on the runs measured through 2026-10-30, while the other four public
+macOS runners are idle. Those runners cannot take a slice of the same prepare
+today: candidate merge requires disjoint platforms and an identical target
+set, so two partial Darwin prepares are not a legal merge. Closing that gap
+means a same-platform partial merge that still hashes every target, then the
+existing three-system merge. Plan-shards stays one `ubuntu-24.04` job because
+a 4-wide graph eval SIGTERM'd the 16 GiB runner. The public macOS pool and
+the `gkze` cache size stay the other caps. Paid `macos-15-xlarge` is out of
+scope.
 
 ## Related
 

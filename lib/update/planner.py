@@ -129,6 +129,22 @@ def source_prerequisites(
     return tuple(dict.fromkeys(prerequisites))
 
 
+def prepare_plan_prerequisites(
+    names: Sequence[str],
+    updaters: Mapping[str, type[object]],
+) -> dict[str, tuple[str, ...]]:
+    """Return the edges hashing uses when every plan name is selected.
+
+    The edges are ``companion_source_parent`` and ``aggregate_source_members``.
+    A consumer hashed without its parent in the same selected set reads the
+    baseline parent instead of the updated one.
+    """
+    selected = set(names)
+    return {
+        name: source_prerequisites(updaters, name, selected=selected) for name in names
+    }
+
+
 def source_dependency_order(
     prerequisites: Mapping[str, tuple[str, ...]],
 ) -> tuple[str, ...]:
@@ -472,6 +488,7 @@ __all__ = [
     "dependency_clusters",
     "failure_closure",
     "held_bulk_update_input_names",
+    "prepare_plan_prerequisites",
     "resolve_update_targets",
     "select_target_source_names",
     "source_additional_input_names",

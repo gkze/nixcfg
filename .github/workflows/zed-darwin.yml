@@ -18,6 +18,9 @@ on:
       - .github/zed-kick
 permissions:
   contents: read
+  # update-native.yml requests actions: read. A called workflow cannot
+  # raise this token, and zed-family inherits the workflow block.
+  actions: read
 concurrency:
   group: nixcfg-zed-darwin-${{ github.ref }}
   cancel-in-progress: true

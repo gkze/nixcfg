@@ -55,6 +55,14 @@ on:
         description: Shard identity for artifact and receipt names
         default: ""
         type: string
+      prepare_shard:
+        description: Darwin prepare slice index across the public macOS pool
+        default: ""
+        type: string
+      prepare_shard_count:
+        description: Darwin prepare slice count, five on the public macOS pool
+        default: ""
+        type: string
       warmup_artifact:
         description: Planner artifact that contains warmup-plan.json
         default: ""
@@ -77,6 +85,7 @@ on:
         required: true
 permissions:
   contents: read
+  actions: read
 jobs:
   native:
     runs-on: ${{ inputs.runner }}
@@ -112,6 +121,33 @@ jobs:
         with:
           name: ${{ inputs.previous_third }}
           path: ${{ runner.temp }}/previous-third
+      # Exact names, not a glob: a faulted attempt uploads
+      # prepare-aarch64-darwin-shard-N-device-fault and must not be folded.
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        if: inputs.stage == 'merge-prepare-shards'
+        with:
+          name: prepare-aarch64-darwin-shard-0
+          path: ${{ runner.temp }}/prepare-shards/0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        if: inputs.stage == 'merge-prepare-shards'
+        with:
+          name: prepare-aarch64-darwin-shard-1
+          path: ${{ runner.temp }}/prepare-shards/1
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        if: inputs.stage == 'merge-prepare-shards'
+        with:
+          name: prepare-aarch64-darwin-shard-2
+          path: ${{ runner.temp }}/prepare-shards/2
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        if: inputs.stage == 'merge-prepare-shards'
+        with:
+          name: prepare-aarch64-darwin-shard-3
+          path: ${{ runner.temp }}/prepare-shards/3
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        if: inputs.stage == 'merge-prepare-shards'
+        with:
+          name: prepare-aarch64-darwin-shard-4
+          path: ${{ runner.temp }}/prepare-shards/4
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         if: inputs.warmup_artifact != ''
         with:
@@ -157,9 +193,17 @@ jobs:
           NIXCFG_MERGE_EXTRA: |-
             ${{ inputs.previous_third != '' &&
             format('{0}/previous-third/candidate.json', runner.temp) || '' }}
+          NIXCFG_PREPARE_SHARD: ${{ inputs.prepare_shard }}
+          NIXCFG_PREPARE_SHARD_COUNT: ${{ inputs.prepare_shard_count }}
+          NIXCFG_PREPARE_SHARDS: |-
+            ${{ inputs.stage == 'merge-prepare-shards' &&
+            format('{0}/prepare-shards', runner.temp) || '' }}
           NIXCFG_CANARY: ${{ inputs.canary }}
           NIXCFG_CANARY_SLOTS: ${{ inputs.canary_slots }}
           NIXCFG_CANARY_CRATES: ${{ inputs.canary_crates }}
+          NIXCFG_SYSTEM: ${{ inputs.system }}
+          # actions:read on this workflow. Not the update PAT.
+          NIXCFG_ACTIONS_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
           NIXCFG_CI_STAGE: ${{ inputs.stage }}
         run: |
@@ -184,7 +228,10 @@ jobs:
           name: |-
             ${{ format('{0}{1}',
             inputs.stage == 'merge-candidates' && 'prepare-x86_64-linux' ||
+            inputs.stage == 'merge-prepare-shards' && 'prepare-aarch64-darwin' ||
             inputs.stage == 'prepare-pins' && 'prepare-pins' ||
+            inputs.prepare_shard != '' &&
+            format('{0}-{1}-shard-{2}', inputs.stage, inputs.system, inputs.prepare_shard) ||
             inputs.shard != '' &&
             format('{0}-{1}-{2}-{3}', inputs.stage, inputs.system, inputs.scope, inputs.shard) ||
             inputs.scope == 'all' &&

@@ -1,11 +1,12 @@
 ---
 name: PR update prepare
-# Run the Update pipeline's native prepare stages (pins, Darwin, both
-# Linux, merge-candidates) before merge, scoped to the updater targets a
-# PR touches. 39791273689 / 39832195356 only failed prepare-darwin or
-# prepare-pins 30-95 min after an updater fix merged; this check fails
-# the PR instead. It runs the same update-native.yml stages, so nothing
-# in Update is skipped or weakened.
+# Run the Update pipeline's native prepare stages (pins, five Darwin
+# shards, both Linux, same-platform Darwin merge, then merge-candidates)
+# before merge, scoped to the updater targets a PR touches. 39791273689 /
+# 39832195356 only failed prepare-darwin or prepare-pins 30-95 min after
+# an updater fix merged; this check fails the PR instead. It runs the
+# same update-native.yml stages, so nothing in Update is skipped or
+# weakened.
 on:
   pull_request:
     paths:
@@ -13,6 +14,9 @@ on:
       - overlays/**
 permissions:
   contents: read
+  # Same sibling stop as Update: list this run's jobs and exit a prepare
+  # that can no longer merge. The token cannot cancel the run.
+  actions: read
 concurrency:
   group: pr-update-prepare-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -73,7 +77,7 @@ jobs:
       stage: prepare-pins
       targets: ${{ needs.targets.outputs.targets }}
     secrets: inherit
-  prepare-darwin:
+  prepare-darwin-0:
     needs: [targets, prepare-pins]
     uses: ./.github/workflows/update-native.yml
     with:
@@ -82,14 +86,11 @@ jobs:
       stage: prepare
       previous: prepare-pins
       targets: ${{ needs.targets.outputs.targets }}
+      prepare_shard: "0"
+      prepare_shard_count: "5"
     secrets: inherit
-  # Same fresh-VM rerun as Update: only a kernel block-device fault retries.
-  prepare-darwin-retry:
-    needs: [targets, prepare-pins, prepare-darwin]
-    if: |-
-      always() && !cancelled() &&
-      needs.prepare-pins.result == 'success' &&
-      needs.prepare-darwin.outputs.device_fault == 'true'
+  prepare-darwin-1:
+    needs: [targets, prepare-pins]
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -97,6 +98,125 @@ jobs:
       stage: prepare
       previous: prepare-pins
       targets: ${{ needs.targets.outputs.targets }}
+      prepare_shard: "1"
+      prepare_shard_count: "5"
+    secrets: inherit
+  prepare-darwin-2:
+    needs: [targets, prepare-pins]
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: prepare
+      previous: prepare-pins
+      targets: ${{ needs.targets.outputs.targets }}
+      prepare_shard: "2"
+      prepare_shard_count: "5"
+    secrets: inherit
+  prepare-darwin-3:
+    needs: [targets, prepare-pins]
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: prepare
+      previous: prepare-pins
+      targets: ${{ needs.targets.outputs.targets }}
+      prepare_shard: "3"
+      prepare_shard_count: "5"
+    secrets: inherit
+  prepare-darwin-4:
+    needs: [targets, prepare-pins]
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: prepare
+      previous: prepare-pins
+      targets: ${{ needs.targets.outputs.targets }}
+      prepare_shard: "4"
+      prepare_shard_count: "5"
+    secrets: inherit
+  # Same fresh-VM rerun as Update: only a kernel block-device fault retries.
+  prepare-darwin-retry-0:
+    needs: [targets, prepare-pins, prepare-darwin-0]
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin-0.outputs.device_fault == 'true'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: prepare
+      previous: prepare-pins
+      targets: ${{ needs.targets.outputs.targets }}
+      prepare_shard: "0"
+      prepare_shard_count: "5"
+    secrets: inherit
+  prepare-darwin-retry-1:
+    needs: [targets, prepare-pins, prepare-darwin-1]
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin-1.outputs.device_fault == 'true'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: prepare
+      previous: prepare-pins
+      targets: ${{ needs.targets.outputs.targets }}
+      prepare_shard: "1"
+      prepare_shard_count: "5"
+    secrets: inherit
+  prepare-darwin-retry-2:
+    needs: [targets, prepare-pins, prepare-darwin-2]
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin-2.outputs.device_fault == 'true'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: prepare
+      previous: prepare-pins
+      targets: ${{ needs.targets.outputs.targets }}
+      prepare_shard: "2"
+      prepare_shard_count: "5"
+    secrets: inherit
+  prepare-darwin-retry-3:
+    needs: [targets, prepare-pins, prepare-darwin-3]
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin-3.outputs.device_fault == 'true'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: prepare
+      previous: prepare-pins
+      targets: ${{ needs.targets.outputs.targets }}
+      prepare_shard: "3"
+      prepare_shard_count: "5"
+    secrets: inherit
+  prepare-darwin-retry-4:
+    needs: [targets, prepare-pins, prepare-darwin-4]
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin-4.outputs.device_fault == 'true'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: prepare
+      previous: prepare-pins
+      targets: ${{ needs.targets.outputs.targets }}
+      prepare_shard: "4"
+      prepare_shard_count: "5"
     secrets: inherit
   prepare-arm:
     needs: [targets, prepare-pins]
@@ -118,14 +238,53 @@ jobs:
       previous: prepare-pins
       targets: ${{ needs.targets.outputs.targets }}
     secrets: inherit
-  prepare-merge:
-    needs: [prepare-darwin, prepare-darwin-retry, prepare-arm, prepare-x86]
+  prepare-darwin-merge:
+    needs:
+      - prepare-pins
+      - prepare-darwin-0
+      - prepare-darwin-1
+      - prepare-darwin-2
+      - prepare-darwin-3
+      - prepare-darwin-4
+      - prepare-darwin-retry-0
+      - prepare-darwin-retry-1
+      - prepare-darwin-retry-2
+      - prepare-darwin-retry-3
+      - prepare-darwin-retry-4
     if: |-
       always() && !cancelled() &&
-      (needs.prepare-darwin.result == 'success' &&
-      needs.prepare-darwin.outputs.device_fault != 'true' ||
-      needs.prepare-darwin-retry.result == 'success' &&
-      needs.prepare-darwin-retry.outputs.device_fault != 'true') &&
+      needs.prepare-pins.result == 'success' &&
+      (needs.prepare-darwin-0.result == 'success' &&
+      needs.prepare-darwin-0.outputs.device_fault != 'true' ||
+      needs.prepare-darwin-retry-0.result == 'success' &&
+      needs.prepare-darwin-retry-0.outputs.device_fault != 'true') &&
+      (needs.prepare-darwin-1.result == 'success' &&
+      needs.prepare-darwin-1.outputs.device_fault != 'true' ||
+      needs.prepare-darwin-retry-1.result == 'success' &&
+      needs.prepare-darwin-retry-1.outputs.device_fault != 'true') &&
+      (needs.prepare-darwin-2.result == 'success' &&
+      needs.prepare-darwin-2.outputs.device_fault != 'true' ||
+      needs.prepare-darwin-retry-2.result == 'success' &&
+      needs.prepare-darwin-retry-2.outputs.device_fault != 'true') &&
+      (needs.prepare-darwin-3.result == 'success' &&
+      needs.prepare-darwin-3.outputs.device_fault != 'true' ||
+      needs.prepare-darwin-retry-3.result == 'success' &&
+      needs.prepare-darwin-retry-3.outputs.device_fault != 'true') &&
+      (needs.prepare-darwin-4.result == 'success' &&
+      needs.prepare-darwin-4.outputs.device_fault != 'true' ||
+      needs.prepare-darwin-retry-4.result == 'success' &&
+      needs.prepare-darwin-retry-4.outputs.device_fault != 'true')
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: ubuntu-24.04
+      system: x86_64-linux
+      stage: merge-prepare-shards
+    secrets: inherit
+  prepare-merge:
+    needs: [prepare-darwin-merge, prepare-arm, prepare-x86]
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-darwin-merge.result == 'success' &&
       needs.prepare-arm.result == 'success' &&
       needs.prepare-x86.result == 'success'
     uses: ./.github/workflows/update-native.yml

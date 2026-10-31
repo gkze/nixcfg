@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Literal, NamedTuple
+from typing import TYPE_CHECKING, Annotated, Literal, NamedTuple, cast
 
 import typer
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -20,7 +20,7 @@ from lib.nix.models.sources import HashCollection, HashEntryMergeKey, SourceEntr
 from lib.system_policy import supported_systems
 from lib.update import cli as update_cli
 from lib.update import derivation_validation as validation
-from lib.update.candidate import Candidate, Preparation, git
+from lib.update.candidate import Candidate, Preparation, ResolvedVersion, git
 from lib.update.ci import jobs
 from lib.update.ci.coverage import (
     ROOT_OUT_PATHS_NAME,
@@ -117,6 +117,13 @@ from lib.update.io import atomic_write_text
 from lib.update.nix import get_current_nix_platform
 from lib.update.paths import get_repo_root
 from lib.update.persistence import IsolatedUpdateWorkspace, planned_update_paths
+from lib.update.planner import prepare_plan_prerequisites
+from lib.update.prepare_shard import (
+    PrepareShardCoverage,
+    coverage_from_json,
+    parse_prepare_coverage,
+    require_exact_prepare_coverage,
+)
 from lib.update.repair import check_applied_repair, propose_repair
 from lib.update.updaters import ensure_updaters_loaded
 
@@ -211,6 +218,9 @@ def prepare_candidate(
     previous: Candidate | None = None,
     validate_all_packages: bool = False,
     pins_only: bool = False,
+    prepare_shard: int | None = None,
+    prepare_shard_count: int | None = None,
+    coverage_path: Path | None = None,
 ) -> tuple[Candidate, int]:
     """Extend one pinned candidate on the current system without live writes.
 
@@ -231,6 +241,8 @@ def prepare_candidate(
         previous=previous,
         validate_all_packages=validate_all_packages,
         pins_only=pins_only,
+        prepare_shard=prepare_shard,
+        prepare_shard_count=prepare_shard_count,
     )
     options = UpdateOptions(
         targets=targets,
@@ -253,7 +265,32 @@ def prepare_candidate(
     if preparation.candidate is None:
         msg = "Preparation failed before a candidate could be captured"
         raise RuntimeError(msg)
+    _write_prepare_coverage(
+        preparation, coverage_path, prepared=preparation.candidate.prepared
+    )
     return preparation.candidate, status
+
+
+def _write_prepare_coverage(
+    preparation: Preparation,
+    path: Path | None,
+    *,
+    prepared: bool,
+) -> None:
+    """Record the full plan and hashed slice beside a successful shard."""
+    shard = preparation.prepare_shard
+    if path is None or not prepared or shard is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(
+        path,
+        PrepareShardCoverage(
+            plan=preparation.prepare_plan,
+            hashed=preparation.prepare_hashed,
+            shard=shard,
+            count=cast("int", preparation.prepare_shard_count),
+        ).to_json(),
+    )
 
 
 _FAIL_FAST_PROGRESS_SOURCES = frozenset({
@@ -671,6 +708,30 @@ def merge_prepared_candidates(
         _candidate_index_files(left, repo),
         _candidate_index_files(right, repo),
     )
+    tree, patch = _materialize_merged_index(repo, base, merged_files)
+    return Candidate(
+        base_tree=left.base_tree,
+        tree=tree,
+        targets=left.targets,
+        sources=tuple(dict.fromkeys((*left.sources, *right.sources))),
+        validate_all_packages=left.validate_all_packages or right.validate_all_packages,
+        systems=tuple(
+            system
+            for system in supported_systems()
+            if system in set(left.systems) | set(right.systems)
+        ),
+        resolutions={**left.resolutions, **right.resolutions},
+        prepared=True,
+        patch=patch,
+    )
+
+
+def _materialize_merged_index(
+    repo: Path,
+    base: dict[str, _IndexBlob],
+    merged_files: dict[str, _IndexBlob],
+) -> tuple[str, bytes]:
+    """Install a merged index in isolation and return its tree and patch."""
     with IsolatedUpdateWorkspace(repo) as workspace:
         root = workspace.root
         for path in set(base) - set(merged_files):
@@ -690,21 +751,139 @@ def merge_prepared_candidates(
             "HEAD",
             "--",
         )
+    return tree, patch
+
+
+def _require_same_platform_partials(candidates: tuple[Candidate, ...]) -> None:
+    """Reject a fold that is not one prepared system with one target set."""
+    if not candidates:
+        msg = "Same-platform prepare merge needs every shard"
+        raise ValueError(msg)
+    first = candidates[0]
+    if len(first.systems) != 1:
+        msg = "Same-platform prepare shards must record exactly one system"
+        raise ValueError(msg)
+    for candidate in candidates:
+        if not candidate.prepared:
+            msg = "A failed preparation cannot be merged"
+            raise ValueError(msg)
+        if candidate.base_tree != first.base_tree:
+            msg = "Merged candidates must share a baseline tree"
+            raise ValueError(msg)
+        if candidate.targets != first.targets:
+            msg = "Candidate target selection cannot change between platforms"
+            raise ValueError(msg)
+        if candidate.systems != first.systems:
+            msg = "Same-platform prepare shards must share one system"
+            raise ValueError(msg)
+
+
+def _union_resolutions(
+    groups: tuple[dict[str, ResolvedVersion], ...] | list[dict[str, ResolvedVersion]],
+) -> dict[str, ResolvedVersion]:
+    """Union resolutions, keeping equal overlap and failing on conflict."""
+    merged: dict[str, ResolvedVersion] = {}
+    for group in groups:
+        for name, value in group.items():
+            existing = merged.get(name)
+            if existing is not None and existing != value:
+                msg = f"Conflicting resolution for {name}"
+                raise ValueError(msg)
+            merged[name] = value
+    return merged
+
+
+def _prepare_coverage_edges(plan: tuple[str, ...]) -> dict[str, tuple[str, ...]]:
+    """Return the prerequisite edges the fold must keep inside one shard."""
+    return prepare_plan_prerequisites(plan, ensure_updaters_loaded())
+
+
+def _load_prepare_coverage(text: str) -> PrepareShardCoverage:
+    """Check a sidecar against the component assignment of its own plan."""
+    return coverage_from_json(
+        text,
+        prerequisites=_prepare_coverage_edges(parse_prepare_coverage(text).plan),
+    )
+
+
+def merge_same_platform_partials(
+    candidates: tuple[Candidate, ...],
+    coverages: tuple[PrepareShardCoverage, ...],
+    *,
+    repo: Path,
+) -> Candidate:
+    """Fold same-system prepare shards after an exact hash-coverage proof.
+
+    The requested target set stays the one every shard recorded. Coverage
+    proves the hashed slices are the pure partition of one plan, so each plan
+    name is hashed once. The result is still a one-system candidate; the
+    existing three-system merge folds it with the other platforms.
+    """
+    if len(candidates) != len(coverages):
+        msg = "Each prepare shard needs its coverage sidecar"
+        raise ValueError(msg)
+    _require_same_platform_partials(candidates)
+    require_exact_prepare_coverage(
+        coverages,
+        prerequisites=_prepare_coverage_edges(coverages[0].plan),
+    )
+    paired = sorted(
+        zip(coverages, candidates, strict=True),
+        key=lambda item: item[0].shard,
+    )
+    first = paired[0][1]
+    with IsolatedUpdateWorkspace(repo) as workspace:
+        base = _index_files(workspace.root)
+    merged_files = dict(base)
+    for _coverage, candidate in paired:
+        merged_files = _merged_index_files(
+            base,
+            merged_files,
+            _candidate_index_files(candidate, repo),
+        )
+    tree, patch = _materialize_merged_index(repo, base, merged_files)
     return Candidate(
-        base_tree=left.base_tree,
+        base_tree=first.base_tree,
         tree=tree,
-        targets=left.targets,
-        sources=tuple(dict.fromkeys((*left.sources, *right.sources))),
-        validate_all_packages=left.validate_all_packages or right.validate_all_packages,
-        systems=tuple(
-            system
-            for system in supported_systems()
-            if system in set(left.systems) | set(right.systems)
+        targets=first.targets,
+        sources=tuple(
+            dict.fromkeys(
+                source for candidate in candidates for source in candidate.sources
+            )
         ),
-        resolutions={**left.resolutions, **right.resolutions},
+        validate_all_packages=any(
+            candidate.validate_all_packages for candidate in candidates
+        ),
+        systems=first.systems,
+        resolutions=_union_resolutions([
+            candidate.resolutions for _coverage, candidate in paired
+        ]),
         prepared=True,
         patch=patch,
     )
+
+
+def load_prepare_shard_dir(
+    root: Path,
+) -> tuple[tuple[Candidate, PrepareShardCoverage], ...]:
+    """Read ``*/candidate.json`` plus the sibling coverage sidecar."""
+    if not root.is_dir():
+        msg = "Prepare shard directory is missing"
+        raise ValueError(msg)
+    loaded: list[tuple[Candidate, PrepareShardCoverage]] = []
+    for candidate_path in sorted(root.glob("*/candidate.json")):
+        coverage_path = candidate_path.with_name("prepare-coverage.json")
+        if not coverage_path.is_file():
+            msg = f"Prepare shard {candidate_path.parent.name} has no coverage"
+            raise ValueError(msg)
+        loaded.append((
+            Candidate.model_validate_json(candidate_path.read_bytes()),
+            _load_prepare_coverage(coverage_path.read_text(encoding="utf-8")),
+        ))
+    if not loaded:
+        msg = "Prepare shard directory has no candidates"
+        raise ValueError(msg)
+    return tuple(loaded)
 
 
 def fold_prepared_candidates(
@@ -1858,6 +2037,27 @@ def merge_candidates_cmd(
     atomic_write_text(output, merged.model_dump_json(indent=2) + "\n")
 
 
+@app.command("merge-prepare-shards")
+def merge_prepare_shards_cmd(
+    shards: Annotated[
+        Path, typer.Option(help="Directory of shard candidate artifacts.")
+    ],
+    output: Annotated[
+        Path,
+        typer.Option(help="Merged one-system candidate JSON outside the repository."),
+    ],
+) -> None:
+    """Fold same-platform prepare shards after proving exact hash coverage."""
+    output = _output_path(output, get_repo_root())
+    loaded = load_prepare_shard_dir(shards)
+    merged = merge_same_platform_partials(
+        tuple(candidate for candidate, _coverage in loaded),
+        tuple(coverage for _candidate, coverage in loaded),
+        repo=get_repo_root(),
+    )
+    atomic_write_text(output, merged.model_dump_json(indent=2) + "\n")
+
+
 @app.command("prepare")
 def prepare(
     targets: Annotated[list[str] | None, typer.Argument()] = None,
@@ -1880,6 +2080,14 @@ def prepare(
             help="Refresh flake refs and source versions without native hashes."
         ),
     ] = False,
+    prepare_shard: Annotated[
+        int | None,
+        typer.Option(help="Hash only this slice of the unchanged target set."),
+    ] = None,
+    prepare_shard_count: Annotated[
+        int | None,
+        typer.Option(help="Number of same-platform prepare slices."),
+    ] = None,
 ) -> None:
     """Resolve and materialize updates on this runner's native platform."""
     output = _output_path(output, get_repo_root())
@@ -1891,11 +2099,19 @@ def prepare(
     selected = tuple(targets or ())
     if prior is not None and not selected:
         selected = prior.targets
+    coverage = (
+        None
+        if prepare_shard is None and prepare_shard_count is None
+        else output.with_name("prepare-coverage.json")
+    )
     candidate, status = prepare_candidate(
         selected,
         previous=prior,
         validate_all_packages=validate_all_packages,
         pins_only=pins_only,
+        prepare_shard=prepare_shard,
+        prepare_shard_count=prepare_shard_count,
+        coverage_path=coverage,
     )
     atomic_write_text(output, candidate.model_dump_json(indent=2) + "\n")
     raise typer.Exit(status)
