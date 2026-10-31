@@ -117,6 +117,15 @@ _RETRYABLE_CRATE2NIX_TRANSIENT_MARKERS = (
     "Directory not empty",
     "No buffer space available",
     "No such file or directory",
+    # 40623890748 prepare-darwin-retry: cargo metadata reused a corrupt
+    # windows-capture git db ("packfile does not match index", commit graph
+    # entry missing from the object database). Delete that db and retry.
+    "does not match index",
+    "repo corruption",
+    "commit graph file but not in the object database",
+)
+_CORRUPT_CARGO_GIT_DB_PATH = re.compile(
+    r"(?:failed to fetch into: |packfile )(?P<path>/\S+)"
 )
 _ANSI_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|$))")
 _ENOSPC_MARKERS = ("no space left on device", "enospc")
@@ -1390,6 +1399,46 @@ def _is_retryable_crate2nix_generate_failure(message: str) -> bool:
     ) and failures.contains_marker(message, _RETRYABLE_CRATE2NIX_TRANSIENT_MARKERS)
 
 
+def _corrupt_cargo_git_db_dirs(message: str, cargo_home: Path) -> set[Path]:
+    """Return cargo git db directories named by a corrupt-pack diagnostic.
+
+    Only the first path component under ``<cargo-home>/git/db`` is eligible.
+    A packfile path, a doubled slash, or the db root itself cannot escape
+    that directory.
+    """
+    db_root = (cargo_home / "git" / "db").resolve()
+    found: set[Path] = set()
+    for match in _CORRUPT_CARGO_GIT_DB_PATH.finditer(message):
+        resolved = Path(match.group("path")).resolve()
+        if not resolved.is_relative_to(db_root):
+            continue
+        relative = resolved.relative_to(db_root)
+        if not relative.parts:
+            continue
+        found.add(db_root / relative.parts[0])
+    return found
+
+
+def _discard_corrupt_cargo_git_dbs(message: str) -> None:
+    """Remove cargo git databases whose pack no longer matches its index."""
+    if not failures.contains_marker(message, _RETRYABLE_CRATE2NIX_TRANSIENT_MARKERS):
+        return
+    for directory in sorted(
+        _corrupt_cargo_git_db_dirs(message, _crate2nix_cargo_home())
+    ):
+        try:
+            shutil.rmtree(directory)
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            if exc.errno == errno.ENOSPC:
+                _raise_resource_error(
+                    f"Could not discard corrupt cargo git db {directory}: "
+                    "No space left on device"
+                )
+            raise
+
+
 def _raise_if_cancelled(cancel_event: threading.Event | None) -> None:
     """Stop synchronous refresh work promptly when its async caller is gone."""
     if cancel_event is not None and cancel_event.is_set():
@@ -1485,6 +1534,14 @@ def _run_crate2nix_generate(
                     cancel_event=cancel_event,
                     progress=progress,
                 )
+            except RuntimeError as exc:
+                if attempt < attempts and _is_retryable_crate2nix_generate_failure(
+                    str(exc)
+                ):
+                    # Still holding the shared Cargo lock, so a concurrent
+                    # generator cannot refetch the db we are about to remove.
+                    _discard_corrupt_cargo_git_dbs(str(exc))
+                raise
             finally:
                 _CRATE2NIX_GENERATE_LOCK.release()
         except (
