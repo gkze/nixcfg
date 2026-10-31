@@ -75,6 +75,22 @@ def _file_candidate(
     )
 
 
+def _files_candidate(
+    root: Path,
+    files: dict[str, str],
+    *,
+    systems: tuple[str, ...],
+) -> Candidate:
+    """Return one candidate that writes every *files* entry over HEAD."""
+    first, *rest = files.items()
+    for relative, content in rest:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        git(root, "add", "--", relative)
+    return _file_candidate(root, first[0], first[1], systems=systems)
+
+
 def test_partition_assigns_each_plan_name_once() -> None:
     """Independent names pack largest-first, and each shard stays in plan order."""
     assert partition_prepare_targets(_PLAN, shard=0, count=5) == ("alpha", "zeta")
@@ -432,7 +448,9 @@ def test_same_platform_partials_fold_into_the_three_system_merge(
         root, "beta.txt", "beta\n", systems=("aarch64-darwin",)
     ).model_copy(update={"validate_all_packages": True})
     coverages = (_coverage(1), _coverage(0))
-    merged = pipeline.merge_same_platform_partials((left, right), coverages, repo=root)
+    merged = pipeline.merge_same_platform_partials(
+        (left, right), coverages, seed=None, repo=root
+    )
     assert merged.systems == ("aarch64-darwin",)
     assert merged.targets == ("example",)
     assert merged.sources == ("alpha", "beta")
@@ -458,47 +476,55 @@ def test_same_platform_partials_reject_an_incomplete_or_conflicting_fold(
     right = _file_candidate(root, "beta.txt", "beta\n", systems=("aarch64-darwin",))
     coverages = (_coverage(0), _coverage(1))
     with pytest.raises(ValueError, match="sidecar"):
-        pipeline.merge_same_platform_partials((left,), coverages, repo=root)
+        pipeline.merge_same_platform_partials((left,), coverages, seed=None, repo=root)
     with pytest.raises(ValueError, match="every shard"):
-        pipeline.merge_same_platform_partials((), (), repo=root)
+        pipeline.merge_same_platform_partials((), (), seed=None, repo=root)
     with pytest.raises(ValueError, match="exactly one"):
         pipeline.merge_same_platform_partials(
             (left.model_copy(update={"systems": ()}),),
             (_coverage(0, count=1, plan=("alpha",)),),
+            seed=None,
             repo=root,
         )
     with pytest.raises(ValueError, match="exactly one"):
         pipeline.merge_same_platform_partials(
             (left.model_copy(update={"systems": ("aarch64-darwin", "aarch64-linux")}),),
             (_coverage(0, count=1, plan=("alpha",)),),
+            seed=None,
             repo=root,
         )
     with pytest.raises(ValueError, match="failed preparation"):
         pipeline.merge_same_platform_partials(
             (left.model_copy(update={"prepared": False}), right),
             coverages,
+            seed=None,
             repo=root,
         )
     with pytest.raises(ValueError, match="baseline"):
         pipeline.merge_same_platform_partials(
             (left, right.model_copy(update={"base_tree": "b" * 40})),
             coverages,
+            seed=None,
             repo=root,
         )
     with pytest.raises(ValueError, match="target selection"):
         pipeline.merge_same_platform_partials(
             (left, right.model_copy(update={"targets": ("other",)})),
             coverages,
+            seed=None,
             repo=root,
         )
     with pytest.raises(ValueError, match="share one system"):
         pipeline.merge_same_platform_partials(
             (left, right.model_copy(update={"systems": ("aarch64-linux",)})),
             coverages,
+            seed=None,
             repo=root,
         )
     with pytest.raises(ValueError, match="missing a shard"):
-        pipeline.merge_same_platform_partials((left,), (_coverage(0),), repo=root)
+        pipeline.merge_same_platform_partials(
+            (left,), (_coverage(0),), seed=None, repo=root
+        )
     with pytest.raises(ValueError, match="more than once"):
         pipeline.merge_same_platform_partials(
             (left, right),
@@ -511,6 +537,7 @@ def test_same_platform_partials_reject_an_incomplete_or_conflicting_fold(
                 ),
                 _coverage(1),
             ),
+            seed=None,
             repo=root,
         )
     shared = ResolvedVersion(version="1")
@@ -521,6 +548,7 @@ def test_same_platform_partials_reject_an_incomplete_or_conflicting_fold(
         pipeline.merge_same_platform_partials(
             (left.model_copy(update={"resolutions": {"example": shared}}), conflicted),
             coverages,
+            seed=None,
             repo=root,
         )
     overlapped = pipeline.merge_same_platform_partials(
@@ -536,6 +564,7 @@ def test_same_platform_partials_reject_an_incomplete_or_conflicting_fold(
             ),
         ),
         coverages,
+        seed=None,
         repo=root,
     )
     assert overlapped.resolutions["example"].version == "1"
@@ -548,7 +577,7 @@ def test_same_platform_partials_reject_an_incomplete_or_conflicting_fold(
     )
     with pytest.raises(ValueError, match="Conflicting candidate edits"):
         pipeline.merge_same_platform_partials(
-            (clash_left, clash_right), coverages, repo=root
+            (clash_left, clash_right), coverages, seed=None, repo=root
         )
 
 
@@ -597,7 +626,9 @@ def test_same_platform_fold_rejects_a_split_goose_chain(tmp_path: Path) -> None:
     with pytest.raises(
         ValueError, match="crosses shards: electron-runtimes -> goose-desktop"
     ):
-        pipeline.merge_same_platform_partials(candidates, coverages, repo=root)
+        pipeline.merge_same_platform_partials(
+            candidates, coverages, seed=None, repo=root
+        )
 
 
 def test_load_prepare_shard_dir_requires_every_sidecar(tmp_path: Path) -> None:
@@ -615,3 +646,76 @@ def test_load_prepare_shard_dir_requires_every_sidecar(tmp_path: Path) -> None:
     (bare / "candidate.json").write_text("{}\n", encoding="utf-8")
     with pytest.raises(ValueError, match="no coverage"):
         pipeline.load_prepare_shard_dir(bare.parent)
+
+
+def test_same_platform_fold_keeps_an_owner_restore_of_a_pin_blank(
+    tmp_path: Path,
+) -> None:
+    """41157698790: the owner's baseline-equal hash beats a non-owner's pin blank.
+
+    The pin blanks ``keep.txt``. The owner shard writes it back to the
+    baseline bytes. The non-owner shard never touches it and keeps the
+    blank. Only the pin is a correct ancestor for that fold.
+    """
+    root = tmp_path / "repo"
+    init_update_workspace_repo(root, tracked_files={"keep.txt": "keep\n"})
+    darwin = ("aarch64-darwin",)
+    pin = _files_candidate(root, {"keep.txt": "blank\n"}, systems=())
+    owner = _files_candidate(root, {"alpha.txt": "alpha\n"}, systems=darwin)
+    other = _files_candidate(
+        root, {"beta.txt": "beta\n", "keep.txt": "blank\n"}, systems=darwin
+    )
+    coverages = (_coverage(0), _coverage(1))
+    folded = pipeline.merge_same_platform_partials(
+        (owner, other), coverages, seed=pin, repo=root
+    )
+    folded.apply(root)
+    assert (root / "keep.txt").read_text(encoding="utf-8") == "keep\n"
+    assert (root / "alpha.txt").read_text(encoding="utf-8") == "alpha\n"
+    assert (root / "beta.txt").read_text(encoding="utf-8") == "beta\n"
+    git(root, "reset", "--hard", "HEAD")
+    git(root, "clean", "-fdq")
+    lost = pipeline.merge_same_platform_partials(
+        (owner, other), coverages, seed=None, repo=root
+    )
+    lost.apply(root)
+    assert (root / "keep.txt").read_text(encoding="utf-8") == "blank\n"
+    git(root, "reset", "--hard", "HEAD")
+    git(root, "clean", "-fdq")
+    for bad in (
+        pin.model_copy(update={"prepared": False}),
+        pin.model_copy(update={"base_tree": "b" * 40}),
+    ):
+        with pytest.raises(ValueError, match="one prepared seed"):
+            pipeline.merge_same_platform_partials(
+                (owner, other), coverages, seed=bad, repo=root
+            )
+
+
+def test_load_prepare_shard_seed_requires_one_seed_per_shard(
+    tmp_path: Path,
+) -> None:
+    """Every shard records the same seed, or the fold has no ancestor."""
+    root = tmp_path / "repo"
+    init_update_workspace_repo(root, tracked_files={"keep.txt": "keep\n"})
+    pin = _files_candidate(root, {"keep.txt": "blank\n"}, systems=())
+    other = pin.model_copy(update={"targets": ("other",)})
+    shards = tmp_path / "shards"
+    with pytest.raises(ValueError, match="no candidates"):
+        pipeline.load_prepare_shard_seed(shards)
+    for index in range(2):
+        directory = shards / str(index)
+        directory.mkdir(parents=True)
+        (directory / "candidate.json").write_text("{}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="shard 0 has no seed"):
+        pipeline.load_prepare_shard_seed(shards)
+    for index, seed in enumerate((pin, other)):
+        (shards / str(index) / pipeline.PREPARE_SEED_NAME).write_text(
+            seed.model_dump_json(), encoding="utf-8"
+        )
+    with pytest.raises(ValueError, match="same seed"):
+        pipeline.load_prepare_shard_seed(shards)
+    (shards / "1" / pipeline.PREPARE_SEED_NAME).write_text(
+        pin.model_dump_json(), encoding="utf-8"
+    )
+    assert pipeline.load_prepare_shard_seed(shards) == pin
