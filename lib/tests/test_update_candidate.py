@@ -324,7 +324,7 @@ def test_darwin_prepare_shards_hash_every_target_once_then_merge(
         coverages.append(coverage)
     assert operations == ["hash:aarch64-darwin"]
     darwin = pipeline.merge_same_platform_partials(
-        tuple(shards), tuple(coverages), repo=root
+        tuple(shards), tuple(coverages), seed=pin, repo=root
     )
     assert darwin.systems == ("aarch64-darwin",)
     assert darwin.targets == ("example",)
@@ -349,6 +349,9 @@ def test_darwin_prepare_shards_hash_every_target_once_then_merge(
         )
         (directory / "prepare-coverage.json").write_text(
             coverage.to_json(), encoding="utf-8"
+        )
+        (directory / pipeline.PREPARE_SEED_NAME).write_text(
+            pin.model_dump_json(indent=2) + "\n", encoding="utf-8"
         )
     merged_out = tmp_path / "merged.json"
     merged = CliRunner().invoke(
@@ -552,7 +555,7 @@ def test_sharded_goose_chain_matches_the_unsharded_candidate(
     }
     assert owners["goose-cli"] == owners["goose-desktop"] == owners["electron-runtimes"]
     folded = pipeline.merge_same_platform_partials(
-        tuple(shards), tuple(coverages), repo=root
+        tuple(shards), tuple(coverages), seed=pin, repo=root
     )
     assert folded.tree == whole.tree
     with IsolatedUpdateWorkspace(root) as workspace:
@@ -630,6 +633,10 @@ def test_prepare_command_writes_and_rejects_shard_flags(
     assert coverage.hashed == ("example",)
     assert coverage.count == 5
     assert Candidate.model_validate_json(out.read_bytes()).targets == ("example",)
+    seed = Candidate.model_validate_json(
+        (tmp_path / pipeline.PREPARE_SEED_NAME).read_bytes()
+    )
+    assert seed == Candidate.model_validate_json(pin_out.read_bytes())
     for args in (
         ["prepare", "--output", str(out), "--prepare-shard", "0", "example"],
         ["prepare", "--output", str(out), "--prepare-shard-count", "5", "example"],

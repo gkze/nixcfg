@@ -202,6 +202,9 @@ class RootDependencyCacheReport(BaseModel):
     store_paths: tuple[str, ...] = ()
 
 
+PREPARE_SEED_NAME = "prepare-seed.json"
+
+
 def _output_path(output: Path, root: Path) -> Path:
     """Keep job artifacts outside the source snapshot they describe."""
     output = output.resolve()
@@ -810,6 +813,7 @@ def merge_same_platform_partials(
     candidates: tuple[Candidate, ...],
     coverages: tuple[PrepareShardCoverage, ...],
     *,
+    seed: Candidate | None,
     repo: Path,
 ) -> Candidate:
     """Fold same-system prepare shards after an exact hash-coverage proof.
@@ -818,6 +822,13 @@ def merge_same_platform_partials(
     proves the hashed slices are the pure partition of one plan, so each plan
     name is hashed once. The result is still a one-system candidate; the
     existing three-system merge folds it with the other platforms.
+
+    Every shard extends the same *seed* (the pins candidate), so the 3-way
+    ancestor is the seed tree, not the baseline. 41157698790: the pin left
+    superconductor ``hashes: {}``; shard 0 hashed it back to the baseline
+    bytes, shards 1-4 kept the pin's blank. Against the baseline the blank
+    looked like the only edit and won, so the fold lost the Darwin hash.
+    ``None`` means the shards extended the baseline itself.
     """
     if len(candidates) != len(coverages):
         msg = "Each prepare shard needs its coverage sidecar"
@@ -832,12 +843,16 @@ def merge_same_platform_partials(
         key=lambda item: item[0].shard,
     )
     first = paired[0][1]
+    if seed is not None and (not seed.prepared or seed.base_tree != first.base_tree):
+        msg = "Prepare shards must extend one prepared seed on their baseline"
+        raise ValueError(msg)
     with IsolatedUpdateWorkspace(repo) as workspace:
         base = _index_files(workspace.root)
-    merged_files = dict(base)
+    ancestor = base if seed is None else _candidate_index_files(seed, repo)
+    merged_files = dict(ancestor)
     for _coverage, candidate in paired:
         merged_files = _merged_index_files(
-            base,
+            ancestor,
             merged_files,
             _candidate_index_files(candidate, repo),
         )
@@ -884,6 +899,24 @@ def load_prepare_shard_dir(
         msg = "Prepare shard directory has no candidates"
         raise ValueError(msg)
     return tuple(loaded)
+
+
+def load_prepare_shard_seed(root: Path) -> Candidate:
+    """Return the one seed every shard recorded beside its candidate."""
+    seeds: list[Candidate] = []
+    for candidate_path in sorted(root.glob("*/candidate.json")):
+        seed_path = candidate_path.with_name(PREPARE_SEED_NAME)
+        if not seed_path.is_file():
+            msg = f"Prepare shard {candidate_path.parent.name} has no seed"
+            raise ValueError(msg)
+        seeds.append(Candidate.model_validate_json(seed_path.read_bytes()))
+    if not seeds:
+        msg = "Prepare shard directory has no candidates"
+        raise ValueError(msg)
+    if any(seed != seeds[0] for seed in seeds[1:]):
+        msg = "Prepare shards must extend the same seed"
+        raise ValueError(msg)
+    return seeds[0]
 
 
 def fold_prepared_candidates(
@@ -2053,6 +2086,7 @@ def merge_prepare_shards_cmd(
     merged = merge_same_platform_partials(
         tuple(candidate for candidate, _coverage in loaded),
         tuple(coverage for _candidate, coverage in loaded),
+        seed=load_prepare_shard_seed(shards),
         repo=get_repo_root(),
     )
     atomic_write_text(output, merged.model_dump_json(indent=2) + "\n")
@@ -2113,6 +2147,12 @@ def prepare(
         prepare_shard_count=prepare_shard_count,
         coverage_path=coverage,
     )
+    if coverage is not None and prior is not None:
+        # The shard fold needs the tree every shard extended as its ancestor.
+        atomic_write_text(
+            output.with_name(PREPARE_SEED_NAME),
+            prior.model_dump_json(indent=2) + "\n",
+        )
     atomic_write_text(output, candidate.model_dump_json(indent=2) + "\n")
     raise typer.Exit(status)
 
