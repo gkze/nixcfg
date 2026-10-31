@@ -17,12 +17,19 @@ EXPECTED_ENTITLEMENTS = {
     "com.apple.security.cs.disable-library-validation": True,
     "com.apple.security.device.audio-input": True,
 }
-# Only these reviewed whole-bundle inventories may choose the signature shape.
-# Counts cover regular app files only: archived app.asar entries and native
-# symlink aliases are not separate signature leaves.
+# Only these reviewed whole-bundle inventories of the release being built may
+# choose the signature shape. Counts cover regular app files only: archived
+# app.asar entries and native symlink aliases are not separate signature leaves.
 EXPECTED_NONEXECUTABLE_COUNTS = {
-    "c95f41c50d4b47704abcfa91a9f52b3bda6a288bd085c43cf0d82cfe6d22a4d0": 95,
-    "5d0fa899e4a7bcc347e6e5a0217d5420bc50b0924715d12aaf0a19529a340ef5": 96,
+    "0.9.1": {
+        "c95f41c50d4b47704abcfa91a9f52b3bda6a288bd085c43cf0d82cfe6d22a4d0": 95,
+        "5d0fa899e4a7bcc347e6e5a0217d5420bc50b0924715d12aaf0a19529a340ef5": 96,
+    },
+    # 0.14.0 adds one non-executable leaf, the msgpackr-extract N-API addon.
+    "0.14.0": {
+        "16bdd9a3bf63ee848c3853baa0d0f50b367845edb3e6415d7f29ef851b5570bb": 96,
+        "2f64aeaf2727f47450f498540488b03845190b4e99487c01a26cea95ab721dec": 97,
+    },
 }
 EXPECTED_FRAMEWORKS = (
     "Contents/Frameworks/Electron Framework.framework",
@@ -58,13 +65,21 @@ EXPECTED_EXECUTABLE_COUNT = len(EXPECTED_EXECUTABLE_MACHOS)
 EXPECTED_ENTITLED_MACHO_COUNT = len(EXPECTED_ENTITLED_MACHOS)
 
 
-def expected_nonexecutable_count(native_manifest: Path) -> int:
-    """Bind the exact signature inventory to the already selected native manifest."""
+def expected_nonexecutable_count(native_manifest: Path, *, paseo_version: str) -> int:
+    """Bind the exact signature inventory to the release and its selected manifest."""
+    try:
+        profiles = EXPECTED_NONEXECUTABLE_COUNTS[paseo_version]
+    except KeyError:
+        msg = f"Paseo release is not reviewed for signatures: {paseo_version!r}"
+        raise ValueError(msg) from None
     digest = sha256(native_manifest.read_bytes()).hexdigest()
     try:
-        return EXPECTED_NONEXECUTABLE_COUNTS[digest]
+        return profiles[digest]
     except KeyError:
-        msg = f"Paseo native manifest is not reviewed for signatures: {digest}"
+        msg = (
+            f"Paseo native manifest is not reviewed for {paseo_version} "
+            f"signatures: {digest}"
+        )
         raise ValueError(msg) from None
 
 
@@ -195,6 +210,7 @@ def validate_bundle(
     app: Path,
     *,
     native_manifest: Path,
+    paseo_version: str,
     runner: CommandRunner = _default_runner,
 ) -> None:
     """Validate Paseo's complete reviewed Mach-O and nested-bundle inventory."""
@@ -202,7 +218,9 @@ def validate_bundle(
         msg = f"Paseo app is not a directory: {app}"
         raise ValueError(msg)
 
-    expected_nonexecutable = expected_nonexecutable_count(native_manifest)
+    expected_nonexecutable = expected_nonexecutable_count(
+        native_manifest, paseo_version=paseo_version
+    )
     expected_macho = EXPECTED_EXECUTABLE_COUNT + expected_nonexecutable
 
     machos: list[tuple[Path, bool]] = []
@@ -310,8 +328,13 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("app", type=Path)
     parser.add_argument("--native-manifest", type=Path, required=True)
+    parser.add_argument("--paseo-version", required=True)
     arguments = parser.parse_args()
-    validate_bundle(arguments.app, native_manifest=arguments.native_manifest)
+    validate_bundle(
+        arguments.app,
+        native_manifest=arguments.native_manifest,
+        paseo_version=arguments.paseo_version,
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover -- package-build entry point

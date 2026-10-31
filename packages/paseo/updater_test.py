@@ -69,6 +69,7 @@ from lib.update.updaters import UpdateContext, VersionInfo
 _PACKAGE_DIR = REPO_ROOT / "packages/paseo"
 _NATIVE_MANIFEST_CASES = [
     (
+        "0.9.1",
         "native-manifest.txt",
         "c95f41c50d4b47704abcfa91a9f52b3bda6a288bd085c43cf0d82cfe6d22a4d0",
         199,
@@ -76,13 +77,37 @@ _NATIVE_MANIFEST_CASES = [
         "2601.0.0",
     ),
     (
+        "0.9.1",
         "native-manifest-abseil-20260817.txt",
         "5d0fa899e4a7bcc347e6e5a0217d5420bc50b0924715d12aaf0a19529a340ef5",
         201,
         96,
         "2608.0.0",
     ),
+    (
+        "0.14.0",
+        "native-manifest-0.14.0.txt",
+        "16bdd9a3bf63ee848c3853baa0d0f50b367845edb3e6415d7f29ef851b5570bb",
+        201,
+        96,
+        "2601.0.0",
+    ),
+    (
+        "0.14.0",
+        "native-manifest-0.14.0-abseil-20260817.txt",
+        "2f64aeaf2727f47450f498540488b03845190b4e99487c01a26cea95ab721dec",
+        203,
+        97,
+        "2608.0.0",
+    ),
 ]
+_MSGPACKR_EXTRACT_ADDON = (
+    "node_modules/@msgpackr-extract/msgpackr-extract-darwin-arm64/node.napi.glibc.node"
+)
+_RELEASE_MANIFEST_SUCCESSORS = {
+    "native-manifest-0.14.0.txt": "native-manifest.txt",
+    "native-manifest-0.14.0-abseil-20260817.txt": "native-manifest-abseil-20260817.txt",
+}
 _VERSION = "0.6.1"
 _TAG = f"v{_VERSION}"
 _COMMIT = "20d7efc46a316f5a274b9943a5c43b0322269825"
@@ -2450,8 +2475,11 @@ def test_paseo_source_metadata_is_complete_and_the_manifest_is_default() -> None
         {
           callPackage,
           protobuf_32,
-          expectedNativeManifest ? import ./native-manifest.nix { protobuf = protobuf_32; },
           selfSource ? builtins.fromJSON (builtins.readFile ./sources.json),
+          expectedNativeManifest ? import ./native-manifest.nix {
+            protobuf = protobuf_32;
+            paseoVersion = selfSource.version or null;
+          },
           ...
         }:
         callPackage ./package.nix {
@@ -2489,10 +2517,18 @@ def test_paseo_registry_exports_only_on_arm64_darwin() -> None:
 
 
 @pytest.mark.parametrize(
-    ("name", "expected_hash", "row_count", "nonexecutable_count", "abseil_abi"),
+    (
+        "release",
+        "name",
+        "expected_hash",
+        "row_count",
+        "nonexecutable_count",
+        "abseil_abi",
+    ),
     _NATIVE_MANIFEST_CASES,
 )
 def test_paseo_reviewed_native_manifest_matches_the_realized_inventory(
+    release: str,
     name: str,
     expected_hash: str,
     row_count: int,
@@ -2535,31 +2571,67 @@ def test_paseo_reviewed_native_manifest_matches_the_realized_inventory(
         "paseo_signature_validator_updater_test",
     )
     assert (
-        signature_validator.expected_nonexecutable_count(manifest_path)
+        signature_validator.expected_nonexecutable_count(
+            manifest_path, paseo_version=release
+        )
         == nonexecutable_count
     )
 
 
+@pytest.mark.parametrize(
+    ("successor", "predecessor"), sorted(_RELEASE_MANIFEST_SUCCESSORS.items())
+)
+def test_paseo_release_manifest_adds_only_the_msgpackr_extract_addon(
+    successor: str,
+    predecessor: str,
+) -> None:
+    """0.14.0 inventories are their 0.9.1 tuple plus the one reviewed addon."""
+    successor_rows = (_PACKAGE_DIR / successor).read_text(encoding="utf-8")
+    predecessor_rows = (_PACKAGE_DIR / predecessor).read_text(encoding="utf-8")
+
+    assert sorted(
+        set(successor_rows.splitlines()) - set(predecessor_rows.splitlines())
+    ) == [
+        f"1\tContents/Resources/app.asar.unpacked/{_MSGPACKR_EXTRACT_ADDON}",
+        f"1\tapp.asar/{_MSGPACKR_EXTRACT_ADDON}",
+    ]
+    assert set(predecessor_rows.splitlines()) <= set(successor_rows.splitlines())
+
+
 def test_paseo_every_selected_native_manifest_is_reviewed() -> None:
-    """Adding a tuple must also add its exact inventory to native contract tests."""
+    """Adding a release or tuple must also add its exact inventory to tests."""
     selector = expect_instance(
         parse_nix_expr((_PACKAGE_DIR / "native-manifest.nix").read_text()),
         FunctionDefinition,
     )
-    manifests = expect_instance(
-        expect_binding(selector.output.scope, "manifests").value,
+    releases = expect_instance(
+        expect_binding(selector.output.scope, "releases").value,
         AttributeSet,
     )
     selected = {
-        Path(expect_instance(binding.value, NixPath).path).name
-        for binding in binding_map(manifests.values).values()
+        (
+            json.loads(release),
+            Path(expect_instance(manifest.value, NixPath).path).name,
+        )
+        for release, binding in binding_map(releases.values).items()
+        for manifest in binding_map(
+            expect_instance(binding.value, AttributeSet).values
+        ).values()
     }
-    assert selected == {case[0] for case in _NATIVE_MANIFEST_CASES}
-    assert selected == {path.name for path in _PACKAGE_DIR.glob("native-manifest*.txt")}
+    assert selected == {(case[0], case[1]) for case in _NATIVE_MANIFEST_CASES}
+    assert {name for _release, name in selected} == {
+        path.name for path in _PACKAGE_DIR.glob("native-manifest*.txt")
+    }
+    assert {release for release, _name in selected} == {
+        *_load_patcher_module()._RELEASE_LAYOUTS
+    }
 
 
 @pytest.mark.nix_eval(
-    reason="Only Nix evaluation tests lazy default selection and rejection of dependency tuples"
+    reason=(
+        "Only Nix evaluation tests lazy default selection and rejection of "
+        "releases and dependency tuples"
+    )
 )
 def test_paseo_selects_only_reviewed_protobuf_abseil_inventories() -> None:
     """Evaluate the small selector alone, without a package build or host graph."""
@@ -2568,7 +2640,13 @@ def test_paseo_selects_only_reviewed_protobuf_abseil_inventories() -> None:
     ) == {
         "current": "native-manifest.txt",
         "latest": "native-manifest-abseil-20260817.txt",
+        "releaseCurrent": "native-manifest-0.14.0.txt",
+        "releaseLatest": "native-manifest-0.14.0-abseil-20260817.txt",
         "unrelatedDependency": "native-manifest-abseil-20260817.txt",
+        "unknownRelease": True,
+        "missingRelease": True,
+        "nonStringRelease": True,
+        "releaseUnknownAbseil": True,
         "missingDependencies": True,
         "emptyDependencies": True,
         "duplicateDependencies": True,
