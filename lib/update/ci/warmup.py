@@ -1132,12 +1132,20 @@ def slot_warmup_paths(
     *,
     width: int = RUST_WARMUP_SLOTS,
     pinned: Collection[str] = (),
+    output_drvs: Mapping[str, str] | None = None,
 ) -> tuple[str, ...]:
     """Return this matrix slot's stripe of each warmup layer, in layer order.
 
     *pinned* outputs (``WarmupPlan.rusty_v8_family``) all go to the slot with
     the fewest round-robin paths, so concurrent slots never compile competing
     copies. Every other path keeps per-layer round-robin.
+
+    With *output_drvs*, the round-robin unit is the deriving ``.drv``, so
+    every output of one drv lands on one slot, even across layers.
+    41178394324 striped by output path: 3198 of 4291 drvs had ``out`` and
+    ``-lib`` on two slots, so two runners each compiled them. Slot 2 then
+    mixed one runner's ``rust_merman-core`` with another's ``rust_merman``
+    and ``rust_mermaid_render`` E0463'd.
     """
     if width < 1:
         msg = "rust warmup width must be at least 1"
@@ -1149,13 +1157,34 @@ def slot_warmup_paths(
     free = tuple(
         tuple(path for path in layer if path not in family) for layer in layers
     )
-    loads = [sum(len(layer[index::width]) for layer in free) for index in range(width)]
+    drv_of = output_drvs or {}
+    owners: dict[str, int] = {}
+    stripes: list[tuple[str, ...]] = []
+    loads = [0] * width
+    for layer in free:
+        # An unmapped path is its own unit, owned for this layer only.
+        groups: dict[str | int, list[str]] = {}
+        for index, path in enumerate(layer):
+            groups.setdefault(drv_of.get(path, index), []).append(path)
+        fresh = 0
+        mine: list[str] = []
+        for key, members in groups.items():
+            owner = owners.get(key) if isinstance(key, str) else None
+            if owner is None:
+                owner = fresh % width
+                fresh += 1
+                if isinstance(key, str):
+                    owners[key] = owner
+            loads[owner] += len(members)
+            if owner == slot:
+                mine.extend(members)
+        stripes.append(tuple(mine))
     owner = loads.index(min(loads))
     return tuple(
         path
-        for layer, rest in zip(layers, free, strict=True)
+        for layer, rest in zip(layers, stripes, strict=True)
         for path in (
-            *rest[slot::width],
+            *rest,
             *(member for member in layer if slot == owner and member in family),
         )
     )
@@ -1970,7 +1999,8 @@ def gitbutler_family_slot_from_package(
     payload = eval_darwin_package_graph(flake_root, "gitbutler", run=run)
     outputs = gitbutler_family_package_outputs((payload,))
     layers = rust_warmup_layers(outputs, (payload,))
-    return slot_warmup_paths(layers, slot), warmup_output_drvs(outputs, (payload,))
+    output_drvs = warmup_output_drvs(outputs, (payload,))
+    return slot_warmup_paths(layers, slot, output_drvs=output_drvs), output_drvs
 
 
 def extension_host_family_warmup_outputs(

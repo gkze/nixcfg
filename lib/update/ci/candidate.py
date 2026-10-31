@@ -1248,7 +1248,12 @@ def _canary_or_slot_paths(
     """Named crates come from every rust layer; otherwise use the slot stripe."""
     if requested_crates:
         return canary_crate_warmup_paths(plan.rust_layers, requested_crates)
-    return slot_warmup_paths(plan.rust_layers, warmup_slot, pinned=plan.rusty_v8_family)
+    return slot_warmup_paths(
+        plan.rust_layers,
+        warmup_slot,
+        pinned=plan.rusty_v8_family,
+        output_drvs=plan.output_drvs,
+    )
 
 
 def _expand_svh_family_from_stripe(

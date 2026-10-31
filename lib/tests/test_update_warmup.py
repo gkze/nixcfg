@@ -1485,6 +1485,40 @@ def test_rusty_v8_family_is_librusty_v8_and_every_dependent() -> None:
     assert not is_rusty_v8_native_store_path(_V8_GOOSE)
 
 
+def test_slot_warmup_paths_keeps_every_output_of_a_drv_on_one_slot() -> None:
+    """41178394324: out and -lib on two slots made two runners compile one drv."""
+    drvs = [
+        f"/nix/store/{index:032d}-rust_crate{index}-1.0.0.drv" for index in range(7)
+    ]
+    output_drvs: dict[str, str] = {}
+    layers: list[tuple[str, ...]] = []
+    for layer in ((0, 1, 2, 3), (4, 5, 6)):
+        paths: list[str] = []
+        for index in layer:
+            stem = f"/nix/store/{index:031d}o-rust_crate{index}-1.0.0"
+            for path in (stem, f"{stem}-lib"):
+                output_drvs[path] = drvs[index]
+                paths.append(path)
+        layers.append(tuple(sorted(paths)))
+    # A later layer may hold another output of an already-owned drv.
+    late = "/nix/store/" + "9" * 32 + "-rust_crate0-1.0.0-doc"
+    output_drvs[late] = drvs[0]
+    layers.append((late,))
+
+    stripes = [
+        slot_warmup_paths(layers, slot, width=3, output_drvs=output_drvs)
+        for slot in range(3)
+    ]
+
+    every = [path for stripe in stripes for path in stripe]
+    assert sorted(every) == sorted(path for layer in layers for path in layer)
+    owner = {path: slot for slot, stripe in enumerate(stripes) for path in stripe}
+    for drv in drvs:
+        assert len({owner[p] for p, d in output_drvs.items() if d == drv}) == 1
+    assert all(stripes)
+    assert owner[late] == owner[layers[0][0]]
+
+
 def test_slot_warmup_paths_pins_rusty_v8_family_to_one_slot() -> None:
     """39912925016: slots 0 and k each compiled rust_pctx_code_execution_runtime."""
     filler = tuple(f"/nix/store/{index:032x}-rust_filler-{index}" for index in range(7))
