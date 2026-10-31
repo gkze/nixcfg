@@ -833,6 +833,33 @@ OXC_VALIDATOR_PATCH_VARIANTS = (
     (OXC_VALIDATOR_WINDOWS_ENTRY_SEAM, OXC_VALIDATOR_WINDOWS_ENTRY_REPLACEMENT),
 )
 
+
+def _sd_cpp_install_guard(finder: str, preflight_comment: str) -> _SourcePatch:
+    """Return before an sd.cpp installer's lock, keeping only usable store binaries.
+
+    0.1.912-beta runs a ROCm-to-Vulkan preflight between the ``allow_install``
+    return and the lock; the guard still precedes both.
+    """
+    early_return = "    if not allow_install:\n        return found\n"
+    install = f"    with _install_lock:\n        found = {finder}()\n"
+    preflight = (
+        f"{preflight_comment}    accelerator = _skip_unloadable_rocm(accelerator)\n"
+    )
+    guard = (
+        '    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":\n'
+        "        return found if usable else None\n"
+    )
+    return _SourcePatch(
+        Path("studio/backend/core/inference/sd_cpp_backend.py"),
+        early_return + install,
+        guard + early_return + install,
+        alternatives=((
+            early_return + preflight + install,
+            guard + early_return + preflight + install,
+        ),),
+    )
+
+
 _BACKEND_PATCHES = (
     _SourcePatch(
         Path("pyproject.toml"),
@@ -1750,20 +1777,12 @@ _BACKEND_PATCHES = (
 """,
         ),),
     ),
-    _SourcePatch(
-        Path("studio/backend/core/inference/sd_cpp_backend.py"),
-        """    if not allow_install:
-        return found
-    with _install_lock:
-""",
-        """    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
-        return found if usable else None
-    if not allow_install:
-        return found
-    with _install_lock:
-""",
-        expected_matches=2,
+    _sd_cpp_install_guard(
+        "find_sd_cpp_binary",
+        "    # Only once a fetch is due: an installed build may carry its runtime "
+        "beside the binary.\n",
     ),
+    _sd_cpp_install_guard("find_sd_server_binary", ""),
     _SourcePatch(
         Path("studio/setup.sh"),
         """set -euo pipefail

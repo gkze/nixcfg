@@ -4552,38 +4552,70 @@ def test_unsloth_current_backend_seams_preserve_managed_boundaries(
         assert call(*args, **kwargs) is True
 
 
+_SD_CPP_BACKEND_PATH = Path("studio/backend/core/inference/sd_cpp_backend.py")
+
+
+def _sd_cpp_install_variants() -> list[object]:
+    patches = [
+        patch
+        for patch in _load_patch_module()._BACKEND_PATCHES
+        if patch.path == _SD_CPP_BACKEND_PATH
+    ]
+    return [
+        pytest.param(old, new, id=f"{finder}-{label}")
+        for patch, finder in zip(
+            patches, ("find_sd_cpp_binary", "find_sd_server_binary"), strict=True
+        )
+        for label, (old, new) in zip(
+            ("0.1.909", "0.1.912-rocm-preflight"),
+            ((patch.old, patch.new), *patch.alternatives),
+            strict=True,
+        )
+    ]
+
+
+def test_unsloth_sd_cpp_policy_guards_each_installer_once() -> None:
+    """Both sd.cpp installers keep a distinct guard; neither anchor can match twice."""
+    patches = [
+        patch
+        for patch in _load_patch_module()._BACKEND_PATCHES
+        if patch.path == _SD_CPP_BACKEND_PATH
+    ]
+    assert [patch.expected_matches for patch in patches] == [1, 1]
+    assert "find_sd_cpp_binary()" in patches[0].old
+    assert "find_sd_server_binary()" in patches[1].old
+
+
 @pytest.mark.parametrize("managed", [False, True])
 @pytest.mark.parametrize("usable", [False, True])
+@pytest.mark.parametrize(("old", "new"), _sd_cpp_install_variants())
 def test_unsloth_sd_cpp_policy_prevents_managed_installs(
+    old: str,
+    new: str,
     managed: bool,
     usable: bool,
 ) -> None:
     """Changing upstream reinstall heuristics cannot enable managed downloads."""
-    module = _load_patch_module()
-    path = Path("studio/backend/core/inference/sd_cpp_backend.py")
-    patch = next(patch for patch in module._BACKEND_PATCHES if patch.path == path)
     source = (
-        "def ensure_binary():\n"
-        "    if not allow_install:\n"
-        "        return found\n"
-        "    with _install_lock:\n"
-        "        return 'installed'\n"
+        f"def ensure_binary(found, accelerator):\n{old}        return 'installed'\n"
     )
     # Execute the policy at the installer boundary with both usability outcomes.
     namespace: dict[str, object] = {
         "os": SimpleNamespace(environ={"UNSLOTH_NIX_MANAGED": "1"} if managed else {}),
         "allow_install": True,
-        "found": "/nix/store/sd-cli",
         "usable": usable,
         "_install_lock": nullcontext(),
+        "_skip_unloadable_rocm": lambda accelerator: accelerator,
+        "find_sd_cpp_binary": lambda: None,
+        "find_sd_server_binary": lambda: None,
     }
     exec(  # noqa: S102 -- executes a fixed policy fixture with inert installer state
-        compile(source.replace(patch.old, patch.new), "<sd-policy>", "exec"), namespace
+        compile(source.replace(old, new), "<sd-policy>", "exec"), namespace
     )
     expected = ("/nix/store/sd-cli" if usable else None) if managed else "installed"
     ensure_binary = namespace["ensure_binary"]
     assert callable(ensure_binary)
-    assert ensure_binary() == expected
+    assert ensure_binary("/nix/store/sd-cli", "cpu") == expected
 
 
 def test_unsloth_nix_managed_capabilities_use_the_validated_immutable_closure() -> None:
