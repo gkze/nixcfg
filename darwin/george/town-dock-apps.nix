@@ -43,7 +43,6 @@ dock.mkDockModule {
     (appPath "zed" "Zed Nightly.app")
     (appPath "linear" "Linear.app")
     (appPath "notion" "Notion.app")
-    "/System/Applications/Podcasts.app"
     "/System/Applications/System Settings.app"
   ];
 }
