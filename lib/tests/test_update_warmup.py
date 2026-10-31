@@ -2277,6 +2277,50 @@ def test_is_source_fetch_mirror_line_skips_crate_fod() -> None:
     assert warmup_fatal_line(clang_src) == "cannot download from any mirror"
 
 
+def test_crane_cargo_src_fod_is_a_retryable_source_fetch() -> None:
+    """41207662691 slot 3: crane's crates.io fetchurl timed out mid-warmup.
+
+    crane names it ``cargo-src-<crate>-<version>`` with no archive suffix,
+    so the mirror line was fatal and the FOD was never retried. It must
+    stream-skip and be picked for the DNS-gated retry like a crate
+    tarball. Compiler mirrors and crane's ``cargo-package-*`` unpack stay
+    out of the source-fetch class.
+    """
+    cfg_aliases = (
+        "/nix/store/f33gdazn0wx6ly7qzs233hr96lwlhqrw-cargo-src-cfg_aliases-0.2.1.drv"
+    )
+    package = (
+        "/nix/store/8jhbbzy3maqb4krl555riaml1gxn84s9-"
+        "cargo-package-proc-macro-error2-2.0.1.drv"
+    )
+    mirror = (
+        "[rust-warmup]        > error: cannot download "
+        "cargo-src-cfg_aliases-0.2.1 from any mirror"
+    )
+    assert is_source_fetch_store_path(cfg_aliases)
+    assert is_source_fetch_store_path(cfg_aliases.removesuffix(".drv"))
+    assert not is_source_fetch_store_path(package)
+    assert is_source_fetch_mirror_line(mirror)
+    assert warmup_fatal_line(mirror) is None
+    assert warmup_fatal_line(f"error: Cannot build '{cfg_aliases}'.") is None
+    assert (
+        warmup_fatal_line("error: cannot download rustc-1.98.1.tar.gz from any mirror")
+        == "cannot download from any mirror"
+    )
+    assert partition_compiler_input_drvs((cfg_aliases,)) == ((), (cfg_aliases,))
+    timed_out = DerivationValidationFailure(
+        source="rust-warmup",
+        installable=f"{package}^*",
+        message=(
+            f"error: Cannot build '{cfg_aliases}'.\n"
+            "       Reason: builder failed with exit code 1.\n"
+            "       > Warning: Problem : timeout. Retrying in 4 seconds. 1 retry left.\n"
+            "       > error: cannot download cargo-src-cfg_aliases-0.2.1 from any mirror"
+        ),
+    )
+    assert source_fetch_retry_drvs((timed_out,)) == (cfg_aliases,)
+
+
 def test_rust_cannot_build_after_source_fod_miss_is_not_fatal() -> None:
     """38359636482 slot 2: rust_markup5ever Cannot-build follows the tarball miss.
 

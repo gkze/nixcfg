@@ -6939,3 +6939,79 @@ def test_rust_warmup_others_substitute_other_slots_inputs_before_building(
         ((mine_low,), False),
         ((mine_high,), False),
     ]
+
+
+def test_rust_warmup_progress_survives_crane_crate_fetch_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """41207662691 slot 3: replay the stream that aborted the warm-rust slot.
+
+    A curl timeout on crane's ``cargo-src-cfg_aliases-0.2.1`` FOD must
+    reach the DNS-gated source retry, not WarmupFatalError the job.
+    A compiler mirror miss in the same stream still fails closed.
+    """
+    monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: {})
+    command = (
+        "nix build --no-link --keep-going --fallback "
+        "'/nix/store/8jhbbzy3maqb4krl555riaml1gxn84s9-"
+        "cargo-package-proc-macro-error2-2.0.1.drv^*'"
+    )
+    progress = pipeline._hosted_validation_progress("rust-warmup", keep_going=True)
+    progress(ValidationCommandStarted(command))
+    for line in (
+        "building '/nix/store/nay6ygwyf820vp9cv27987zf3x8j6j2x-"
+        "cargo-src-proc-macro-error2-2.0.1.drv'...",
+        "error: Cannot build '/nix/store/f33gdazn0wx6ly7qzs233hr96lwlhqrw-"
+        "cargo-src-cfg_aliases-0.2.1.drv'.",
+        "       Reason: builder failed with exit code 1.",
+        "       > Warning: Problem : timeout. Retrying in 4 seconds. 1 retry left.",
+        "       > error: cannot download cargo-src-cfg_aliases-0.2.1 from any mirror",
+    ):
+        progress(ValidationCommandOutput(command, line))
+    with pytest.raises(WarmupFatalError, match="cannot download from any mirror"):
+        progress(
+            ValidationCommandOutput(
+                command, "error: cannot download rustc-1.98.1.tar.gz from any mirror"
+            )
+        )
+
+
+def test_rust_warmup_others_retry_crane_crate_fetch_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """41207662691 slot 3: retry the timed-out crane FOD, then the others.
+
+    The parent ``cargo-package-*`` keep-going realize reports the
+    ``cargo-src-*`` Cannot-build. The slot must refetch that FOD after
+    the DNS gate and realize the others again, not fail the run.
+    """
+    cfg_aliases = (
+        "/nix/store/f33gdazn0wx6ly7qzs233hr96lwlhqrw-cargo-src-cfg_aliases-0.2.1.drv"
+    )
+    package = (
+        "/nix/store/8jhbbzy3maqb4krl555riaml1gxn84s9-"
+        "cargo-package-proc-macro-error2-2.0.1.drv"
+    )
+    timed_out = DerivationValidationFailure(
+        source="rust-warmup",
+        installable=f"{package}^*",
+        message=(
+            f"error: Cannot build '{cfg_aliases}'.\n"
+            "       > error: cannot download cargo-src-cfg_aliases-0.2.1 from any mirror"
+        ),
+    )
+    calls: list[tuple[str, ...]] = []
+
+    def realize(
+        paths: tuple[str, ...], **_kwargs: object
+    ) -> tuple[DerivationValidationFailure, ...]:
+        calls.append(tuple(paths))
+        return (timed_out,) if len(calls) == 1 else ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", realize)
+    monkeypatch.setattr("lib.update.ci.warmup.realize_warmup_outputs", realize)
+    monkeypatch.setattr(
+        "lib.update.ci.warmup.wait_for_source_fetch_network", lambda **_k: True
+    )
+    assert pipeline._realize_rust_warmup_others((package,), flake_root=tmp_path) == ()
+    assert calls == [(package,), (cfg_aliases,), (package,)]
