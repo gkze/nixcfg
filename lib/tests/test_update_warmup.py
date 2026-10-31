@@ -31,6 +31,7 @@ from lib.update.ci.warmup import (
     WARMUP_DRVS_ROOTS,
     WARMUP_FATAL_BUILD_LIMIT,
     WARMUP_PLAN_NAME,
+    ForeignInputGate,
     ShardLocalBuildReport,
     WarmupError,
     WarmupFatalError,
@@ -146,6 +147,7 @@ from lib.update.ci.warmup import (
     unpublished_source_fetches,
     wait_for_source_fetch_network,
     warmup_build_installable,
+    warmup_drv_owners,
     warmup_drv_root_args,
     warmup_fatal_line,
     warmup_output_drvs,
@@ -1521,6 +1523,40 @@ def test_rusty_v8_family_is_librusty_v8_and_every_dependent() -> None:
     assert is_rusty_v8_native_store_path(f"{_V8_NATIVE}.drv")
     assert not is_rusty_v8_native_store_path(_V8_TOOLCHAIN)
     assert not is_rusty_v8_native_store_path(_V8_GOOSE)
+
+
+def test_slot_warmup_paths_keeps_every_output_of_a_drv_on_one_slot() -> None:
+    """41178394324: out and -lib on two slots made two runners compile one drv."""
+    drvs = [
+        f"/nix/store/{index:032d}-rust_crate{index}-1.0.0.drv" for index in range(7)
+    ]
+    output_drvs: dict[str, str] = {}
+    layers: list[tuple[str, ...]] = []
+    for layer in ((0, 1, 2, 3), (4, 5, 6)):
+        paths: list[str] = []
+        for index in layer:
+            stem = f"/nix/store/{index:031d}o-rust_crate{index}-1.0.0"
+            for path in (stem, f"{stem}-lib"):
+                output_drvs[path] = drvs[index]
+                paths.append(path)
+        layers.append(tuple(sorted(paths)))
+    # A later layer may hold another output of an already-owned drv.
+    late = "/nix/store/" + "9" * 32 + "-rust_crate0-1.0.0-doc"
+    output_drvs[late] = drvs[0]
+    layers.append((late,))
+
+    stripes = [
+        slot_warmup_paths(layers, slot, width=3, output_drvs=output_drvs)
+        for slot in range(3)
+    ]
+
+    every = [path for stripe in stripes for path in stripe]
+    assert sorted(every) == sorted(path for layer in layers for path in layer)
+    owner = {path: slot for slot, stripe in enumerate(stripes) for path in stripe}
+    for drv in drvs:
+        assert len({owner[p] for p, d in output_drvs.items() if d == drv}) == 1
+    assert all(stripes)
+    assert owner[late] == owner[layers[0][0]]
 
 
 def test_slot_warmup_paths_pins_rusty_v8_family_to_one_slot() -> None:
@@ -3513,3 +3549,152 @@ def test_filter_cascade_realize_drvs_drops_umbrellas_over_ceiling() -> None:
     assert filter_cascade_realize_drvs((leaf, umbrella, leaf), run=run) == (leaf,)
     with pytest.raises(WarmupError, match="at least 1"):
         filter_cascade_realize_drvs((leaf,), run=run, limit=0)
+
+
+def _gate_drv(name: str) -> str:
+    digest = name.replace("_", "").ljust(32, "0")
+    return f"/nix/store/{digest}-rust_{name}-1.0.0.drv"
+
+
+class _FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+def _gate(
+    requisites: dict[str, tuple[str, ...]],
+    owners: dict[str, int],
+    present: Callable[[tuple[str, ...]], frozenset[str]],
+    clock: _FakeClock,
+    **kwargs: float,
+) -> ForeignInputGate:
+    return ForeignInputGate(
+        slot=0,
+        owners=owners,
+        drv_outputs={drv: (drv.removesuffix(".drv"),) for drv in owners},
+        drv_layers={drv: index for index, drv in enumerate(owners)},
+        present=lambda paths: present(tuple(paths)),
+        requisites=lambda drvs: tuple(
+            dep for drv in drvs for dep in (drv, *requisites.get(drv, ()))
+        ),
+        clock=clock,
+        sleep=clock.sleep,
+        poll_seconds=30.0,
+        **kwargs,
+    )
+
+
+def test_foreign_input_gate_waits_for_owner_slot_inputs_only() -> None:
+    """41178394324 slot 2 compiled rust_autocfg that slot 0 owns, then E0463'd."""
+    autocfg, serde, mine = (_gate_drv(n) for n in ("autocfg", "serde_core", "mine"))
+    settings = "/nix/store/" + "s" * 32 + "-rust_settings-0.1.0.drv"
+    unplanned = _gate_drv("unplanned")
+    parent = _gate_drv("parent")
+    owners = {autocfg: 1, serde: 2, mine: 0, settings: 3, parent: 0}
+    clock = _FakeClock()
+    polls: list[tuple[str, ...]] = []
+
+    def present(paths: tuple[str, ...]) -> frozenset[str]:
+        polls.append(paths)
+        # The owner uploads autocfg after two polls, serde_core after three.
+        landed = {autocfg: 2, serde: 3}
+        return frozenset(
+            path for path in paths if len(polls) >= landed.get(f"{path}.drv", 99)
+        )
+
+    gate = _gate(
+        {parent: (autocfg, serde, mine, settings, unplanned)}, owners, present, clock
+    )
+    assert gate.foreign_inputs((parent,)) == (autocfg, serde)
+    ready, missed = gate.wait((parent,))
+    assert ready == (autocfg, serde)
+    assert missed == ()
+    assert clock.sleeps == [30.0, 30.0]
+
+
+def test_foreign_input_gate_fails_open_and_never_rewaits() -> None:
+    late, parent, sibling = (_gate_drv(n) for n in ("late", "parent", "sibling"))
+    clock = _FakeClock()
+    gate = _gate(
+        {parent: (late,), sibling: (late,)},
+        {late: 1, parent: 0, sibling: 0},
+        lambda _paths: frozenset(),
+        clock,
+        wait_seconds=100.0,
+    )
+    assert gate.wait((parent,)) == ((), (late,))
+    assert clock.now == 100.0
+    # The missed input builds locally now; a later batch does not wait again.
+    assert gate.wait((sibling,)) == ((), ())
+    assert clock.now == 100.0
+
+
+def test_foreign_input_gate_caps_total_wait_per_slot() -> None:
+    names = ("a", "b", "c", "pa", "pb", "pc")
+    a, b, c, pa, pb, pc = (_gate_drv(n) for n in names)
+    clock = _FakeClock()
+    gate = _gate(
+        {pa: (a,), pb: (b,), pc: (c,)},
+        {a: 1, b: 2, c: 3, pa: 0, pb: 0, pc: 0},
+        lambda _paths: frozenset(),
+        clock,
+        wait_seconds=100.0,
+        budget_seconds=150.0,
+    )
+    assert gate.wait((pa,)) == ((), (a,))
+    assert gate.wait((pb,)) == ((), (b,))
+    assert clock.now == 150.0
+    assert gate.wait((pc,)) == ((), (c,))
+    assert clock.now == 150.0
+
+
+def test_foreign_input_gate_fails_open_when_requisites_fail() -> None:
+    parent = _gate_drv("parent")
+
+    def broken(_drvs: object) -> tuple[str, ...]:
+        raise WarmupError("nix-store --query failed")
+
+    clock = _FakeClock()
+    gate = _gate({}, {parent: 0}, lambda _paths: frozenset(), clock)
+    gate.requisites = broken
+    assert gate.wait((parent,)) == ((), ())
+
+
+def test_foreign_input_gate_batches_by_plan_layer() -> None:
+    low, mid, high, loose = (_gate_drv(n) for n in ("low", "mid", "high", "loose"))
+    gate = _gate({}, {low: 0, mid: 0, high: 0}, lambda _p: frozenset(), _FakeClock())
+    assert gate.layer_batches((loose, high, low, mid)) == (
+        (low,),
+        (mid,),
+        (high,),
+        (loose,),
+    )
+
+
+def test_warmup_drv_owners_matches_slot_stripes() -> None:
+    drvs = [f"/nix/store/{i:032x}-rust_c{i}-1.0.0.drv" for i in range(7)]
+    output_drvs: dict[str, str] = {}
+    layers: list[tuple[str, ...]] = []
+    for layer in ((0, 1, 2, 3), (4, 5, 6)):
+        paths: list[str] = []
+        for index in layer:
+            out = drvs[index].removesuffix(".drv")
+            for path in (out, f"{out}-lib"):
+                output_drvs[path] = drvs[index]
+                paths.append(path)
+        layers.append(tuple(paths))
+    owners = warmup_drv_owners(layers, output_drvs, width=3)
+    assert set(owners) == set(drvs)
+    for slot in range(3):
+        stripe = slot_warmup_paths(layers, slot, width=3, output_drvs=output_drvs)
+        assert {output_drvs[path] for path in stripe} == {
+            drv for drv, owner in owners.items() if owner == slot
+        }

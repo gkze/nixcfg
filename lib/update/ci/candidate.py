@@ -47,6 +47,7 @@ from lib.update.ci.warmup import (
     TREE_SITTER_MEMBER_CRATES,
     WARMUP_DRVS_NAME,
     WARMUP_PLAN_NAME,
+    ForeignInputGate,
     WarmupError,
     WarmupFatalError,
     WarmupPlan,
@@ -60,6 +61,7 @@ from lib.update.ci.warmup import (
     darwin_leaf_prebuild_installables,
     export_warmup_drvs,
     filter_cascade_realize_drvs,
+    foreign_input_gate,
     gitbutler_family_slot_from_package,
     import_warmup_drvs,
     is_compiler_must_substitute_store_path,
@@ -1248,7 +1250,12 @@ def _canary_or_slot_paths(
     """Named crates come from every rust layer; otherwise use the slot stripe."""
     if requested_crates:
         return canary_crate_warmup_paths(plan.rust_layers, requested_crates)
-    return slot_warmup_paths(plan.rust_layers, warmup_slot, pinned=plan.rusty_v8_family)
+    return slot_warmup_paths(
+        plan.rust_layers,
+        warmup_slot,
+        pinned=plan.rusty_v8_family,
+        output_drvs=plan.output_drvs,
+    )
 
 
 def _expand_svh_family_from_stripe(
@@ -1303,6 +1310,7 @@ def _realize_rust_warmup_others(
     *,
     flake_root: Path,
     chunk: int | None = None,
+    gate: ForeignInputGate | None = None,
 ) -> tuple[validation.DerivationValidationFailure, ...]:
     """Realize rust-warmup others; DNS-retry source FODs after a tainted hash.
 
@@ -1314,6 +1322,10 @@ def _realize_rust_warmup_others(
     """
     if not others:
         return ()
+    if gate is not None:
+        return _realize_rust_warmup_others_gated(
+            others, gate, flake_root=flake_root, chunk=chunk
+        )
     progress = _hosted_validation_progress("rust-warmup", keep_going=True)
     if chunk is None:
         others_failures = realize_warmup_outputs(
@@ -1346,6 +1358,45 @@ def _realize_rust_warmup_others(
         progress=progress,
         keep_going=True,
     )
+
+
+def _realize_rust_warmup_others_gated(
+    others: tuple[str, ...],
+    gate: ForeignInputGate,
+    *,
+    flake_root: Path,
+    chunk: int | None,
+) -> tuple[validation.DerivationValidationFailure, ...]:
+    """Realize *others* layer by layer, substituting other slots' inputs first.
+
+    A ``nix build`` of a missing planned input compiles a second,
+    non-reproducible rlib (nixpkgs#482646). Substitute the owner's copy
+    with ``--max-jobs 0`` instead; on a missed wait, build it locally.
+    """
+    failures: list[validation.DerivationValidationFailure] = []
+    for batch in gate.layer_batches(others):
+        started = time.monotonic()
+        ready, missed = gate.wait(batch)
+        if ready:
+            # A failed substitute leaves the input missing; the batch
+            # build below then compiles it, the same as before the gate.
+            realize_warmup_outputs(
+                ready,
+                flake_root=flake_root,
+                substitute_only=True,
+                keep_going=True,
+            )
+        if ready or missed:
+            sys.stderr.write(
+                f"rust-warmup foreign-input gate drvs={len(batch)} "
+                f"substituted={len(ready)} missed={len(missed)} "
+                f"waited={time.monotonic() - started:.0f}s\n"
+            )
+            sys.stderr.flush()
+        failures.extend(
+            _realize_rust_warmup_others(batch, flake_root=flake_root, chunk=chunk)
+        )
+    return tuple(failures)
 
 
 def _compile_drvs_after_gitbutler_probe(
@@ -1476,10 +1527,22 @@ def _realize_rust_warmup(
             msg = "agent_ui drv has no rust_language_models input"
             raise WarmupError(msg)
     family = _expand_svh_family_from_stripe(family, settings, stripe_svh, others, plan)
+    # Named-crate canaries take paths from every layer, so no slot owns them.
+    gate = (
+        None
+        if requested_crates
+        else foreign_input_gate(
+            plan.rust_layers,
+            plan.output_drvs,
+            warmup_slot,
+            pinned=plan.rusty_v8_family,
+        )
+    )
     return _realize_rust_warmup_compile(
         others,
         family,
         flake_root=flake_root,
+        gate=gate,
         agent_ui=agent_ui,
         rust_zed=rust_zed,
         zed_nightly=zed_nightly,
@@ -1496,6 +1559,7 @@ def _realize_rust_warmup_compile(
     rust_zed: tuple[str, ...],
     zed_nightly: tuple[str, ...],
     zed_slot: bool,
+    gate: ForeignInputGate | None = None,
 ) -> tuple[validation.DerivationValidationFailure, ...]:
     """Realize crane deps, SVH family, others, then compiled leaves."""
     failures: list[validation.DerivationValidationFailure] = []
@@ -1506,7 +1570,7 @@ def _realize_rust_warmup_compile(
     if crane_deps:
         failures.extend(
             _realize_rust_warmup_others(
-                crane_deps, flake_root=flake_root, chunk=CRANE_DEP_CHUNK
+                crane_deps, flake_root=flake_root, chunk=CRANE_DEP_CHUNK, gate=gate
             )
         )
     # Force-local SVH next. 38121661811 slots 1/2 built feature_flags /
@@ -1525,7 +1589,9 @@ def _realize_rust_warmup_compile(
         # deferred those leaves. crate2nix rust_* keep_going (rust_gpui
         # 415 on 39387963366 slot 0) must compile; rustc/bmake 406
         # still fail closed.
-        failures.extend(_realize_rust_warmup_others(others, flake_root=flake_root))
+        failures.extend(
+            _realize_rust_warmup_others(others, flake_root=flake_root, gate=gate)
+        )
     if compiled:
         if agent_ui and not zed_slot:
             failures.extend(_realize_logged_warmup(agent_ui, flake_root=flake_root))
