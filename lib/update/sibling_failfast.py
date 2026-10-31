@@ -17,8 +17,6 @@ A green run still builds every closure. The stop only abandons work that can
 no longer reach publish.
 """
 
-from __future__ import annotations
-
 import json
 import re
 import urllib.error
