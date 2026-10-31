@@ -198,8 +198,8 @@ _CLAUDE_BUILD_OPTIONS_TAIL_FIXTURE = b"""\
 """
 _CLAUDE_PROVIDER_FIXTURE = (
     # The constructor wires resolveBinary directly into contextUsage;
-    # it has no intervening rewindSdk assignment. Session construction
-    # forwards the resolver and buildOptions takes no arguments.
+    # it has no intervening rewindSdk assignment. Model discovery forwards
+    # the same resolver, and buildOptions takes the permission mode.
     _CLAUDE_RESOLVER_FIXTURE
     + b"""\
 
@@ -259,7 +259,9 @@ export class ClaudeAgentClient implements AgentClient {
   }
 
   async discoverModels(): Promise<void> {
-    await this.discoverModels();
+    await this.discoverModels({
+          resolveBinary: this.resolveBinary,
+    });
   }
 
   async fetchCatalog(): Promise<ProviderCatalog> {
@@ -279,7 +281,7 @@ class ClaudeAgentSession implements AgentSession {
     );
   }
 
-  private async buildOptions(): Promise<ClaudeOptions> {
+  private async buildOptions(permissionMode: PermissionMode): Promise<ClaudeOptions> {
     const claudeBinary = await this.resolveBinary();
     const base: ClaudeOptions = {
       pathToClaudeCodeExecutable: claudeBinary,
@@ -314,8 +316,10 @@ _REQUIRED_PATCH_COUNTS = {
     "packages/desktop/src/integrations/cli-install/install.ts": 1,
     "packages/desktop/src/main.ts": 1,
     "packages/server/src/server/session/daemon/daemon-self-updater.ts": 2,
-    "packages/server/src/server/session/daemon/npm-global-cli.ts": 2,
+    "packages/server/src/server/session/daemon/npm-global-cli.ts": 1,
 }
+_NPM_GLOBAL_CLI_PATH = "packages/server/src/server/session/daemon/npm-global-cli.ts"
+_NPM_INSTALL_LATEST_INVOCATION = '    return this.runCommand("npm", ["install", "-g", '
 _REQUIRED_ANCHOR_COUNTS = {
     "packages/app/src/desktop/updates/use-desktop-app-updater.ts": 2,
     "packages/desktop/src/features/auto-updater.ts": 1,
@@ -413,9 +417,10 @@ _PINNED_SOURCE_FIXTURES = {
     "packages/server/src/server/session/daemon/npm-global-cli.ts": (
         'export const PASEO_CLI_PACKAGE = "@getpaseo/cli";\n'
         "const NPM_INSTALL_TIMEOUT_MS = 300_000;\n"
-        "  installLatest(): Promise<CommandResult> {\n"
+        "  installLatest(options: NpmGlobalOptions = {}): Promise<CommandResult> {\n"
+        '    const prefixArgs = options.prefix ? ["--prefix", options.prefix] : [];\n'
         '    return this.runCommand("npm", ["install", "-g", '
-        "`${PASEO_CLI_PACKAGE}@latest`], {\n"
+        "`${PASEO_CLI_PACKAGE}@latest`, ...prefixArgs], {\n"
         "      timeout: NPM_INSTALL_TIMEOUT_MS,\n"
         "      maxBuffer: NPM_MAX_BUFFER_BYTES,\n"
         "    });\n"
@@ -455,9 +460,10 @@ _ORIGINAL_MUTATION_FRAGMENTS = {
     ),
     "packages/server/src/server/session/daemon/npm-global-cli.ts": (
         "const NPM_INSTALL_TIMEOUT_MS = 300_000;\n",
-        "  installLatest(): Promise<CommandResult> {\n"
+        "  installLatest(options: NpmGlobalOptions = {}): Promise<CommandResult> {\n"
+        '    const prefixArgs = options.prefix ? ["--prefix", options.prefix] : [];\n'
         '    return this.runCommand("npm", ["install", "-g", '
-        "`${PASEO_CLI_PACKAGE}@latest`], {\n"
+        "`${PASEO_CLI_PACKAGE}@latest`, ...prefixArgs], {\n"
         "      timeout: NPM_INSTALL_TIMEOUT_MS,\n"
         "      maxBuffer: NPM_MAX_BUFFER_BYTES,\n"
         "    });\n"
@@ -649,6 +655,47 @@ def _write_patcher_fixture(root: Path) -> None:
         path = root / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(source, encoding="utf-8")
+
+
+def _rewrite_fixture(root: Path, relative_path: str, old: str, new: str) -> None:
+    path = root / relative_path
+    source = path.read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    path.write_text(source.replace(old, new), encoding="utf-8")
+
+
+def _rewrite_v091_claude_provider(root: Path) -> None:
+    _rewrite_fixture(
+        root,
+        _CLAUDE_PROVIDER_PATH,
+        "  private async buildOptions(permissionMode: PermissionMode): "
+        "Promise<ClaudeOptions> {\n",
+        "  private async buildOptions(): Promise<ClaudeOptions> {\n",
+    )
+    _rewrite_fixture(
+        root,
+        _CLAUDE_PROVIDER_PATH,
+        "    await this.discoverModels({\n"
+        "          resolveBinary: this.resolveBinary,\n"
+        "    });\n",
+        "    await this.discoverModels();\n",
+    )
+
+
+def _rewrite_v091_npm_global_cli(root: Path) -> None:
+    _rewrite_fixture(
+        root,
+        _NPM_GLOBAL_CLI_PATH,
+        "  installLatest(options: NpmGlobalOptions = {}): Promise<CommandResult> {\n"
+        '    const prefixArgs = options.prefix ? ["--prefix", options.prefix] : [];\n',
+        "  installLatest(): Promise<CommandResult> {\n",
+    )
+    _rewrite_fixture(
+        root,
+        _NPM_GLOBAL_CLI_PATH,
+        "`${PASEO_CLI_PACKAGE}@latest`, ...prefixArgs], {\n",
+        "`${PASEO_CLI_PACKAGE}@latest`], {\n",
+    )
 
 
 def _validate_manifests(
@@ -2158,6 +2205,144 @@ def test_paseo_patcher_rejects_ambiguous_claude_build_options_tail(
         )
 
     assert {path: path.read_bytes() for path in before} == before
+
+
+@pytest.mark.parametrize("layout", ["0.14.0", "0.9.1"])
+def test_paseo_patcher_supports_the_pinned_and_candidate_release_layouts(
+    tmp_path: Path,
+    layout: str,
+) -> None:
+    """The build patches the pinned layout while Update validates the newer one."""
+    module = _load_patcher_module()
+    root = tmp_path / "source"
+    _write_patcher_fixture(root)
+    if layout == "0.9.1":
+        _rewrite_v091_claude_provider(root)
+        _rewrite_v091_npm_global_cli(root)
+
+    provider = (root / _CLAUDE_PROVIDER_PATH).read_text(encoding="utf-8")
+    assert module.validate_claude_provider_source(provider) == layout
+    module.patch_tree(
+        root,
+        claude_code_executable=_TEST_CLAUDE_CODE_EXECUTABLE,
+    )
+
+    npm_global_cli = (root / _NPM_GLOBAL_CLI_PATH).read_text(encoding="utf-8")
+    assert _NPM_INSTALL_LATEST_INVOCATION not in npm_global_cli
+    assert all(
+        fragment in npm_global_cli
+        for fragment in _PINNED_REPLACEMENT_FRAGMENTS[_NPM_GLOBAL_CLI_PATH]
+    )
+    patched_provider = (root / _CLAUDE_PROVIDER_PATH).read_text(encoding="utf-8")
+    assert all(
+        fragment in patched_provider
+        for fragment in _PINNED_REPLACEMENT_FRAGMENTS[_CLAUDE_PROVIDER_PATH]
+    )
+
+
+def test_paseo_pinned_release_has_a_reviewed_layout() -> None:
+    """The build patches the pinned source, so its release needs a layout."""
+    module = _load_patcher_module()
+    pinned = json.loads(
+        Path(__file__).with_name("sources.json").read_text(encoding="utf-8")
+    )
+
+    assert pinned["version"] in module._RELEASE_LAYOUTS
+
+
+@pytest.mark.parametrize(
+    ("v091_surface", "expected_layout"),
+    [("provider", "0.9.1"), ("cli", "0.14.0")],
+    ids=("v091-provider-v0140-cli", "v0140-provider-v091-cli"),
+)
+def test_paseo_patcher_rejects_a_tree_mixing_release_layouts(
+    tmp_path: Path,
+    v091_surface: str,
+    expected_layout: str,
+) -> None:
+    """One release's seams are coupled; a mixed tree is unreviewed drift."""
+    module = _load_patcher_module()
+    root = tmp_path / "source"
+    _write_patcher_fixture(root)
+    if v091_surface == "provider":
+        _rewrite_v091_claude_provider(root)
+    else:
+        _rewrite_v091_npm_global_cli(root)
+    provider = (root / _CLAUDE_PROVIDER_PATH).read_text(encoding="utf-8")
+    assert module.validate_claude_provider_source(provider) == expected_layout
+    before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+
+    with pytest.raises(
+        CodemodError,
+        match=rf"^expected 1 match for .*{re.escape(_NPM_GLOBAL_CLI_PATH)}, found 0$",
+    ):
+        module.patch_tree(
+            root,
+            claude_code_executable=_TEST_CLAUDE_CODE_EXECUTABLE,
+        )
+
+    assert {path: path.read_bytes() for path in before} == before
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        (
+            "  private async buildOptions(permissionMode: PermissionMode): "
+            "Promise<ClaudeOptions> {\n",
+            "  private async buildOptions(): Promise<ClaudeOptions> {\n",
+        ),
+        (
+            "    await this.discoverModels({\n"
+            "          resolveBinary: this.resolveBinary,\n"
+            "    });\n",
+            "    await this.discoverModels();\n",
+        ),
+    ],
+    ids=("v091-signature-three-forwardings", "v0140-signature-two-forwardings"),
+)
+def test_paseo_rejects_a_claude_layout_with_unpaired_resolver_forwarding(
+    old: str,
+    new: str,
+) -> None:
+    """Each buildOptions layout requires its own reviewed resolver forwarding."""
+    module = _load_patcher_module()
+    source = _CLAUDE_PROVIDER_FIXTURE.decode()
+    assert source.count(old) == 1
+
+    with pytest.raises(RuntimeError, match="reviewed Claude executable wiring"):
+        module.validate_claude_provider_source(source.replace(old, new))
+
+
+@pytest.mark.parametrize(
+    ("ambiguous", "found"),
+    [(False, "none"), (True, "0.14.0, 0.9.1")],
+    ids=("unreviewed-signature", "ambiguous-signatures"),
+)
+def test_paseo_rejects_an_unreviewed_or_ambiguous_claude_layout(
+    *,
+    ambiguous: bool,
+    found: str,
+) -> None:
+    """The provider must match exactly one reviewed buildOptions layout."""
+    module = _load_patcher_module()
+    source = _CLAUDE_PROVIDER_FIXTURE.decode()
+    signature = "buildOptions(permissionMode: PermissionMode)"
+    assert source.count(signature) == 1
+    if ambiguous:
+        source = "\n\n  private async buildOptions(): Promise<ClaudeOptions> {" + source
+    else:
+        source = source.replace(
+            signature,
+            "buildOptions(permissionMode: PermissionMode, effort: Effort)",
+        )
+
+    with pytest.raises(
+        RuntimeError,
+        match=rf"reviewed Claude buildOptions layout \(0\.14\.0, 0\.9\.1\), "
+        rf"found {re.escape(found)}$",
+    ):
+        module.validate_claude_provider_source(source)
 
 
 def test_paseo_patcher_makes_the_claude_executable_the_final_base_mutation(
