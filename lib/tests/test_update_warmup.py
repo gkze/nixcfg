@@ -2,6 +2,8 @@
 
 import json
 import subprocess
+import threading
+import time
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
@@ -989,6 +991,41 @@ def test_plan_defaults_to_subprocess_and_cache_helpers(
     assert empty.warmup_outputs == ()
     assert empty.rust_layers == ()
     assert empty.per_root == {}
+
+
+def test_substitute_only_realize_runs_drvs_concurrently(tmp_path: Path) -> None:
+    """41178394324: 658 serial --max-jobs 0 realizes cost the canary 10.7m."""
+    drvs = tuple(f"/nix/store/{index:032d}-dep-{index}.drv" for index in range(24))
+    lock = threading.Lock()
+    active = 0
+    peak = 0
+    calls: list[list[str]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal active, peak
+        with lock:
+            calls.append(args)
+            active += 1
+            peak = max(peak, active)
+        time.sleep(0.02)
+        with lock:
+            active -= 1
+        failed = any(arg.startswith(drvs[5]) for arg in args)
+        return subprocess.CompletedProcess(args, int(failed), "", "boom" * failed)
+
+    failures = realize_warmup_outputs(
+        drvs, flake_root=tmp_path, run=run, substitute_only=True
+    )
+    builds = [call for call in calls if call[:2] == ["nix", "build"]]
+    assert len(builds) >= len(drvs)
+    assert all("--max-jobs" in call for call in builds)
+    assert 1 < peak <= 8
+    assert [failure.installable for failure in failures] == [f"{drvs[5]}^*"]
+    peak = 0
+    realize_warmup_outputs(drvs[:4], flake_root=tmp_path, run=run, keep_going=True)
+    assert peak == 1
+    with pytest.raises(WarmupError, match="workers"):
+        realize_warmup_outputs(drvs, flake_root=tmp_path, run=run, workers=0)
 
 
 def test_realize_warmup_outputs_batches_store_paths(
