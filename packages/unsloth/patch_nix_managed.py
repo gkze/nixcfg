@@ -817,6 +817,21 @@ OXC_VALIDATOR_PATCH_REPLACEMENT = """    const oxlintBin = process.execPath;
     const oxlintArgs = [
       join(TOOL_DIR, "node_modules", "oxlint", "bin", "oxlint"),
 """
+# 0.1.913-beta already runs oxlint's bin entry through Node, but only on Windows.
+OXC_VALIDATOR_WINDOWS_ENTRY_SEAM = """    const oxlintBin = IS_WINDOWS
+      ? process.execPath
+      : join(TOOL_DIR, "node_modules", ".bin", "oxlint");
+    const oxlintBaseArgs = [
+      ...(IS_WINDOWS ? [OXLINT_ENTRY] : []),
+"""
+OXC_VALIDATOR_WINDOWS_ENTRY_REPLACEMENT = """    const oxlintBin = process.execPath;
+    const oxlintBaseArgs = [
+      join(TOOL_DIR, "node_modules", "oxlint", "bin", "oxlint"),
+"""
+OXC_VALIDATOR_PATCH_VARIANTS = (
+    (OXC_VALIDATOR_PATCH_SEAM, OXC_VALIDATOR_PATCH_REPLACEMENT),
+    (OXC_VALIDATOR_WINDOWS_ENTRY_SEAM, OXC_VALIDATOR_WINDOWS_ENTRY_REPLACEMENT),
+)
 
 _BACKEND_PATCHES = (
     _SourcePatch(
@@ -833,6 +848,7 @@ _BACKEND_PATCHES = (
         OXC_VALIDATOR_PATH,
         OXC_VALIDATOR_PATCH_SEAM,
         OXC_VALIDATOR_PATCH_REPLACEMENT,
+        alternatives=OXC_VALIDATOR_PATCH_VARIANTS[1:],
     ),
     _SourcePatch(
         Path("unsloth/chat_templates.py"),

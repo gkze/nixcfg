@@ -1535,7 +1535,7 @@ def test_unsloth_rejects_backend_sdist_oxc_patch_seam_drift(
     github_payloads = _oxc_source_payloads()
     sdist_payloads = dict(github_payloads)
     sdist_payloads[_OXC_VALIDATE_PATH] = sdist_payloads[_OXC_VALIDATE_PATH].replace(
-        module.OXC_VALIDATOR_PATCH_SEAM.encode(),
+        module.OXC_VALIDATOR_PATCH_VARIANTS[0][0].encode(),
         b"",
     )
     _install_oxc_discovery_fakes(
@@ -1810,7 +1810,7 @@ def _add_lock_package(
 
 def _ambiguous_validator_seam(copies: int) -> _PayloadMutation:
     def mutate(payloads: dict[str, bytes]) -> None:
-        seam = _load_updater_module().OXC_VALIDATOR_PATCH_SEAM.encode()
+        seam = _load_updater_module().OXC_VALIDATOR_PATCH_VARIANTS[0][0].encode()
         _replace(_OXC_VALIDATE_PATH, seam, seam * copies)(payloads)
 
     return mutate
@@ -2215,6 +2215,169 @@ def test_unsloth_audits_function_scoped_oxc_setup(unreviewed_install: bool) -> N
     )
     with context:
         _load_updater_module()._audit_oxc_runtime_sources(payloads)
+
+
+_OXC_0_1_913_FIXTURES = {
+    _SETUP_SH_PATH: "oxc-0.1.913-beta-setup.sh.txt",
+    _SETUP_PS1_PATH: "oxc-0.1.913-beta-setup.ps1.txt",
+    _OXC_VALIDATE_PATH: "oxc-0.1.913-beta-validate.mjs.txt",
+    _OXC_CALLER_PATH: "oxc-0.1.913-beta-local_callable_validators.py.txt",
+}
+
+
+def _stamped_oxc_source_payloads() -> dict[str, bytes]:
+    """Use OXC sources from upstream commit fe982adaf29a5260d45bfff2ef1ff7323c2e77d6."""
+    payloads = _oxc_source_payloads()
+    for path, name in _OXC_0_1_913_FIXTURES.items():
+        payloads[path] = (_PACKAGE_DIR / "tests/fixtures" / name).read_bytes()
+    return payloads
+
+
+def test_unsloth_accepts_install_stamped_persistent_oxc_sources() -> None:
+    """0.1.913-beta skips the reviewed npm ci on a stamp match and serves batches."""
+    _load_updater_module()._audit_oxc_sources(_stamped_oxc_source_payloads())
+
+
+_STAMPED_VALIDATOR_TIMEOUT_MARKERS = (
+    b"budgetMs - OXLINT_BUDGET_MARGIN_MS - (performance.now() - startedAtMs)",
+    b"runLintBatch(entries, oxlintBudgetMs, startedAtMs)",
+    b"runLintBatch(lintTargets, oxlintBudgetMs, startedAtMs)",
+    b"runValidation({ codes, lang, mode, codeShape, oxlintBudgetMs, startedAtMs })",
+    b"process.stdout.write(validatePayload(payload, 0));",
+    b"const startedAtMs = servedRequests++ === 0 ? 0 : performance.now();",
+    b"timeout: timeoutMs,",
+)
+_PERSISTENT_CALLER_TIMEOUT_MARKERS = (
+    b"deadline = time.monotonic() + _OXC_TIMEOUT_S",
+    b"writer.join(_OXC_TIMEOUT_S)",
+    b"if result is _WORKER_TIMED_OUT:\n                self._drop_worker(kill = True)",
+    (
+        b"raise subprocess.TimeoutExpired(cmd = node_executable, "
+        b"timeout = _OXC_TIMEOUT_S)"
+    ),
+    b"except subprocess.TimeoutExpired:",
+    b"timeout = _OXC_TIMEOUT_S,",
+)
+
+
+def _with_payload_from(source: dict[str, bytes], path: str) -> _PayloadMutation:
+    return lambda payloads: payloads.__setitem__(path, source[path])
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        pytest.param(
+            _replace(
+                _SETUP_SH_PATH,
+                b'    verbose_substep "oxc validator runtime up to date"',
+                b"    npm install unreviewed\n"
+                b'    verbose_substep "oxc validator runtime up to date"',
+            ),
+            "OXC setup.sh npm install",
+            id="sh-install-on-stamp-match",
+        ),
+        pytest.param(
+            _replace(
+                _SETUP_SH_PATH,
+                b'[ "$_NPM_INSTALL" != ci ] ||',
+                b'[ "$_NPM_INSTALL" != install ] ||',
+            ),
+            "OXC setup.sh npm install",
+            id="sh-stamp-after-unlocked-install",
+        ),
+        pytest.param(
+            _replace(
+                _SETUP_PS1_PATH,
+                b'        step "oxc runtime" "up to date"',
+                b'        npm install unreviewed\n        step "oxc runtime" "up to date"',
+            ),
+            "OXC setup.ps1 npm install",
+            id="ps1-install-on-stamp-match",
+        ),
+        pytest.param(
+            _replace(
+                _SETUP_PS1_PATH,
+                b'if ($NpmInstallVerb -eq "ci") { $null =',
+                b'if ($NpmInstallVerb -eq "install") { $null =',
+            ),
+            "OXC setup.ps1 npm install",
+            id="ps1-stamp-after-unlocked-install",
+        ),
+        pytest.param(
+            _with_payload_from(_oxc_source_payloads(), _OXC_CALLER_PATH),
+            "OXC caller timeout",
+            id="persistent-validator-one-shot-caller",
+        ),
+        pytest.param(
+            _append(
+                _OXC_VALIDATE_PATH,
+                _load_patch_module().OXC_VALIDATOR_PATCH_VARIANTS[0][0].encode(),
+            ),
+            "OXC validator patch seam",
+            id="both-validator-seams",
+        ),
+        *(
+            pytest.param(
+                _replace(_OXC_VALIDATE_PATH, marker, b"", 1),
+                "OXC validator timeout",
+                id=f"validator-timeout-{index}",
+            )
+            for index, marker in enumerate(_STAMPED_VALIDATOR_TIMEOUT_MARKERS)
+        ),
+        *(
+            pytest.param(
+                _replace(_OXC_CALLER_PATH, marker, b"", 1),
+                "OXC caller timeout",
+                id=f"caller-timeout-{index}",
+            )
+            for index, marker in enumerate(_PERSISTENT_CALLER_TIMEOUT_MARKERS)
+        ),
+    ],
+)
+def test_unsloth_rejects_install_stamped_persistent_oxc_drift(
+    mutate: _PayloadMutation, message: str
+) -> None:
+    """The stamp, verb, seam, and per-request worker deadline stay reviewed."""
+    payloads = _stamped_oxc_source_payloads()
+    mutate(payloads)
+    with pytest.raises(RuntimeError, match=message):
+        _load_updater_module()._audit_oxc_sources(payloads)
+
+
+def test_unsloth_rejects_persistent_caller_with_one_shot_validator() -> None:
+    """A serving caller needs a validator that answers ``--serve`` requests."""
+    payloads = _oxc_source_payloads()
+    payloads[_OXC_CALLER_PATH] = _stamped_oxc_source_payloads()[_OXC_CALLER_PATH]
+    with pytest.raises(RuntimeError, match="OXC caller timeout"):
+        _load_updater_module()._audit_oxc_sources(payloads)
+
+
+def test_unsloth_oxc_patch_runs_oxlint_through_node_on_0_1_913(
+    tmp_path: Path,
+) -> None:
+    """The Windows-only Node launch becomes unconditional, with no .bin shim."""
+    module = _load_patch_module()
+    validator = tmp_path / module.OXC_VALIDATOR_PATH
+    validator.parent.mkdir(parents=True)
+    validator.write_bytes(_stamped_oxc_source_payloads()[_OXC_VALIDATE_PATH])
+    patch = next(
+        patch
+        for patch in module._BACKEND_PATCHES
+        if patch.path == module.OXC_VALIDATOR_PATH
+    )
+
+    patched = module._validated_replacements(tmp_path, (patch,))[
+        module.OXC_VALIDATOR_PATH
+    ]
+
+    assert patched.count("const oxlintBin = process.execPath;") == 1
+    assert "IS_WINDOWS ? [OXLINT_ENTRY]" not in patched
+    assert 'node_modules", ".bin", "oxlint"' not in patched
+    assert (
+        "    const oxlintBaseArgs = [\n"
+        '      join(TOOL_DIR, "node_modules", "oxlint", "bin", "oxlint"),\n'
+    ) in patched
 
 
 @pytest.mark.parametrize(
@@ -4577,9 +4740,13 @@ def test_unsloth_nix_policy_packages_and_invokes_the_owned_oxc_runtime() -> None
     )
 
     assert "oxc-validator/node_modules/**/*" in pyproject_patch.new
-    assert "const oxlintBin = process.execPath;" in validator_patch.new
-    assert '"node_modules", "oxlint", "bin", "oxlint"' in validator_patch.new
-    assert 'node_modules", ".bin", "oxlint"' not in validator_patch.new
+    for _, replacement in (
+        (validator_patch.old, validator_patch.new),
+        *validator_patch.alternatives,
+    ):
+        assert "const oxlintBin = process.execPath;" in replacement
+        assert '"node_modules", "oxlint", "bin", "oxlint"' in replacement
+        assert 'node_modules", ".bin", "oxlint"' not in replacement
 
 
 def test_unsloth_combined_policy_patch_validates_both_trees_before_writing(
