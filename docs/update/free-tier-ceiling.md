@@ -156,17 +156,21 @@ macOS runners were idle for that whole job. Measured Darwin prepare was
 prepare was the long pole (including 40577174548 at about 56m after a
 short Linux prepare).
 
-The five `prepare-darwin-N` jobs hash disjoint slices of that same plan.
-Each keeps the requested target set. `prepare-darwin-merge` is a short
-ubuntu git/json fold: it checks the coverage sidecars and does not hash
-again. Linux prepare still hashes every target and still runs beside the
-shards.
+The five `prepare-darwin-N` jobs hash disjoint prerequisite components of
+that same plan. Each keeps the requested target set. Companion parents and
+aggregate members stay on one runner, so `electron-runtimes` is hashed with
+`goose-desktop` and `goose-cli` instead of against the baseline parent.
+`prepare-darwin-merge` is a short ubuntu git/json fold: it checks the
+coverage sidecars, rejects a prerequisite edge that crosses shards, and
+does not hash again. Linux prepare still hashes every target and still
+runs beside the shards.
 
-If the hash work splits evenly, a 50–95m Darwin prepare becomes about
-**10–19m** of shard wall, which is about **40–76m** off the critical path
-before the ubuntu fold. The 39m green run would fall by about **31m** on
-the same even split. A target that dominates the shard, and the repeated
-plan resolution on every runner, both shrink the saving. The fold itself
+If independent hash work splits evenly, a 50–95m Darwin prepare becomes
+about **10–19m** of shard wall, which is about **40–76m** off the critical
+path before the ubuntu fold. The 39m green run would fall by about **31m**
+on that same even split. That figure is an upper bound: the
+`electron-runtimes` cluster cannot be split, a target that dominates its
+shard is a floor, and every runner still resolves the plan. The fold itself
 is a few minutes, not another hash.
 
 **Unmeasured** until five Update runs after this change. Paid

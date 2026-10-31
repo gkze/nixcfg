@@ -75,12 +75,16 @@ Three stages own the work: preparation, validation, and certification.
 keeps the existing hashes. A version bump without its hashes is not a legal
 persist. Darwin hashing then runs as five `prepare-darwin-0` … `prepare-darwin-4`
 jobs on the public `macos-15` pool. Each job keeps the same requested target
-set as the pin and hashes only `index % 5` of the deterministic plan order.
-`prepare-darwin-merge` on `ubuntu-24.04` accepts those artifacts only when the
-coverage sidecars are exactly that partition, so every plan name is hashed
-once. It publishes one `prepare-aarch64-darwin` candidate. `prepare-arm` and
-`prepare-x86` still hash every target from the pin, in parallel with the
-Darwin shards. `prepare-merge` folds that Darwin candidate with the two Linux
+set as the pin and hashes one slice of prerequisite components. A companion
+parent and an aggregate member stay with their consumer, transitively, so
+the consumer is hashed against the updated parent. Independent components
+are packed largest-first, and names inside a shard stay in plan order.
+`prepare-darwin-merge` on `ubuntu-24.04` accepts those artifacts only when
+the coverage sidecars are that assignment and no prerequisite edge crosses
+shards, so every plan name is hashed once against the same inputs as an
+unsharded run. It publishes one `prepare-aarch64-darwin` candidate.
+`prepare-arm` and `prepare-x86` still hash every target from the pin, in
+parallel with the Darwin shards. `prepare-merge` folds that Darwin candidate with the two Linux
 candidates. Each native job keeps the release metadata that `prepare-pins`
 selected.
 

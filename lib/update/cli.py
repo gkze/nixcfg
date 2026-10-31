@@ -743,6 +743,9 @@ def _restrict_plan_to_prepare_shard(
         tuple(plan.order),
         shard=cast("int", preparation.prepare_shard),
         count=cast("int", preparation.prepare_shard_count),
+        prerequisites=update_planner.prepare_plan_prerequisites(
+            plan.order, _get_updaters()
+        ),
     )
     preparation.prepare_plan = tuple(plan.order)
     preparation.prepare_hashed = hashed

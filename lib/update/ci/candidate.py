@@ -117,9 +117,11 @@ from lib.update.io import atomic_write_text
 from lib.update.nix import get_current_nix_platform
 from lib.update.paths import get_repo_root
 from lib.update.persistence import IsolatedUpdateWorkspace, planned_update_paths
+from lib.update.planner import prepare_plan_prerequisites
 from lib.update.prepare_shard import (
     PrepareShardCoverage,
     coverage_from_json,
+    parse_prepare_coverage,
     require_exact_prepare_coverage,
 )
 from lib.update.repair import check_applied_repair, propose_repair
@@ -791,6 +793,19 @@ def _union_resolutions(
     return merged
 
 
+def _prepare_coverage_edges(plan: tuple[str, ...]) -> dict[str, tuple[str, ...]]:
+    """Return the prerequisite edges the fold must keep inside one shard."""
+    return prepare_plan_prerequisites(plan, ensure_updaters_loaded())
+
+
+def _load_prepare_coverage(text: str) -> PrepareShardCoverage:
+    """Check a sidecar against the component assignment of its own plan."""
+    return coverage_from_json(
+        text,
+        prerequisites=_prepare_coverage_edges(parse_prepare_coverage(text).plan),
+    )
+
+
 def merge_same_platform_partials(
     candidates: tuple[Candidate, ...],
     coverages: tuple[PrepareShardCoverage, ...],
@@ -808,7 +823,10 @@ def merge_same_platform_partials(
         msg = "Each prepare shard needs its coverage sidecar"
         raise ValueError(msg)
     _require_same_platform_partials(candidates)
-    require_exact_prepare_coverage(coverages)
+    require_exact_prepare_coverage(
+        coverages,
+        prerequisites=_prepare_coverage_edges(coverages[0].plan),
+    )
     paired = sorted(
         zip(coverages, candidates, strict=True),
         key=lambda item: item[0].shard,
@@ -860,7 +878,7 @@ def load_prepare_shard_dir(
             raise ValueError(msg)
         loaded.append((
             Candidate.model_validate_json(candidate_path.read_bytes()),
-            coverage_from_json(coverage_path.read_text(encoding="utf-8")),
+            _load_prepare_coverage(coverage_path.read_text(encoding="utf-8")),
         ))
     if not loaded:
         msg = "Prepare shard directory has no candidates"
