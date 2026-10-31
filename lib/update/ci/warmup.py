@@ -196,6 +196,11 @@ _WARMUP_REALIZE_CHUNK = 128
 # macos-15 is 7 GiB; 128-wide rustc would OOM a cold stripe.
 CRANE_DEP_CHUNK = 8
 _STORE_COPY_CHUNK = 128
+# ``--max-jobs 0`` realizes only substitute, so they are network-bound and
+# never compile. Update run 41178394324's canary-warm-rust ran 658 of them
+# one at a time (10.7 of its 61.8 step minutes) because each ``.drv^*`` node
+# is its own validation group.
+_SUBSTITUTE_ONLY_WORKERS = 8
 _SUBSTITUTER_WORKERS = 16
 _NIXOS_CACHE = "https://cache.nixos.org"
 _GKZE_CACHE = "https://gkze.cachix.org"
@@ -2200,18 +2205,31 @@ def extension_host_family_warmup_outputs(
     return _warmup_outputs_matching(layers, is_extension_host_family_store_path)
 
 
+# Parents per ``nix-store --query`` process: about 40 KiB of argv, far below
+# macOS and Linux ARG_MAX.
+_DRV_GRAPH_QUERY_BATCH = 512
+
+
 def _query_drv_graph(
     parent_drvs: Sequence[str],
     operation: Literal["references", "requisites"],
     *,
     run: _StoreRun | None = None,
 ) -> tuple[str, ...]:
-    """Return ``.drv`` ``--references`` or ``--requisites`` of *parent_drvs*."""
+    """Return ``.drv`` ``--references`` or ``--requisites`` of *parent_drvs*.
+
+    ``nix-store --query`` prints the union for many paths, so parents go
+    _DRV_GRAPH_QUERY_BATCH per process. Update run 41178394324 spent 14.3
+    of plan-darwin-closures' 50 minutes running one ``--requisites`` process
+    per rust warmup ``.drv``, each walking a mostly shared closure.
+    """
     runner = subprocess.run if run is None else run
     found: dict[str, None] = {}
-    for drv in dict.fromkeys(parent_drvs):
+    parents = tuple(dict.fromkeys(parent_drvs))
+    for start in range(0, len(parents), _DRV_GRAPH_QUERY_BATCH):
+        batch = parents[start : start + _DRV_GRAPH_QUERY_BATCH]
         result = runner(
-            ["nix-store", "--query", f"--{operation}", drv],
+            ["nix-store", "--query", f"--{operation}", *batch],
             check=False,
             capture_output=True,
             text=True,
@@ -2220,7 +2238,8 @@ def _query_drv_graph(
             detail = _store_command_detail(
                 result, fallback=f"nix-store --query --{operation} failed"
             )
-            msg = f"failed to query rust crate inputs of {drv}: {detail}"
+            subject = batch[0] if len(batch) == 1 else f"{batch[0]} (+{len(batch) - 1})"
+            msg = f"failed to query rust crate inputs of {subject}: {detail}"
             raise WarmupError(msg)
         stdout = result.stdout
         text = stdout.decode() if isinstance(stdout, bytes) else stdout
@@ -3094,6 +3113,7 @@ def realize_warmup_outputs(
     substitute_only: bool = False,
     keep_going: bool = False,
     chunk: int = _WARMUP_REALIZE_CHUNK,
+    workers: int | None = None,
 ) -> tuple[DerivationValidationFailure, ...]:
     """Build the warmup outputs so Cachix's post-build-hook pushes each path.
 
@@ -3103,12 +3123,21 @@ def realize_warmup_outputs(
     rebuilt 406 bootstrap drvs after a partial ``--fallback``.
     Cascade warmup uses ``chunk=1`` so each shared non-rust path is one
     drv (38130420607 / #1268: umbrella goose-cli was 1759 will-be-built).
+    *workers* bounds how many single-drv realizes run at once. It defaults
+    to ``_SUBSTITUTE_ONLY_WORKERS`` for ``substitute_only`` and to one
+    otherwise, so a call that can compile keeps its sequential, memory-safe
+    order. Failures are still recorded per drv.
     """
     if force_local and substitute_only:
         msg = "realize_warmup_outputs cannot be force_local and substitute_only"
         raise WarmupError(msg)
     if chunk < 1:
         msg = "realize_warmup_outputs chunk must be at least 1"
+        raise WarmupError(msg)
+    if workers is None:
+        workers = _SUBSTITUTE_ONLY_WORKERS if substitute_only else 1
+    if workers < 1:
+        msg = "realize_warmup_outputs workers must be at least 1"
         raise WarmupError(msg)
     failures: list[DerivationValidationFailure] = []
     ordered = tuple(dict.fromkeys(paths))
@@ -3132,6 +3161,7 @@ def realize_warmup_outputs(
             progress=progress,
             timeout=timeout,
             print_build_logs=print_build_logs,
+            max_build_workers=workers,
         )
         failures.extend(window_failures)
         _remember_realized_warmup_outputs(window, window_failures, run=run)

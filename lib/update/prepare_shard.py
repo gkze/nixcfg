@@ -3,8 +3,8 @@
 Each shard keeps the requested target set. Connected components of the
 prerequisite graph stay on one runner: a companion parent or aggregate
 member is hashed before its consumer, against the updated input. Independent
-components are packed largest-first. Names inside a shard stay in plan
-order. The same-platform merge accepts the shards only when those slices
+components are packed heaviest-first by measured source cost. Names inside a
+shard stay in plan order. The same-platform merge accepts the shards only when those slices
 are that assignment and no prerequisite edge crosses shards.
 """
 
@@ -18,6 +18,44 @@ from typing import cast
 DARWIN_PREPARE_SHARD_COUNT = 5
 _COVERAGE_KEYS = frozenset({"plan", "hashed", "shard", "count"})
 
+# Source-phase minutes for each slow updater on a hosted macos-15 runner,
+# rounded, from each source's start to its result in Update run 41178394324.
+# A name not listed costs one, about what a quick updater takes. Packing by
+# name count put the 17-name electron-runtimes component together with the
+# other slow updaters on shard 0 (221 summed minutes against 7-37 on the
+# other shards), and each runner works on only eight sources at a time.
+# The prepare shards and the merge both get their slices from this one
+# table, so a stale entry changes how the work is balanced but can never
+# leave a name unhashed.
+_PREPARE_SOURCE_COST: Mapping[str, int] = {
+    "openchamber": 36,
+    "paseo": 19,
+    "bb": 16,
+    "gooeypi": 14,
+    "mux": 14,
+    "reflect-open": 14,
+    "executor": 13,
+    "github-desktop": 13,
+    "goose-cli": 13,
+    "opencode": 13,
+    "emdash": 11,
+    "codex": 9,
+    "opencode-desktop": 9,
+    "gitbutler": 8,
+    "goose-desktop": 8,
+    "zed-editor-nightly": 8,
+    "t3code-desktop": 7,
+    "t3code-workspace": 7,
+    "zeron": 6,
+    "buzz": 5,
+    "neutils": 5,
+    "sentry-cli": 5,
+    "t3code": 5,
+    "unsloth": 4,
+    "writer-computer": 4,
+    "tsgolint": 3,
+}
+
 
 def partition_prepare_targets(
     names: tuple[str, ...] | list[str],
@@ -30,9 +68,11 @@ def partition_prepare_targets(
 
     Edges are undirected for membership and directed when the fold checks
     that a consumer and its prerequisite share a runner. Components are
-    assigned largest first. Equal sizes break ties by the component's
-    earliest name. Equal shard loads break ties by the lower shard index.
-    The returned names stay in plan order.
+    assigned heaviest first, where a component's weight is the summed
+    ``_PREPARE_SOURCE_COST`` of its names. Equal weights break ties by size,
+    then by the component's earliest name. Each component goes to the shard
+    with the lowest summed weight, and equal loads break ties by the lower
+    shard index. The returned names stay in plan order.
     """
     _require_shard_slot(shard, count)
     plan = tuple(names)
@@ -52,15 +92,27 @@ def _assign_prepare_components(
     prerequisites: Mapping[str, Sequence[str]],
     count: int,
 ) -> dict[str, int]:
-    """Pack each prerequisite component onto one shard."""
+    """Pack each prerequisite component onto the lightest shard."""
     loads = [0] * count
     assigned: dict[str, int] = {}
-    for component in _prerequisite_components(plan, prerequisites):
+    weighted = sorted(
+        (
+            (_component_cost(component), component)
+            for component in _prerequisite_components(plan, prerequisites)
+        ),
+        key=lambda item: (-item[0], -len(item[1]), min(item[1])),
+    )
+    for cost, component in weighted:
         chosen = min(range(count), key=lambda index: (loads[index], index))
-        loads[chosen] += len(component)
+        loads[chosen] += cost
         for name in component:
             assigned[name] = chosen
     return assigned
+
+
+def _component_cost(component: tuple[str, ...]) -> int:
+    """Return the summed source cost; an unlisted name costs one."""
+    return sum(_PREPARE_SOURCE_COST.get(name, 1) for name in component)
 
 
 def _prerequisite_components(
