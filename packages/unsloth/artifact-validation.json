@@ -10,9 +10,9 @@
     "no-updater-or-runtime-installer-endpoints"
   ],
   "runtimeEvidence": {
-    "appCandidate": "/nix/store/5cn15wfzsgfb3fp1invfa7pinpkx3jpk-unsloth-desktop-0.1.909-beta",
-    "backendExecutable": "/nix/store/ikww3z4g3v7dcm5gqfxj11asfs83ghhg-unsloth-backend-2026.10.7/bin/unsloth",
-    "backendRuntimeEntrypoint": "/nix/store/jkwqw5m35877wn9sr4h06k2pg07qmwlj-unsloth-2026.10.7-venv/bin/unsloth",
+    "appCandidate": "/nix/store/drgrmjq7b6rlrhba3ydbga5qw4k7rf2c-unsloth-desktop-0.1.913-beta",
+    "backendExecutable": "/nix/store/34jsxpknjqz447vbcjp5zpyhyg50khg1-unsloth-backend-2026.10.11/bin/unsloth",
+    "backendRuntimeEntrypoint": "/nix/store/lc8r9z3rsj32kgcwj9aclrdsc13qswvv-unsloth-2026.10.11-venv/bin/unsloth",
     "health": {
       "service": "Unsloth UI Backend",
       "status": "healthy"
@@ -26,5 +26,5 @@
   },
   "runtimeEvidenceSchemaVersion": 3,
   "status": "passed",
-  "storePathAppCandidateSmokeOutput": "/nix/store/z8ibwqwmpgs1pxv7sf56jr14sz07wn24-unsloth-0.1.909-beta-store-path-app-candidate-smoke"
+  "storePathAppCandidateSmokeOutput": "/nix/store/87awwliirdsf1y87h2h09qb7k65dr23w-unsloth-0.1.913-beta-store-path-app-candidate-smoke"
 }

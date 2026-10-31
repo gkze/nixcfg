@@ -1,24 +1,24 @@
 {
-  "commit": "e680e303ea5374372aa4d66b1f02b747899740bb",
+  "commit": "fe982adaf29a5260d45bfff2ef1ff7323c2e77d6",
   "hashes": [
     {
-      "hash": "sha256-TuF58UdWhjHrQs1AN+jy9U6qxrtp78cDGPcDRZikJuw=",
+      "hash": "sha256-01T4qDKoQoi3FUIlxt2We6RI/En2JHEMKK7tBRJCDW4=",
       "hashType": "sha256",
-      "url": "https://github.com/unslothai/unsloth/archive/e680e303ea5374372aa4d66b1f02b747899740bb.tar.gz"
+      "url": "https://github.com/unslothai/unsloth/archive/fe982adaf29a5260d45bfff2ef1ff7323c2e77d6.tar.gz"
     },
     {
-      "hash": "sha256-ni1Fi9obU/M3oKQfjSjCuvcBMmIL1ohdQhSutMUPqDc=",
+      "hash": "sha256-xAvj9xyyueDF5H9FJ26srHH8IRGoxQjk2Skmgr9SAMY=",
       "hashType": "sha256",
-      "url": "https://github.com/unslothai/unsloth/releases/download/v0.1.909-beta/latest.json"
+      "url": "https://github.com/unslothai/unsloth/releases/download/v0.1.913-beta/latest.json"
     },
     {
-      "hash": "sha256-tKFzWv86VsaoDnRUY1nqz7njtgnccmFaIddCqgkf3fI=",
+      "hash": "sha256-JAswrvmUfg1V976YBmA/XSrXD02PtV+0/tLmDKxQIkA=",
       "hashType": "srcHash"
     }
   ],
   "urls": {
-    "backendSdist": "https://github.com/unslothai/unsloth/archive/e680e303ea5374372aa4d66b1f02b747899740bb.tar.gz",
-    "releaseManifest": "https://github.com/unslothai/unsloth/releases/download/v0.1.909-beta/latest.json"
+    "backendSdist": "https://github.com/unslothai/unsloth/archive/fe982adaf29a5260d45bfff2ef1ff7323c2e77d6.tar.gz",
+    "releaseManifest": "https://github.com/unslothai/unsloth/releases/download/v0.1.913-beta/latest.json"
   },
-  "version": "0.1.909-beta"
+  "version": "0.1.913-beta"
 }
