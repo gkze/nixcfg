@@ -136,6 +136,18 @@ def test_partition_keeps_a_prerequisite_component_on_one_shard() -> None:
     assert whole["goose-cli"] == whole["goose-desktop"] == whole["electron-runtimes"]
 
 
+def test_partition_spreads_slow_updaters_instead_of_counting_names() -> None:
+    """A slow updater fills its shard; quick names go to the lighter shard."""
+    plan = ("alpha", "openchamber", "beta", "paseo", "gamma")
+    assert partition_prepare_targets(plan, shard=0, count=2) == ("openchamber",)
+    assert partition_prepare_targets(plan, shard=1, count=2) == (
+        "alpha",
+        "beta",
+        "paseo",
+        "gamma",
+    )
+
+
 def test_partition_rejects_a_slot_that_cannot_hash() -> None:
     """Bools, non-integers, empty counts, and duplicate names fail closed."""
     bad_bool = True
@@ -601,6 +613,23 @@ def test_real_goose_chain_stays_on_one_prepare_shard() -> None:
         assert owners[member] == owners["electron-runtimes"]
     index = {name: position % 5 for position, name in enumerate(plan)}
     assert index["goose-cli"] != index["goose-desktop"]
+
+
+def test_real_electron_component_holds_no_other_slow_updater() -> None:
+    """The electron-runtimes chain gets a runner to itself in the real plan."""
+    updaters = ensure_updaters_loaded()
+    plan = tuple(sorted(updaters))
+    edges = prepare_plan_prerequisites(plan, updaters)
+    slices = [
+        partition_prepare_targets(plan, shard=shard, count=5, prerequisites=edges)
+        for shard in range(5)
+    ]
+    electron = next(names for names in slices if "electron-runtimes" in names)
+    members = set(aggregate_source_members(updaters, "electron-runtimes"))
+    slow_elsewhere = {"reflect-open", "codex", "gitbutler", "zed-editor-nightly"}
+    assert members <= set(electron)
+    assert not slow_elsewhere & set(electron)
+    assert sorted(name for names in slices for name in names) == sorted(plan)
 
 
 def test_same_platform_fold_rejects_a_split_goose_chain(tmp_path: Path) -> None:
