@@ -2,7 +2,7 @@
 
 from dataclasses import replace
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -24,6 +24,7 @@ from lib.update.prepare_shard import (
     require_exact_prepare_coverage,
 )
 from lib.update.refs import FlakeInputRef
+from lib.update.sources import load_all_sources
 from lib.update.updaters import ensure_updaters_loaded
 
 _PLAN = ("alpha", "beta", "gamma", "delta", "epsilon", "zeta")
@@ -779,3 +780,37 @@ def test_load_prepare_shard_seed_requires_one_seed_per_shard(
         pin.model_dump_json(), encoding="utf-8"
     )
     assert pipeline.load_prepare_shard_seed(shards) == pin
+
+
+def test_prepare_shard_feeds_the_real_electron_inventory_its_consumers() -> None:
+    """The real inventory updater succeeds on the shard that owns it.
+
+    PR #311 run 41268684498: prepare-darwin-0 hashed electron-runtimes with
+    only bb and gooeypi of its consumers targeted. The slice dropped the
+    other consumers' entries, so the updater raised "missing source
+    metadata" although an unsharded prepare reads their baselines.
+    """
+    sources = load_all_sources()
+    updaters = ensure_updaters_loaded()
+    consumers = aggregate_source_members(updaters, "electron-runtimes")
+    targets = ("bb", "electron-runtimes", "gooeypi", "energy", "macfuse")
+    assert [name for name in consumers if name not in targets]
+    plan = replace(make_run_plan(source_names=targets), sources=sources)
+    inventory = cast("Any", updaters["electron-runtimes"])
+    owners = []
+    for shard in range(5):
+        preparation = Preparation(
+            system="aarch64-darwin",
+            targets=targets,
+            prepare_shard=shard,
+            prepare_shard_count=5,
+        )
+        narrowed = _apply_prepare_shard(plan, preparation)
+        if narrowed is None:
+            continue
+        sibling = set(preparation.prepare_plan) - set(preparation.prepare_hashed)
+        if "electron-runtimes" in narrowed.resolved.source_names:
+            owners.append(shard)
+            assert inventory._consumer_versions(narrowed.sources.entries)
+        assert set(narrowed.sources.entries) == set(sources.entries) - sibling
+    assert len(owners) == 1
