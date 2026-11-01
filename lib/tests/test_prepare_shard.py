@@ -1,10 +1,12 @@
 """Darwin prepare slices stay disjoint and still hash every plan name once."""
 
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
 import pytest
 
+from lib.nix.models.sources import SourceEntry, SourcesFile
 from lib.tests._run_updates_helpers import make_run_plan
 from lib.tests._update_workspace_helpers import init_update_workspace_repo
 from lib.update.candidate import Candidate, Preparation, ResolvedVersion, git
@@ -415,6 +417,35 @@ def test_apply_prepare_shard_filters_execution_and_keeps_targets() -> None:
     assert _apply_prepare_shard(make_run_plan(source_names=("alpha",)), empty) is None
     assert empty.prepare_plan == ("alpha",)
     assert empty.prepare_hashed == ()
+
+
+def test_apply_prepare_shard_keeps_unplanned_sources_as_baselines() -> None:
+    """An aggregate slice still reads consumers outside the targeted plan.
+
+    PR #311 targeted electron-runtimes with two of its consumers; dropping
+    every unplanned consumer failed Darwin prepare with "consumers are missing
+    source metadata". Names hashed on a sibling shard still leave the slice.
+    """
+    plan = make_run_plan(source_names=("alpha", "beta"))
+    baseline = SourceEntry(hashes={})
+    plan = replace(
+        plan,
+        sources=SourcesFile(
+            entries={**plan.sources.entries, "unplanned": baseline},
+        ),
+    )
+    first = Preparation(
+        system="aarch64-darwin",
+        targets=("alpha", "beta"),
+        prepare_shard=0,
+        prepare_shard_count=2,
+    )
+    narrowed = _apply_prepare_shard(plan, first)
+    assert narrowed is not None
+    assert first.prepare_hashed == ("alpha",)
+    assert narrowed.resolved.source_names == ["alpha"]
+    assert set(narrowed.sources.entries) == {"alpha", "unplanned"}
+    assert narrowed.sources.entries["unplanned"] is baseline
 
 
 def test_apply_prepare_shard_claims_no_coverage_without_a_plan() -> None:
