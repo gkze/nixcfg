@@ -1,24 +1,25 @@
 {
   fetchFromGitHub,
   lib,
+  outputs,
+  selfSource,
   stdenvNoCC,
   zig_0_17,
   ...
 }:
 let
   pname = "neorex";
-  # Upstream publishes no tags and no releases, so this pin is deliberately
-  # manual: bump rev, version and hash together. Recompute the hash with
-  # `nix store prefetch-file --unpack --json \
-  #   https://github.com/alexrlocke/neorex/archive/<rev>.tar.gz`.
-  version = "0.0.0-unstable-2026-10-31";
-  rev = "e3062d2cd731315dba99faea21672b13e476ab63";
+  # Upstream tags no releases, so the pin comes from the update pipeline
+  # (`nixcfg update neorex`): it resolves the default-branch head into a
+  # `0.0.0-unstable-<date>` version and hashes that immutable commit.
+  inherit (selfSource) version;
+  rev = selfSource.commit;
 
   src = fetchFromGitHub {
     owner = "alexrlocke";
     repo = pname;
     inherit rev;
-    hash = "sha256-PIzF80Gpq/5uKPQNxdycYfuiKVnQ3LxuByE1YbXSFtA=";
+    hash = outputs.lib.sourceHash pname "srcHash";
   };
 in
 stdenvNoCC.mkDerivation {

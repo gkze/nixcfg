@@ -1,13 +1,21 @@
-"""Shared helpers for GitHub latest-release updaters."""
+"""Shared helpers for GitHub latest-release and head-pinned updaters."""
 
+import re
 import urllib.parse
 from typing import TYPE_CHECKING, ClassVar
 
 from lib.nix.models.sources import SourceEntry, SourceHashes
+from lib.update.events import EventSink, ignore_event
 from lib.update.locked_source import is_immutable_commit
 from lib.update.net import JSONValue, fetch_github_api
 from lib.update.nix import _build_fetch_from_github_expr
-from lib.update.updaters.core import DownloadHashUpdater, UpdateContext, Updater
+from lib.update.updaters.core import (
+    DownloadHashUpdater,
+    FixedOutputHashStep,
+    UpdateContext,
+    Updater,
+    stream_fixed_output_hashes,
+)
 from lib.update.updaters.metadata import (
     AssetURLsMetadata,
     GitHubReleaseMetadata,
@@ -19,6 +27,10 @@ if TYPE_CHECKING:
     import aiohttp
 
     from lib.update.config import UpdateConfig
+
+
+_COMMIT_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
+UNSTABLE_VERSION_PREFIX = "0.0.0-unstable-"
 
 
 def require_immutable_commit(value: str, *, context: str) -> str:
@@ -52,6 +64,45 @@ async def resolve_tag_commit(
     if not isinstance(commit, str) or not is_immutable_commit(commit):
         raise RuntimeError(message)
     return commit
+
+
+def require_commit_date(payload: dict[str, JSONValue], *, context: str) -> str:
+    """Return a GitHub commit payload's committer date as ``YYYY-MM-DD``."""
+    commit = payload.get("commit")
+    committer = commit.get("committer") if isinstance(commit, dict) else None
+    date = committer.get("date") if isinstance(committer, dict) else None
+    if not isinstance(date, str):
+        msg = f"{context} has no usable commit date"
+        raise TypeError(msg)
+    match = _COMMIT_DATE_PATTERN.match(date)
+    if match is None:
+        msg = f"{context} has no usable commit date"
+        raise RuntimeError(msg)
+    return match.group()
+
+
+async def resolve_head_commit(
+    session: aiohttp.ClientSession,
+    *,
+    owner: str,
+    repo: str,
+    config: UpdateConfig,
+    context: str,
+    ref: str = "HEAD",
+) -> tuple[str, str]:
+    """Resolve one GitHub ref to its immutable commit and committer date."""
+    payload = await fetch_github_api(
+        session,
+        f"repos/{owner}/{repo}/commits/{ref}",
+        config=config,
+    )
+    message = f"{context} {owner}/{repo} {ref} has no immutable source commit"
+    if not isinstance(payload, dict):
+        raise TypeError(message)
+    commit = payload.get("sha")
+    if not isinstance(commit, str) or not is_immutable_commit(commit):
+        raise RuntimeError(message)
+    return commit, require_commit_date(payload, context=context)
 
 
 class GitHubReleaseUpdater(Updater):
@@ -176,6 +227,60 @@ class GitHubReleaseUpdater(Updater):
         })
 
 
+class GitHubHeadSourceUpdater(GitHubReleaseUpdater):
+    """Base updater for source packages pinned to a GitHub ref head.
+
+    Some upstreams publish no tags and no releases, so there is no version to
+    track. The pin still belongs to the update pipeline, so resolve the ref
+    head commit, derive a dated ``0.0.0-unstable-<date>`` version from its
+    committer date, and hash the immutable source tree.
+    """
+
+    RESOLVE_TAG_COMMIT: ClassVar[bool] = True
+    HEAD_REF: ClassVar[str] = "HEAD"
+
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
+        """Resolve the ref head commit into a dated unstable version."""
+        _ = context
+        commit, date = await resolve_head_commit(
+            session,
+            owner=self.GITHUB_OWNER,
+            repo=self.GITHUB_REPO,
+            ref=self.HEAD_REF,
+            config=self.config,
+            context=self._release_display_name,
+        )
+        return VersionInfo(
+            version=f"{UNSTABLE_VERSION_PREFIX}{date}",
+            metadata={"commit": commit},
+        )
+
+    async def fetch_hashes(
+        self,
+        info: VersionInfo,
+        session: aiohttp.ClientSession,
+        *,
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
+        """Hash the immutable source tree at the resolved commit."""
+        _ = (session, context)
+        commit = self._require_commit(info)
+        return await stream_fixed_output_hashes(
+            self.name,
+            steps=(
+                FixedOutputHashStep(
+                    hash_type="srcHash",
+                    expr=lambda _resolved: self._src_expr(commit),
+                ),
+            ),
+            config=self.config,
+            emit=emit,
+        )
+
+
 class GitHubReleaseAssetURLsUpdater(GitHubReleaseUpdater, DownloadHashUpdater):
     """Download-hash updater that resolves assets from a GitHub latest release."""
 
@@ -271,8 +376,12 @@ class GitHubReleaseAssetURLsUpdater(GitHubReleaseUpdater, DownloadHashUpdater):
 
 
 __all__ = [
+    "UNSTABLE_VERSION_PREFIX",
+    "GitHubHeadSourceUpdater",
     "GitHubReleaseAssetURLsUpdater",
     "GitHubReleaseUpdater",
+    "require_commit_date",
     "require_immutable_commit",
+    "resolve_head_commit",
     "resolve_tag_commit",
 ]

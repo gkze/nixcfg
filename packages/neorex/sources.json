@@ -1,0 +1,10 @@
+{
+  "commit": "e3062d2cd731315dba99faea21672b13e476ab63",
+  "hashes": [
+    {
+      "hash": "sha256-PIzF80Gpq/5uKPQNxdycYfuiKVnQ3LxuByE1YbXSFtA=",
+      "hashType": "srcHash"
+    }
+  ],
+  "version": "0.0.0-unstable-2026-10-31"
+}

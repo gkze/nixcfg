@@ -9,6 +9,7 @@ from lib.update.events import EventSink, UpdateEvent, ignore_event
 from lib.update.updaters import github_release
 from lib.update.updaters.core import UpdateContext
 from lib.update.updaters.github_release import (
+    GitHubHeadSourceUpdater,
     GitHubReleaseAssetURLsUpdater,
     GitHubReleaseUpdater,
 )
@@ -49,6 +50,12 @@ class _DemoAssetReleaseUpdater(GitHubReleaseAssetURLsUpdater):
 class _DemoCommitReleaseUpdater(_DemoReleaseUpdater):
     RESOLVE_TAG_COMMIT = True
     RELEASE_DISPLAY_NAME = "Demo"
+
+
+class _DemoHeadUpdater(GitHubHeadSourceUpdater):
+    name = "demo-head"
+    GITHUB_OWNER = "owner"
+    GITHUB_REPO = "repo"
 
 
 def test_normalize_release_version_paths() -> None:
@@ -259,3 +266,110 @@ def test_require_immutable_commit_accepts_only_full_lowercase_sha() -> None:
     assert github_release.require_immutable_commit(commit, context="X") == commit
     with pytest.raises(RuntimeError, match="X must be an immutable commit"):
         github_release.require_immutable_commit("main", context="X")
+
+
+def test_head_source_updater_derives_a_dated_version_from_the_head_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A repo without releases still pins through the head commit and its date."""
+    paths: list[str] = []
+
+    async def fetch(_session: object, path: str, **_kwargs: object) -> object:
+        paths.append(path)
+        return {
+            "sha": "c" * 40,
+            "commit": {"committer": {"date": "2026-10-31T22:23:01Z"}},
+        }
+
+    monkeypatch.setattr(
+        "lib.update.updaters.github_release.fetch_github_api",
+        fetch,
+    )
+    updater = _DemoHeadUpdater()
+
+    info = asyncio.run(updater.fetch_latest(object(), context=UpdateContext(None)))
+
+    assert info == VersionInfo(
+        version="0.0.0-unstable-2026-10-31",
+        metadata={"commit": "c" * 40},
+    )
+    assert paths == ["repos/owner/repo/commits/HEAD"]
+    assert updater.build_result(info, []).commit == "c" * 40
+
+
+@pytest.mark.parametrize(
+    ("payload", "error_type", "message"),
+    [
+        ([], TypeError, "has no immutable source commit"),
+        ({}, RuntimeError, "has no immutable source commit"),
+        ({"sha": "main"}, RuntimeError, "has no immutable source commit"),
+        ({"sha": "d" * 40}, TypeError, "has no usable commit date"),
+        (
+            {"sha": "d" * 40, "commit": {"committer": {"date": 20261031}}},
+            TypeError,
+            "has no usable commit date",
+        ),
+        (
+            {"sha": "d" * 40, "commit": {"committer": {"date": "31-10-2026"}}},
+            RuntimeError,
+            "has no usable commit date",
+        ),
+    ],
+)
+def test_head_commit_resolution_rejects_unusable_payloads(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: object,
+    error_type: type[Exception],
+    message: str,
+) -> None:
+    """A head pin needs one immutable sha and one parseable committer date."""
+
+    async def fetch(*_args: object, **_kwargs: object) -> object:
+        return payload
+
+    monkeypatch.setattr(
+        "lib.update.updaters.github_release.fetch_github_api",
+        fetch,
+    )
+
+    with pytest.raises(error_type, match=message):
+        asyncio.run(
+            _DemoHeadUpdater().fetch_latest(object(), context=UpdateContext(None))
+        )
+
+
+def test_head_source_updater_hashes_only_the_immutable_source_tree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Head pins carry exactly one fixed-output source hash, never a tag URL."""
+    captured: dict[str, object] = {}
+
+    async def stream(
+        name: str,
+        *,
+        steps: tuple[object, ...],
+        config: object,
+        emit: object,
+    ) -> list[object]:
+        captured.update(name=name, steps=steps, config=config, emit=emit)
+        return []
+
+    monkeypatch.setattr(
+        "lib.update.updaters.github_release.stream_fixed_output_hashes",
+        stream,
+    )
+    updater = _DemoHeadUpdater()
+    info = VersionInfo(
+        version="0.0.0-unstable-2026-10-31",
+        metadata={"commit": "e" * 40},
+    )
+
+    hashes = asyncio.run(
+        updater.fetch_hashes(info, object(), context=UpdateContext(None))
+    )
+
+    assert hashes == []
+    assert captured["name"] == "demo-head"
+    (step,) = captured["steps"]
+    assert step.hash_type == "srcHash"
+    assert step.expr({}) == updater._src_expr("e" * 40)

@@ -42,6 +42,7 @@ from lib.update.updaters.flake_backed import (
 )
 from lib.update.updaters.github_raw_file import GitHubRawFileUpdater
 from lib.update.updaters.github_release import (
+    GitHubHeadSourceUpdater,
     GitHubReleaseAssetURLsUpdater,
     GitHubReleaseUpdater,
 )
@@ -199,6 +200,7 @@ __all__ = [
     "FlakeInputHashUpdater",
     "FlakeInputMetadataUpdater",
     "FlakeInputUpdater",
+    "GitHubHeadSourceUpdater",
     "GitHubRawFileUpdater",
     "GitHubReleaseAssetURLsUpdater",
     "GitHubReleaseUpdater",
