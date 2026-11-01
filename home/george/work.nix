@@ -43,7 +43,6 @@ let
     openchamber = systemApp pkgs.openchamber;
     paseo = systemApp pkgs.paseo;
     reflect = systemApp pkgs.reflect-open;
-    rex-beta = systemApp pkgs.rex-beta;
     screen-studio = systemApp pkgs.screen-studio;
     # macOS requires the system extension's parent app in /Applications.
     tailscale = {

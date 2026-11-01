@@ -145,15 +145,12 @@ let
       packages = availablePackages (
         [
           code-cursor
-          dbeaver-bin
           emdash
           github-desktop
           jetbrains.datagrip
-          hoppscotch
           config.fonts.monospace.package
           postman
           slack
-          spacedrive
         ]
         ++ lib.optionals (stdenv.hostPlatform.isDarwin || stdenv.hostPlatform.system == "x86_64-linux") [
           red-reddit-cli
@@ -170,7 +167,6 @@ let
           conductor
           opencode-desktop-dev
           container
-          cyberduck
           google-chrome
           iina
           mas

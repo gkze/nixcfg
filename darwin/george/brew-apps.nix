@@ -4,7 +4,6 @@
     casks = [ ];
     masApps = {
       "AdGuard for Safari" = 1440147259;
-      "Amazon Kindle" = 302584613;
       "Amphetamine" = 937984704;
       "Apple Configurator" = 1037126344;
       "JSONPeep" = 1458969831;

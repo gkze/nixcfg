@@ -103,6 +103,7 @@ let
         "linear"
         "loom"
         "mole-app"
+        "neorex"
         "netnewswire"
         "raycast"
         "screen-studio"

@@ -1120,6 +1120,7 @@ def test_package_registry_metadata_overrides_are_intentional() -> None:
         "linear",
         "loom",
         "mole-app",
+        "neorex",
         "netnewswire",
         "raycast",
         "screen-studio",

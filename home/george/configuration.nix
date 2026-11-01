@@ -198,9 +198,7 @@
         comet.package = pkgs.comet;
         commander.package = pkgs.commander;
         conductor.package = pkgs.conductor;
-        cyberduck.package = pkgs.cyberduck;
         datagrip.package = pkgs.jetbrains.datagrip;
-        dbeaver.package = pkgs.dbeaver-bin;
         discord.package = pkgs.discord;
         docker.package = pkgs.docker-desktop;
         element.package = pkgs.element-desktop;
@@ -220,7 +218,6 @@
           package = pkgs.granola;
           cli.granola.path = "Contents/MacOS/Granola";
         };
-        hoppscotch.package = pkgs.hoppscotch;
         iina.package = pkgs.iina;
         jacq.package = pkgs.jacq;
         linear.package = pkgs.linear;
@@ -244,6 +241,10 @@
         raycast.package = pkgs.raycast;
         reason.package = pkgs.reason;
         rectangle.package = pkgs.rectangle;
+        rex-beta = {
+          package = pkgs.rex-beta;
+          scope = "system";
+        };
         rio.package = pkgs.rio;
         "signal-beta" = {
           package = pkgs.signal-beta;
@@ -254,8 +255,6 @@
           preventDowngrade = true;
         };
         sloth.package = pkgs.sloth-app;
-        solo.package = pkgs.solo;
-        spacedrive.package = pkgs.spacedrive;
         spotify.package = pkgs.spotify;
         superset.package = pkgs.superset;
         superconductor.package = pkgs.superconductor;
@@ -272,7 +271,6 @@
         };
         wave.package = pkgs.wave;
         "wispr-flow".package = pkgs.wispr-flow;
-        yaak.package = pkgs.yaak-beta;
         zed = {
           package = pkgs.zed-editor-nightly;
           cli.zed.path = "Contents/MacOS/cli";
@@ -350,20 +348,27 @@
         heavyOptional.enable = lib.mkDefault false;
         cloud.enable = lib.mkDefault false;
         excludePackagesByName = managedMacAppProjection.excludePackagesByName ++ [ "opencode-desktop-dev" ];
-        extraPackages = with pkgs; [
-          # Topgrade's cargo step needs cargo-install-update; without it the
-          # step skips and the cargo-installed binaries never get upgraded.
-          # cargo-cache covers the cleanup half of that step.
-          cargo-cache
-          cargo-update
-          claude-code
-          docker
-          docker-compose
-          docker-credential-helpers
-          kubectl
-          macfuse
-          mole-app
-        ];
+        extraPackages =
+          with pkgs;
+          [
+            # Topgrade's cargo step needs cargo-install-update; without it the
+            # step skips and the cargo-installed binaries never get upgraded.
+            # cargo-cache covers the cleanup half of that step.
+            cargo-cache
+            cargo-update
+            claude-code
+            docker
+            docker-compose
+            docker-credential-helpers
+            kubectl
+            macfuse
+            mole-app
+          ]
+          # neorex draws Neovim inside Rex panes, so it is installed on
+          # whichever hosts configure Rex rather than on every macOS host:
+          # keying it to the app entry keeps the pane binary and the app that
+          # provides those panes from drifting apart.
+          ++ lib.optional (config.nixcfg.macApps.applications ? rex-beta) pkgs.neorex;
       };
       macApps = {
         inherit (managedMacAppProjection) applications;
