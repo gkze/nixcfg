@@ -94,7 +94,7 @@ def _write_policy_bundle(
 def test_energy_policy_disables_packaged_checks_and_install_on_quit() -> None:
     """Every app-update entry point must see a fail-closed packaged gate."""
     packaged_gate = b"!this.app.isPackaged"
-    install_on_quit = b"kn.autoUpdater.autoInstallOnAppQuit=!0"
+    install_on_quit = b'kn.autoUpdater.autoInstallOnAppQuit=process.platform!=="win32"'
     payload = b"|".join([packaged_gate, packaged_gate, install_on_quit])
 
     patched = _load_policy_module().disable_updates(payload)
@@ -103,19 +103,39 @@ def test_energy_policy_disables_packaged_checks_and_install_on_quit() -> None:
     assert packaged_gate not in patched
     assert patched.count(b"!!1/*nix-managed*/  ") == 2
     assert install_on_quit not in patched
-    assert b"kn.autoUpdater.autoInstallOnAppQuit=!1" in patched
+    assert b"kn.autoUpdater.autoInstallOnAppQuit=!1/*nix-managed*/ " in patched
 
 
 def test_energy_policy_ignores_the_minified_auto_updater_binding_name() -> None:
     """Vendor symbol renaming must not reactivate the install-on-quit path."""
     packaged_gate = b"!this.app.isPackaged"
-    install_on_quit = b"Cn.autoUpdater.autoInstallOnAppQuit=!0"
+    install_on_quit = b'Cn.autoUpdater.autoInstallOnAppQuit=process.platform!=="win32"'
     payload = b"|".join([packaged_gate, packaged_gate, install_on_quit])
 
     patched = _load_policy_module().disable_updates(payload)
 
     assert install_on_quit not in patched
-    assert b"Cn.autoUpdater.autoInstallOnAppQuit=!1" in patched
+    assert b"Cn.autoUpdater.autoInstallOnAppQuit=!1/*nix-managed*/ " in patched
+
+
+def test_energy_0_8_83_platform_derived_install_on_quit_is_disabled() -> None:
+    """0.8.83 enables install-on-quit off Windows; the policy must force it off."""
+    module = _load_policy_module()
+    configure = (
+        b"Fn.autoUpdater.autoDownload=!1,"
+        b'Fn.autoUpdater.autoInstallOnAppQuit=process.platform!=="win32",'
+        b"Fn.autoUpdater.allowDowngrade=!0"
+    )
+    payload = b"|".join([module._PACKAGED_GATE] * 2 + [configure])
+
+    patched = module.disable_updates(payload)
+
+    assert len(patched) == len(payload)
+    assert b"process.platform" not in patched
+    assert (
+        b"Fn.autoUpdater.autoInstallOnAppQuit=!1/*nix-managed*/         ,"
+        b"Fn.autoUpdater.allowDowngrade=!0"
+    ) in patched
 
 
 def test_energy_0_8_17_start_and_check_stay_closed() -> None:
@@ -125,7 +145,7 @@ def test_energy_0_8_17_start_and_check_stay_closed() -> None:
     check = (
         b"checkCurrentFeed(){if(!this.app.isPackaged)return Promise.resolve({ok:!1});"
     )
-    install = b"Gt.autoUpdater.autoInstallOnAppQuit=!0"
+    install = b'Gt.autoUpdater.autoInstallOnAppQuit=process.platform!=="win32"'
     payload = start + check + install
 
     patched = module.disable_updates(payload)
@@ -133,8 +153,8 @@ def test_energy_0_8_17_start_and_check_stay_closed() -> None:
     assert module._PACKAGED_GATE not in patched
     assert b"if(!(this.started||!!1/*nix-managed*/  )){configure()}" in patched
     assert b"if(!!1/*nix-managed*/  )return Promise.resolve({ok:!1})" in patched
-    assert b"autoInstallOnAppQuit=!1" in patched
-    assert b"autoInstallOnAppQuit=!0" not in patched
+    assert b"autoInstallOnAppQuit=!1/*nix-managed*/" in patched
+    assert b"autoInstallOnAppQuit=process.platform" not in patched
 
 
 @pytest.mark.parametrize(

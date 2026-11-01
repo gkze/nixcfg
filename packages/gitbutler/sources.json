@@ -1,9 +1,15 @@
 {
-  "drvHash": "qf4y3grw4gk4ax1zbb1z9b83lc8zb1ig",
+  "drvHash": "k3npqk446vm2qwfkms4rbh14540v6n6s",
   "hashes": [
     {
-      "hash": "sha256-CZZOZ+ox4kE5hq/W82UrpJ4I9al9TFBiN+K4XUhxnDE=",
-      "hashType": "npmDepsHash"
+      "hash": "sha256-RfLGMMbrXLR7fuCV+WkDm/wf9CV1GK8Hnt+06jHTeDM=",
+      "hashType": "npmDepsHash",
+      "platform": "aarch64-darwin"
+    },
+    {
+      "hash": "sha256-bLci8i+wXuNqKa5esrC7JUwbz0sVEvQTXZO8Ab3mvsQ=",
+      "hashType": "npmDepsHash",
+      "platform": "x86_64-linux"
     }
   ],
   "input": "gitbutler",
@@ -11,9 +17,13 @@
     "nodeEngine": ">=24",
     "nodejsAttr": "nodejs_24",
     "nodejsVersion": "24.21.0",
-    "packageManager": "pnpm@10.20.0",
-    "pnpmAttr": "pnpm_10",
-    "pnpmVersion": "10.34.5"
+    "packageManager": "pnpm@12.5.1",
+    "pnpmAttr": "pnpm_12",
+    "pnpmVersion": "12.9.0"
   },
-  "version": "0.22.3"
+  "platformDrvHashes": {
+    "aarch64-darwin": "k5mbqmb4h8qdrs7qyfbk74lmxwsqdh0b",
+    "x86_64-linux": "k3npqk446vm2qwfkms4rbh14540v6n6s"
+  },
+  "version": "0.23.1"
 }

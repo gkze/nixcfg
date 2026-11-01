@@ -1,6 +1,9 @@
 """Focused tests for the Baseten Switch source updater."""
 
 import asyncio
+import shutil
+import subprocess
+from pathlib import Path
 from types import ModuleType
 
 import pytest
@@ -24,6 +27,8 @@ from lib.tests._updater_helpers import load_repo_module
 from lib.update.nix import _build_fetch_from_github_call
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters import UpdateContext
+
+_PACKAGE_DIR = REPO_ROOT / "packages/baseten-switch"
 
 COMMIT = "b" * 40
 
@@ -152,6 +157,41 @@ def test_package_skips_headed_swift_layout_guide_check() -> None:
     )
 
 
+def test_package_prints_a_compact_backtrace_when_swift_tests_trap() -> None:
+    """A hosted XCTest SIGTRAP must name its frame inside Nix's 25-line tail."""
+    package = expect_instance(
+        parse_nix_expr(
+            (REPO_ROOT / "packages/baseten-switch/default.nix").read_text(
+                encoding="utf-8"
+            )
+        ),
+        FunctionDefinition,
+    )
+    derivation = expect_instance(
+        expect_scope_binding(package.output, "package").value,
+        FunctionCall,
+    )
+    check_phase = expect_instance(
+        expect_binding(
+            expect_instance(derivation.argument, AttributeSet).values,
+            "checkPhase",
+        ).value,
+        IndentedString,
+    )
+
+    shell = parse_shell(indented_string_body(check_phase.rebuild()))
+    swift_tests = [
+        " ".join(command.replace("\\\n", " ").split())
+        for command in command_texts(shell, "env")
+        if "/usr/bin/swift test" in command
+    ]
+    assert len(swift_tests) == 1
+    assert (
+        'SWIFT_BACKTRACE="enable=yes,interactive=no,color=no,threads=crashed,'
+        'registers=none,images=none,limit=10,top=0" /usr/bin/swift test'
+    ) in swift_tests[0]
+
+
 def test_package_applies_the_reviewed_nix_integration_patch() -> None:
     """Retain Nix integration without patches for fixes already shipped upstream."""
     package = expect_instance(
@@ -170,8 +210,23 @@ def test_package_applies_the_reviewed_nix_integration_patch() -> None:
 
     assert_nix_ast_equal(
         expect_binding(arguments.values, "patches").value,
-        "[ ./nix-managed.patch ]",
+        "[ ./nix-managed.patch ./raw-telemetry-test-clock.patch"
+        " ./status-item-appkit-test-setup.patch ]",
     )
+
+
+def test_status_item_tests_initialize_appkit_before_asking_for_an_item() -> None:
+    """Hosted Nix builds abort in CGSConnectionByID without NSApplication."""
+    patch = (
+        REPO_ROOT / "packages/baseten-switch/status-item-appkit-test-setup.patch"
+    ).read_text(encoding="utf-8")
+    for test_class in ("RuntimeCoordinationTests", "UpdatePresentationTests"):
+        header = f"final class {test_class}: XCTestCase {{\n"
+        assert header in patch
+        set_up = patch.split(header, 1)[1].split("\n+    }\n", 1)[0]
+        assert "+    override class func setUp() {" in set_up
+        assert "+        _ = NSApplication.shared" in set_up
+    assert "+import AppKit\n" in patch
 
 
 def test_package_embeds_the_exact_cli_used_by_the_copied_app() -> None:
@@ -300,3 +355,41 @@ def test_fetch_latest_requires_published_release(
 
     with pytest.raises(RuntimeError, match="No published releases found"):
         _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
+
+
+_ANALYTICS_TEST_HELPER = """\
+func analyticsGateway(t *testing.T, now time.Time) (*Gateway, string) {
+\tt.Helper()
+}
+
+func appendAnalyticsEvent(t *testing.T, dir string, event telemetry.EventV1) {
+\tt.Helper()
+\twriter, err := telemetry.NewWriter(telemetry.WriterOptions{Dir: dir})
+\tif err != nil {
+\t\tt.Fatal(err)
+\t}
+}
+"""
+
+
+def test_raw_telemetry_test_clock_patch_pins_writes_to_event_time(
+    tmp_path: Path,
+) -> None:
+    """The July 2026 fixture must not expire under 90-day wall-clock retention."""
+    git = shutil.which("git")
+    assert git is not None
+    helper = tmp_path / "gateway/cmd/gateway/admin_analytics_test.go"
+    helper.parent.mkdir(parents=True)
+    helper.write_text(_ANALYTICS_TEST_HELPER, encoding="utf-8")
+
+    subprocess.run(  # noqa: S603 -- fixed repository-owned patch
+        [git, "apply", str(_PACKAGE_DIR / "raw-telemetry-test-clock.patch")],
+        cwd=tmp_path,
+        check=True,
+    )
+
+    assert helper.read_text(encoding="utf-8") == _ANALYTICS_TEST_HELPER.replace(
+        "telemetry.WriterOptions{Dir: dir}",
+        "telemetry.WriterOptions{Dir: dir, Now: func() time.Time { "
+        "return event.CompletedAt }}",
+    )

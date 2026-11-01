@@ -1,6 +1,6 @@
 """Tests for the Rio source updater."""
 
-from typing import TYPE_CHECKING
+import pytest
 
 from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.tests._nix_ast import assert_nix_ast_equal
@@ -15,12 +15,14 @@ from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import UpdateEventKind
 from lib.update.nix import _build_fetch_from_github_call, _build_overlay_expr
 
-if TYPE_CHECKING:
-    import pytest
-
 SRC_HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 CARGO_HASH = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
 COMMIT = "c" * 40
+RUST_TOOLCHAIN_TOML = b"""[toolchain]
+channel = "1.99.1"
+profile = "minimal"
+components = [ "rustfmt", "clippy" ]
+"""
 
 
 def test_rio_update_uses_latest_source_when_release_has_no_rio_dmg(
@@ -68,6 +70,13 @@ def test_rio_update_uses_latest_source_when_release_has_no_rio_dmg(
         "lib.update.updaters.github_release.fetch_github_api",
         _fetch_github,
     )
+    toolchain_urls: list[str] = []
+
+    async def _fetch_url(_session: object, url: str, **_kwargs: object) -> bytes:
+        toolchain_urls.append(url)
+        return RUST_TOOLCHAIN_TOML
+
+    monkeypatch.setattr(module, "fetch_url", _fetch_url)
     monkeypatch.setattr(
         "lib.update.nix.get_current_nix_platform",
         lambda: "aarch64-darwin",
@@ -84,6 +93,9 @@ def test_rio_update_uses_latest_source_when_release_has_no_rio_dmg(
         collect_events(lambda emit: updater.update_stream(current, object(), emit=emit))
     )
 
+    assert toolchain_urls == [
+        f"https://raw.githubusercontent.com/raphamorim/rio/{COMMIT}/rust-toolchain.toml"
+    ]
     assert len(calls) == 2
     assert_nix_ast_equal(
         str(calls[0]["expr"]),
@@ -108,6 +120,7 @@ def test_rio_update_uses_latest_source_when_release_has_no_rio_dmg(
                             "cargoHash", placeholder_hash_for("cargoHash")
                         ),
                     ],
+                    pins={"rustToolchain": "1.99.1"},
                 )
             },
         ),
@@ -125,4 +138,35 @@ def test_rio_update_uses_latest_source_when_release_has_no_rio_dmg(
             HashEntry.create("srcHash", SRC_HASH),
             HashEntry.create("cargoHash", CARGO_HASH),
         ],
+        pins={"rustToolchain": "1.99.1"},
     )
+
+
+def test_rio_reads_exact_stable_channel_from_rust_toolchain_toml() -> None:
+    """Rio 0.5.29 pins 1.99.1, newer than nixpkgs' 1.99.0 rustc."""
+    module = load_repo_module("packages/rio/updater.py", "rio_updater_channel_test")
+    assert (
+        module.rust_toolchain_channel(RUST_TOOLCHAIN_TOML, context="fixture")
+        == "1.99.1"
+    )
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        b'[toolchain]\nchannel = "stable"\n',
+        b'[toolchain]\nchannel = "nightly-2026-10-10"\n',
+        b'[toolchain]\nchannel = "1.99"\n',
+        b'[toolchain]\nprofile = "minimal"\n',
+        b'channel = "1.99.1"\n',
+        b"[toolchain\n",
+        b"\xff",
+    ],
+)
+def test_rio_rejects_toolchains_without_an_exact_stable_release(
+    manifest: bytes,
+) -> None:
+    """Only an exact stable release maps onto rust-bin.stable.<version>."""
+    module = load_repo_module("packages/rio/updater.py", "rio_updater_reject_test")
+    with pytest.raises(ValueError, match="fixture"):
+        module.rust_toolchain_channel(manifest, context="fixture")

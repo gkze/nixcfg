@@ -66,10 +66,16 @@ def _load_patch_module() -> ModuleType:
 
 
 def _reviewed_patch_fixture(module: ModuleType) -> bytes:
-    return b"fixture:" + b"|".join(
-        original * expected_count
-        for _label, original, _disabled, expected_count in module.PATCHES
-    )
+    return b"fixture:" + b"|".join((
+        *(
+            original * expected_count
+            for _label, original, _disabled, expected_count in module.PATCHES
+        ),
+        *(
+            span * expected_count
+            for _label, span, expected_count in module.UNRELATED_SPANS
+        ),
+    ))
 
 
 def _is_valid_ed25519_point(encoded: bytes) -> bool:
@@ -270,8 +276,9 @@ def test_copilot_patch_disables_acquisition_and_staged_install() -> None:
 
     assert len(patched) == len(original)
     module.validate_disabled_payload(patched)
+    unrelated = b"latest.jsongdrivelocal"
     for _label, vendor, disabled, expected_count in module.PATCHES:
-        assert vendor not in patched
+        assert vendor not in patched.replace(unrelated, b"")
         assert patched.count(disabled) == expected_count
 
     vendor_key = base64.b64decode(module.VENDOR_PUBLIC_KEY)
@@ -297,6 +304,7 @@ def test_copilot_patch_isolates_preexisting_tauri_staged_state() -> None:
         if anchor not in vendor_stage_names
     )
     original += b"|" + b"|".join(vendor_stage_names)
+    original += b"|" + b"".join(span for _label, span, _count in module.UNRELATED_SPANS)
 
     patched = module.patch_payload(original)
 
@@ -326,6 +334,45 @@ def test_copilot_patch_rejects_drifted_vendor_inventory(
 
     with pytest.raises(module.PatchError, match="inventory drifted"):
         module.patch_payload(drifted)
+
+
+def test_copilot_patch_keeps_the_unrelated_latest_json_enum_variant() -> None:
+    """1.1.34's automation enum spells latest.json but is not an update manifest."""
+    module = _load_patch_module()
+    span = b"latest.jsongdrivelocal"
+    assert [entry[1] for entry in module.UNRELATED_SPANS] == [span]
+    original = _reviewed_patch_fixture(module)
+    assert original.count(b"latest.json") == 4
+
+    patched = module.patch_payload(original)
+
+    assert patched.count(span) == 1
+    assert patched.count(b"latest.json") == 1
+    assert patched.count(b"denied.json") == 3
+    module.validate_disabled_payload(patched)
+
+
+@pytest.mark.parametrize("span_count", [0, 2])
+def test_copilot_patch_rejects_drifted_unrelated_span_inventory(
+    span_count: int,
+) -> None:
+    """The exempted span is pinned too, before mutation and after signing."""
+    module = _load_patch_module()
+    span = b"latest.jsongdrivelocal"
+    original = _reviewed_patch_fixture(module)
+    patched = module.patch_payload(original)
+    drifted_original = original.replace(span, b"|".join([span] * span_count))
+    drifted_patched = patched.replace(span, b"|".join([span] * span_count))
+    if span_count == 0:
+        # Removing the span also removes one vendor latest.json, so only the
+        # span inventory itself is out of contract.
+        drifted_original = original.replace(span, b"X" * len(span))
+        drifted_patched = patched.replace(span, b"X" * len(span))
+
+    with pytest.raises(module.PatchError, match="automation storage enum"):
+        module.patch_payload(drifted_original)
+    with pytest.raises(module.PatchError, match="automation storage enum"):
+        module.validate_disabled_payload(drifted_patched)
 
 
 def test_copilot_patch_allows_unrelated_vendor_byte_drift() -> None:

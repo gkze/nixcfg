@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-sAkEbSXhp3hX3BxHa1/j/b2zfPl+ZBlCknexbC3Z9TI="
+    "aarch64-darwin": "sha256-AI1cBxnnZzRUz7/tGQLE23dqsqdV5TVvK5rywPMl07o="
   },
   "urls": {
-    "aarch64-darwin": "https://github.com/github/app/releases/download/v1.1.30/GitHub-Copilot-darwin-arm64.dmg"
+    "aarch64-darwin": "https://github.com/github/app/releases/download/v1.1.34/GitHub-Copilot-darwin-arm64.dmg"
   },
-  "version": "1.1.30"
+  "version": "1.1.34"
 }

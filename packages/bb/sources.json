@@ -1,15 +1,15 @@
 {
-  "commit": "9b8c1d3457b00359af206e3fd423fe50520182c2",
-  "electronVersion": "44.3.0",
+  "commit": "e003e9510cbfd3bb6c26a28630b46ffb1c242a44",
+  "electronVersion": "44.9.3",
   "hashes": [
     {
-      "hash": "sha256-wb2dZ6Ki2+gC4XnHYOUUVcYfK1t3G8+dFeOlmRb2o84=",
+      "hash": "sha256-cubx5drF1IR90ggNdSPgKMI3ayBcynNDTk41WgoAXMc=",
       "hashType": "npmDepsHash"
     },
     {
-      "hash": "sha256-sfQ/91h/c4lndq8uMqO81zSWc2t0cYFbs0izU6B/n8c=",
+      "hash": "sha256-KQ8dZJXIc15lFXrvzAD/8ZPBuJJjkh0P1XXfIUv75bo=",
       "hashType": "srcHash"
     }
   ],
-  "version": "0.43.4"
+  "version": "0.48.1"
 }

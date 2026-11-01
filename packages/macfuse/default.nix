@@ -1,11 +1,11 @@
 {
+  _7zz,
   darwin,
   fetchurl,
   lib,
   selfSource,
   stdenvNoCC,
   system,
-  undmg,
   ...
 }:
 
@@ -22,16 +22,17 @@ stdenvNoCC.mkDerivation {
   };
 
   nativeBuildInputs = [
+    _7zz
     darwin.xattr
-    undmg
   ];
 
   dontFixup = true;
   sourceRoot = ".";
 
+  # 5.5.0 ships an APFS DMG, which undmg (HFS+ only) cannot read.
   unpackCmd = ''
     runHook preUnpack
-    undmg "$src"
+    7zz x -sns- -snld -y "$src"
     runHook postUnpack
   '';
 

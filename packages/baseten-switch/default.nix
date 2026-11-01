@@ -42,7 +42,19 @@ let
     # Finder-launched apps do not inherit Home Manager's PATH. Keep the
     # packaged CLI discoverable and use Xcode's Swift toolchain through a
     # reviewed patch that must continue to apply to the pinned release.
-    patches = [ ./nix-managed.patch ];
+    patches = [
+      ./nix-managed.patch
+      # The raw-telemetry admin test writes July/August 2026 events through a
+      # wall-clock writer, whose 90-day retention deletes the July segment from
+      # 2026-10-30 UTC on. Pin that helper's writer clock to each event, so the
+      # test keeps checking segment reads rather than the build date.
+      ./raw-telemetry-test-clock.patch
+      # StatusItemController tests ask NSStatusBar for an item before anything
+      # created NSApplication; SkyLight then aborts in CGSConnectionByID
+      # (Update run 41275217088). Initialize AppKit in those test classes'
+      # setUp the way the app does at launch, so the tests still run headless.
+      ./status-item-appkit-test-setup.patch
+    ];
 
     # Match upstream's release build: one universal Go CLI plus one universal,
     # ad-hoc-signed SwiftUI app bundle. The upstream CI build number is not part
@@ -109,6 +121,10 @@ let
         "$swift_test_home" \
         "$swift_test_clang_cache" \
         "$swift_test_module_cache"
+      # Hosted macos-15 builds of 0.8.1 SIGTRAPped inside XCTest (Update run
+      # 41275217088) while Nix kept only a 25-line tail with no crash frame.
+      # The Swift runtime backtracer prints the crashed thread compactly, so a
+      # trap names its frame without changing which tests run.
       (
         cd "$repo_root/mac/BasetenSwitch"
         env \
@@ -125,6 +141,7 @@ let
           SDKROOT="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk" \
           CLANG_MODULE_CACHE_PATH="$swift_test_clang_cache" \
           SWIFTPM_MODULECACHE_OVERRIDE="$swift_test_module_cache" \
+          SWIFT_BACKTRACE="enable=yes,interactive=no,color=no,threads=crashed,registers=none,images=none,limit=10,top=0" \
           /usr/bin/swift test \
             --disable-sandbox \
             --scratch-path "$swift_test_build" \

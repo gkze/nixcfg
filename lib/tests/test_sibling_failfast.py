@@ -809,6 +809,14 @@ def test_unconfigured_wait_does_not_poll(
         )
 
 
+def _pid_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
 def test_terminate_updater_kills_session_grandchildren(tmp_path: Path) -> None:
     pidfile = tmp_path / "grandchild"
     script = (
@@ -832,6 +840,12 @@ def test_terminate_updater_kills_session_grandchildren(tmp_path: Path) -> None:
     grandchild = int(pidfile.read_text())
     try:
         jobs._terminate_updater(process)
+        # The group signal reaches the grandchild at once, but it is reparented
+        # to init, which reaps it asynchronously; under load kill(pid, 0) can
+        # still find it for a moment after the leader has been waited for.
+        deadline = time.monotonic() + 5
+        while _pid_exists(grandchild) and time.monotonic() < deadline:
+            time.sleep(0.01)
         with pytest.raises(ProcessLookupError):
             os.kill(grandchild, 0)
     finally:

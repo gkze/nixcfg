@@ -6,7 +6,13 @@ import tarfile
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
-from lib.codemods.source_patch import SourcePatch, plan_sources, source_tree_parser
+from lib.codemods.source_patch import (
+    SourceAnchor,
+    SourcePatch,
+    plan_sources,
+    source_tree_parser,
+)
+from lib.codemods.text import require_count
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -27,10 +33,6 @@ _UPDATER_CONFIG_ANCHOR = (
     'latest.json"\n'
     "      ]\n"
     "    }\n"
-)
-_UPDATE_PROVIDER_DECLARATION = (
-    "export function UpdateProvider({ children, autoCheck }: "
-    "UpdateProviderProps): ReactElement {"
 )
 _ARCHIVE_PATH_COMPONENTS = 2
 
@@ -74,9 +76,14 @@ _PATCHES = (
         ),
         ('  "permissions": ["window-state:default", "deep-link:default"]\n'),
     ),
+    # 0.16.0 moved the plugin versions into the workspace manifest; the
+    # audited versions are pinned by _ANCHORS below.
     SourcePatch(
         "apps/desktop/src-tauri/Cargo.toml",
-        'tauri-plugin-updater = "2.13.2"\ntauri-plugin-process = "2.4.0"\n',
+        (
+            "tauri-plugin-updater = { workspace = true }\n"
+            "tauri-plugin-process = { workspace = true }\n"
+        ),
         "",
     ),
     SourcePatch(
@@ -89,24 +96,43 @@ _PATCHES = (
         """    let builder = builder.plugin(
 """,
     ),
+    # 0.16.0 derives `supported` from whether the host has an updater, so
+    # the desktop host simply provides none.
     SourcePatch(
-        "apps/desktop/src/providers/update-provider.tsx",
-        "import { isNativeShell } from '@/lib/platform.ts'\n",
+        "apps/desktop/src/services/create-desktop-services.ts",
+        "import { createTauriUpdaterAdapter } from '@/services/tauri-updater.ts'\n",
         "",
     ),
     SourcePatch(
-        "apps/desktop/src/providers/update-provider.tsx",
-        f"{_UPDATE_PROVIDER_DECLARATION}\n  const supported = isNativeShell()\n",
+        "apps/desktop/src/services/create-desktop-services.ts",
         (
-            f"{_UPDATE_PROVIDER_DECLARATION}\n"
-            "  // Nix owns application updates; packaged builds expose no mutable updater.\n"
-            "  const supported = false\n"
+            "      exceptionTelemetry,\n"
+            "      updater: createTauriUpdaterAdapter(),\n"
+            "      nativeMenu: createTauriNativeMenuHost(),\n"
+        ),
+        (
+            "      exceptionTelemetry,\n"
+            "      // Nix owns application updates; packaged builds expose no updater.\n"
+            "      nativeMenu: createTauriNativeMenuHost(),\n"
         ),
     ),
 )
 
+_ANCHORS = (
+    SourceAnchor("Cargo.toml", 'tauri-plugin-process = "2.4.0"\n'),
+    SourceAnchor("Cargo.toml", 'tauri-plugin-updater = "2.14.0"\n'),
+    SourceAnchor(
+        "packages/app/src/app/update-service.ts",
+        "  return updater === undefined\n",
+    ),
+)
+
 _REQUIRED_PATHS = tuple(
-    dict.fromkeys(("package.json", *(patch.relative_path for patch in _PATCHES)))
+    dict.fromkeys((
+        "package.json",
+        *(anchor.relative_path for anchor in _ANCHORS),
+        *(patch.relative_path for patch in _PATCHES),
+    ))
 )
 
 
@@ -130,6 +156,13 @@ def patch_sources(
             msg = f"missing Reflect source file: {relative_path}"
             raise RuntimeError(msg)
     _validate_package_manager(sources["package.json"], package_manager)
+    for anchor in _ANCHORS:
+        require_count(
+            sources[anchor.relative_path],
+            anchor.text,
+            expected_count=anchor.expected_count,
+            context=f"anchor in {anchor.relative_path}",
+        )
     return plan_sources(sources, _PATCHES)
 
 

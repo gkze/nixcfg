@@ -114,19 +114,34 @@ _UPSTREAM_PATCH_SOURCES = {
   "permissions": ["updater:default", "process:default", "window-state:default", "deep-link:default"]
 }
 """,
-    "apps/desktop/src-tauri/Cargo.toml": """[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-tauri-plugin-updater = "2.13.2"
+    "Cargo.toml": """[workspace.dependencies]
 tauri-plugin-process = "2.4.0"
+tauri-plugin-single-instance = "2.4.2"
+tauri-plugin-updater = "2.14.0"
 tauri-plugin-window-state = "2.4.1"
-trash = "5.2.6"
 """,
-    "apps/desktop/src/providers/update-provider.tsx": """import { useMainWindowEffect } from '@/hooks/use-main-window-effect'
-import { isNativeShell } from '@/lib/platform.ts'
+    "apps/desktop/src-tauri/Cargo.toml": """[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-updater = { workspace = true }
+tauri-plugin-process = { workspace = true }
+tauri-plugin-window-state = { workspace = true }
+trash = { workspace = true }
+""",
+    "apps/desktop/src/services/create-desktop-services.ts": """import { createTauriPathTransport } from '@/services/tauri-path.ts'
+import { createTauriUpdaterAdapter } from '@/services/tauri-updater.ts'
+import { createTauriWindowHost } from '@/services/tauri-window.ts'
 
-export function UpdateProvider({ children, autoCheck }: UpdateProviderProps): ReactElement {
-  const supported = isNativeShell()
-  const resolvedAutoCheck = autoCheck ?? (supported && !import.meta.env.DEV)
-  return <UpdateContext value={value}>{children}</UpdateContext>
+    return {
+      ...common,
+      exceptionTelemetry,
+      updater: createTauriUpdaterAdapter(),
+      nativeMenu: createTauriNativeMenuHost(),
+    }
+""",
+    "packages/app/src/app/update-service.ts": """export function createUpdateService(deps: UpdateServiceDeps): UpdateService {
+  const { updater } = deps
+  return updater === undefined
+    ? new UnsupportedUpdateService()
+    : new NativeUpdateService({ ...deps, updater })
 }
 """,
 }
@@ -603,9 +618,10 @@ def test_reflect_nix_policy_suppresses_updates_and_uses_dev_entitlements() -> No
     rust_source = patched["apps/desktop/src-tauri/src/lib.rs"]
     assert "tauri_plugin_updater" not in rust_source
     assert "tauri_plugin_process" not in rust_source
-    provider = patched["apps/desktop/src/providers/update-provider.tsx"]
-    assert "const supported = false" in provider
-    assert "isNativeShell" not in provider
+    desktop_services = patched["apps/desktop/src/services/create-desktop-services.ts"]
+    assert "createTauriUpdaterAdapter" not in desktop_services
+    assert "updater:" not in desktop_services
+    assert "nativeMenu: createTauriNativeMenuHost()," in desktop_services
     capabilities = json.loads(
         patched["apps/desktop/src-tauri/capabilities/desktop.json"]
     )
@@ -619,7 +635,8 @@ def test_reflect_nix_policy_suppresses_updates_and_uses_dev_entitlements() -> No
     cargo_manifest = patched["apps/desktop/src-tauri/Cargo.toml"]
     assert "tauri-plugin-updater" not in cargo_manifest
     assert "tauri-plugin-process" not in cargo_manifest
-    assert 'tauri-plugin-window-state = "2.4.1"' in cargo_manifest
+    assert "tauri-plugin-window-state = { workspace = true }" in cargo_manifest
+    assert patched["Cargo.toml"] == _UPSTREAM_PATCH_SOURCES["Cargo.toml"]
     assert patched != _UPSTREAM_PATCH_SOURCES
 
 
@@ -673,19 +690,19 @@ def test_reflect_nix_policy_rejects_drift_before_patching_any_source(
     """One missing anchor must reject the whole source transaction."""
     module = _load_patch_module()
     drifted = dict(_UPSTREAM_PATCH_SOURCES)
-    provider_path = "apps/desktop/src/providers/update-provider.tsx"
-    anchor = "const supported = isNativeShell()"
-    drifted[provider_path] = drifted[provider_path].replace(
+    services_path = "apps/desktop/src/services/create-desktop-services.ts"
+    anchor = "      updater: createTauriUpdaterAdapter(),\n"
+    drifted[services_path] = drifted[services_path].replace(
         anchor,
         anchor * copies,
     )
     before = dict(drifted)
 
-    # The anchor spans the declaration line too, so a duplicated or missing
-    # `supported` line leaves no exact match for the multi-line anchor.
+    # The anchor spans its neighbouring lines too, so a duplicated or missing
+    # `updater` line leaves no exact match for the multi-line anchor.
     with pytest.raises(
         CodemodError,
-        match=rf"expected 1 match for {provider_path}, found 0$",
+        match=rf"expected 1 match for {services_path}, found 0$",
     ):
         module.patch_sources(drifted, package_manager=_PACKAGE_MANAGER)
 
@@ -699,9 +716,11 @@ def test_reflect_nix_policy_rejects_drift_before_patching_any_source(
             "apps/desktop/src-tauri/tauri.conf.json",
             "releases/latest/download/latest.json",
         ),
+        ("Cargo.toml", 'tauri-plugin-updater = "2.14.0"'),
+        ("Cargo.toml", 'tauri-plugin-process = "2.4.0"'),
         (
-            "apps/desktop/src-tauri/Cargo.toml",
-            'tauri-plugin-updater = "2.13.2"',
+            "packages/app/src/app/update-service.ts",
+            "return updater === undefined",
         ),
     ],
 )

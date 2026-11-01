@@ -752,6 +752,10 @@ def _restrict_plan_to_prepare_shard(
     if not hashed:
         return None
     keep = set(hashed)
+    # Names hashed on a sibling shard leave this slice. Sources outside the
+    # plan stay as read-only baselines: an aggregate such as electron-runtimes
+    # derives from every consumer, selected or not, exactly as unsharded runs.
+    sibling_hashed = set(plan.order) - keep
     source_names = [name for name in plan.resolved.source_names if name in keep]
     ref_inputs = [item for item in plan.resolved.ref_inputs if item.name in keep]
     order = [name for name in plan.order if name in keep]
@@ -765,7 +769,11 @@ def _restrict_plan_to_prepare_shard(
             ref_inputs=ref_inputs,
         ),
         sources=SourcesFile(
-            entries={name: plan.sources.entries[name] for name in source_names}
+            entries={
+                name: entry
+                for name, entry in plan.sources.entries.items()
+                if name not in sibling_hashed
+            }
         ),
         item_meta={name: plan.item_meta[name] for name in order},
         order=order,

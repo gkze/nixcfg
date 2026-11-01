@@ -21,16 +21,23 @@ _ELECTRON_44_REMOVED_MACHOS = (
 )
 
 
+# 2.28 ships a Bluetooth cable scanner helper next to language_server;
+# 2.28.2 is the first audited release that carries it (2.25.0 does not).
+_BLE_SCANNER_ADDED_MACHOS = ("Contents/Resources/bin/cable_ble_scanner",)
+_BLE_SCANNER_FIRST_VERSION = (2, 28, 2)
+
+
 def _expected_machos(app_version: str) -> tuple[str, ...]:
     """Pin the audited Mach-O inventory for the release generation at hand."""
     version_parts = tuple(int(part) for part in app_version.split("."))
+    labels = EXPECTED_MACHOS
     if version_parts >= (2, 17, 0):
-        return tuple(
-            label
-            for label in EXPECTED_MACHOS
-            if label not in _ELECTRON_44_REMOVED_MACHOS
+        labels = tuple(
+            label for label in labels if label not in _ELECTRON_44_REMOVED_MACHOS
         )
-    return EXPECTED_MACHOS
+    if version_parts >= _BLE_SCANNER_FIRST_VERSION:
+        labels = tuple(sorted((*labels, *_BLE_SCANNER_ADDED_MACHOS), key=os.fsencode))
+    return labels
 
 
 EXPECTED_MACHOS = (
@@ -112,6 +119,7 @@ EXPECTED_ENTITLEMENTS = {
         "chrome_crashpad_handler"
     ): _JIT_ENTITLEMENTS,
     "Contents/Frameworks/Squirrel.framework/Versions/A/Resources/ShipIt": _JIT_ENTITLEMENTS,
+    "Contents/Resources/bin/cable_ble_scanner": _JIT_ENTITLEMENTS,
     "Contents/Resources/bin/language_server": _JIT_ENTITLEMENTS,
     "Contents/Resources/bin/webm_encoder": _JIT_ENTITLEMENTS,
 }

@@ -1,5 +1,7 @@
 """Tests for the GitButler updater."""
 
+from pathlib import Path
+
 import pytest
 
 from lib.nix.models.flake_lock import FlakeLockNode
@@ -883,3 +885,21 @@ def test_gitbutler_is_latest_treats_probe_failure_as_stale(
     )
 
     assert not _run(updater._is_latest(UpdateContext(current=current), _version_info()))
+
+
+def test_gitbutler_frontend_pnpm_config_supports_pnpm_11_and_newer() -> None:
+    """Only pnpm 10 may set the key that pnpm 11+ rejects in global config."""
+    default_nix = (Path(__file__).parent / "default.nix").read_text()
+    build_phase = default_nix.split("buildPhase = ''", 1)[1].split("installPhase", 1)[0]
+
+    unguarded = [
+        line
+        for line in build_phase.splitlines()
+        if "pnpm config set manage-package-manager-versions" in line
+    ]
+    assert len(unguarded) == 1
+    guard = build_phase.split(unguarded[0], 1)[0]
+    assert guard.rstrip().endswith("lib.optionalString (pnpmRelease < 11) ''")
+    assert 'npm_config_manage_package_manager_versions = "false";' in default_nix
+    assert 'active_pnpm="$(pnpm --version)"' in build_phase
+    assert '[ "$active_pnpm" != "${pnpm.version}" ]' in build_phase
