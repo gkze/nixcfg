@@ -42,7 +42,14 @@ let
     # Finder-launched apps do not inherit Home Manager's PATH. Keep the
     # packaged CLI discoverable and use Xcode's Swift toolchain through a
     # reviewed patch that must continue to apply to the pinned release.
-    patches = [ ./nix-managed.patch ];
+    patches = [
+      ./nix-managed.patch
+      # The raw-telemetry admin test writes July/August 2026 events through a
+      # wall-clock writer, whose 90-day retention deletes the July segment from
+      # 2026-10-30 UTC on. Pin that helper's writer clock to each event, so the
+      # test keeps checking segment reads rather than the build date.
+      ./raw-telemetry-test-clock.patch
+    ];
 
     # Match upstream's release build: one universal Go CLI plus one universal,
     # ad-hoc-signed SwiftUI app bundle. The upstream CI build number is not part

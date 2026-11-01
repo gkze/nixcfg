@@ -98,7 +98,19 @@ let
 
       export HOME="$TMPDIR/gitbutler-home"
       mkdir -p "$HOME"
-      pnpm config set manage-package-manager-versions false
+      ${
+        # pnpm 11+ rejects this key in its global config.yaml; the
+        # npm_config_manage_package_manager_versions env above still applies.
+        lib.optionalString (pnpmRelease < 11) ''
+          pnpm config set manage-package-manager-versions false
+        ''
+      }
+      # Fail closed if pnpm would hand off to the packageManager-pinned release.
+      active_pnpm="$(pnpm --version)"
+      if [ "$active_pnpm" != "${pnpm.version}" ]; then
+        echo "gitbutler: expected nixpkgs pnpm ${pnpm.version}, got $active_pnpm" >&2
+        exit 1
+      fi
       ${lib.optionalString stdenv.hostPlatform.isLinux ''
         autoPatchelf node_modules
       ''}

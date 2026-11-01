@@ -1,0 +1,12 @@
+diff --git a/gateway/cmd/gateway/admin_analytics_test.go b/gateway/cmd/gateway/admin_analytics_test.go
+--- a/gateway/cmd/gateway/admin_analytics_test.go
++++ b/gateway/cmd/gateway/admin_analytics_test.go
+@@ -27,7 +27,7 @@ func analyticsGateway(t *testing.T, now time.Time) (*Gateway, string) {
+ 
+ func appendAnalyticsEvent(t *testing.T, dir string, event telemetry.EventV1) {
+ 	t.Helper()
+-	writer, err := telemetry.NewWriter(telemetry.WriterOptions{Dir: dir})
++	writer, err := telemetry.NewWriter(telemetry.WriterOptions{Dir: dir, Now: func() time.Time { return event.CompletedAt }})
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}

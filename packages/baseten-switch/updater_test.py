@@ -1,6 +1,9 @@
 """Focused tests for the Baseten Switch source updater."""
 
 import asyncio
+import shutil
+import subprocess
+from pathlib import Path
 from types import ModuleType
 
 import pytest
@@ -24,6 +27,8 @@ from lib.tests._updater_helpers import load_repo_module
 from lib.update.nix import _build_fetch_from_github_call
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters import UpdateContext
+
+_PACKAGE_DIR = REPO_ROOT / "packages/baseten-switch"
 
 COMMIT = "b" * 40
 
@@ -170,7 +175,7 @@ def test_package_applies_the_reviewed_nix_integration_patch() -> None:
 
     assert_nix_ast_equal(
         expect_binding(arguments.values, "patches").value,
-        "[ ./nix-managed.patch ]",
+        "[ ./nix-managed.patch ./raw-telemetry-test-clock.patch ]",
     )
 
 
@@ -300,3 +305,41 @@ def test_fetch_latest_requires_published_release(
 
     with pytest.raises(RuntimeError, match="No published releases found"):
         _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
+
+
+_ANALYTICS_TEST_HELPER = """\
+func analyticsGateway(t *testing.T, now time.Time) (*Gateway, string) {
+\tt.Helper()
+}
+
+func appendAnalyticsEvent(t *testing.T, dir string, event telemetry.EventV1) {
+\tt.Helper()
+\twriter, err := telemetry.NewWriter(telemetry.WriterOptions{Dir: dir})
+\tif err != nil {
+\t\tt.Fatal(err)
+\t}
+}
+"""
+
+
+def test_raw_telemetry_test_clock_patch_pins_writes_to_event_time(
+    tmp_path: Path,
+) -> None:
+    """The July 2026 fixture must not expire under 90-day wall-clock retention."""
+    git = shutil.which("git")
+    assert git is not None
+    helper = tmp_path / "gateway/cmd/gateway/admin_analytics_test.go"
+    helper.parent.mkdir(parents=True)
+    helper.write_text(_ANALYTICS_TEST_HELPER, encoding="utf-8")
+
+    subprocess.run(  # noqa: S603 -- fixed repository-owned patch
+        [git, "apply", str(_PACKAGE_DIR / "raw-telemetry-test-clock.patch")],
+        cwd=tmp_path,
+        check=True,
+    )
+
+    assert helper.read_text(encoding="utf-8") == _ANALYTICS_TEST_HELPER.replace(
+        "telemetry.WriterOptions{Dir: dir}",
+        "telemetry.WriterOptions{Dir: dir, Now: func() time.Time { "
+        "return event.CompletedAt }}",
+    )

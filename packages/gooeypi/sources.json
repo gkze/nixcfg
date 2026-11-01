@@ -1,9 +1,9 @@
 {
-  "commit": "459c9965690468c69d7434f82acf4b5eeee8e4bf",
+  "commit": "f63b9cfa707488880eeb9f47984fbf383e397322",
   "electronVersion": "43.4.0",
   "hashes": [
     {
-      "hash": "sha256-SnTpJ6oV1XaH68LL7ceAIVJQb0jCvvYUsiE7pZn5A9A=",
+      "hash": "sha256-1TON/LHN/15d/xEWVVvvscaAnoErLtjTrk2QGHyKLCE=",
       "hashType": "npmDepsHash"
     },
     {
@@ -12,12 +12,12 @@
       "url": "https://registry.npmjs.org/npm/-/npm-12.0.2.tgz"
     },
     {
-      "hash": "sha256-aUe4RtY6KIaW0NyCaUCkIdM/NB112vQ6nf2rAtru7TA=",
+      "hash": "sha256-Ad6BWl92uEZDP5/QV9CInBt1j3DLCoEroX4GRzLQQ/o=",
       "hashType": "srcHash"
     }
   ],
   "pins": {
     "npmVersion": "12.0.2"
   },
-  "version": "1.1.17"
+  "version": "1.1.21"
 }

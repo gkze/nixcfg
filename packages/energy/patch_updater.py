@@ -18,12 +18,20 @@ _DISABLED_PACKAGED_GATE = b"!!1/*nix-managed*/  "
 # `!this.app.isPackaged` is true, and checkCurrentFeed() returns before the
 # feed. 0.7.x carried a third copy of that same gate.
 _PACKAGED_GATE_COUNT = 2
-_INSTALL_ON_QUIT = b"autoUpdater.autoInstallOnAppQuit=!0"
-_DISABLED_INSTALL_ON_QUIT = b"autoUpdater.autoInstallOnAppQuit=!1"
+# 0.8.83 derives install-on-quit from the platform instead of a literal `!0`.
+_INSTALL_ON_QUIT = b'autoUpdater.autoInstallOnAppQuit=process.platform!=="win32"'
+_DISABLED_INSTALL_ON_QUIT = (
+    b"autoUpdater.autoInstallOnAppQuit=!1/*nix-managed*/         "
+)
 
 
 class PatchError(RuntimeError):
     """Energy's packed updater no longer matches the audited policy anchors."""
+
+
+if len(_INSTALL_ON_QUIT) != len(_DISABLED_INSTALL_ON_QUIT):
+    msg = "Energy install-on-quit replacement must preserve the payload size"
+    raise AssertionError(msg)
 
 
 def _replace_exactly(payload: bytes, old: bytes, new: bytes, count: int) -> bytes:

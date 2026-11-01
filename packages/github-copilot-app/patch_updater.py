@@ -39,6 +39,51 @@ PATCHES: tuple[tuple[str, bytes, bytes, int], ...] = (
     ("update verification key", VENDOR_PUBLIC_KEY, DISABLED_PUBLIC_KEY, 2),
 )
 
+# 1.1.34 added a three-variant serde enum (``latest.json``/``gdrive``/``local``)
+# in the automation string table. It is not an update manifest, so its bytes
+# stay vendor-owned; the span is pinned by its own exact count and every anchor
+# above is counted and replaced only outside it.
+UNRELATED_SPANS: tuple[tuple[str, bytes, int], ...] = (
+    ("automation storage enum", b"latest.jsongdrivelocal", 1),
+)
+
+
+def _outside_unrelated_spans(payload: bytes) -> list[bytes]:
+    pieces = [payload]
+    for _label, span, _expected_count in UNRELATED_SPANS:
+        pieces = [part for piece in pieces for part in piece.split(span)]
+    return pieces
+
+
+def _count_outside_unrelated_spans(payload: bytes, anchor: bytes) -> int:
+    return sum(piece.count(anchor) for piece in _outside_unrelated_spans(payload))
+
+
+def _validate_unrelated_spans(payload: bytes) -> None:
+    for label, span, expected_count in UNRELATED_SPANS:
+        actual_count = payload.count(span)
+        if actual_count != expected_count:
+            msg = (
+                f"Copilot {label} inventory drifted: "
+                f"expected {expected_count}, got {actual_count}"
+            )
+            raise PatchError(msg)
+
+
+def _replace_outside_unrelated_spans(
+    payload: bytes,
+    original: bytes,
+    replacement: bytes,
+    spans: tuple[bytes, ...] = tuple(span for _label, span, _count in UNRELATED_SPANS),
+) -> bytes:
+    if not spans:
+        return payload.replace(original, replacement)
+    head, *rest = spans
+    return head.join(
+        _replace_outside_unrelated_spans(piece, original, replacement, tuple(rest))
+        for piece in payload.split(head)
+    )
+
 
 def _validate_patch_contract() -> None:
     for label, original, replacement, _expected_count in PATCHES:
@@ -54,8 +99,9 @@ def _validate_patch_contract() -> None:
 
 def validate_disabled_payload(payload: bytes) -> None:
     """Require every acquisition and installation gate to remain disabled."""
+    _validate_unrelated_spans(payload)
     for label, original, replacement, expected_count in PATCHES:
-        if original in payload:
+        if _count_outside_unrelated_spans(payload, original):
             msg = f"Copilot {label} still contains the vendor updater anchor"
             raise PatchError(msg)
         actual_count = payload.count(replacement)
@@ -70,8 +116,9 @@ def validate_disabled_payload(payload: bytes) -> None:
 def patch_payload(payload: bytes) -> bytes:
     """Return the exact-length, fail-closed updater transformation."""
     _validate_patch_contract()
+    _validate_unrelated_spans(payload)
     for label, original, _replacement, expected_count in PATCHES:
-        actual_count = payload.count(original)
+        actual_count = _count_outside_unrelated_spans(payload, original)
         if actual_count != expected_count:
             msg = (
                 f"Copilot {label} inventory drifted: "
@@ -81,7 +128,7 @@ def patch_payload(payload: bytes) -> bytes:
 
     patched = payload
     for _label, original, replacement, _expected_count in PATCHES:
-        patched = patched.replace(original, replacement)
+        patched = _replace_outside_unrelated_spans(patched, original, replacement)
     validate_disabled_payload(patched)
     return patched
 

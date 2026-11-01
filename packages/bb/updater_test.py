@@ -684,3 +684,120 @@ def test_bb_rejects_non_object_desktop_manifest_for_electron_discovery() -> None
 
     with pytest.raises(TypeError, match="desktop manifest is not a JSON object"):
         module.BbUpdater._electron_version([])
+
+
+_DESKTOP_UPDATE_SUPPORT_0_48 = """\
+export function resolveDesktopUpdateSupport(
+  args: ResolveDesktopUpdateSupportArgs,
+): DesktopUpdateSupport {
+  if (args.platform === "macos" || args.platform === "windows") {
+    return { autoUpdate: true, versionCheck: true };
+  }
+
+  const appImagePath = args.env.APPIMAGE?.trim() ?? "";
+"""
+
+
+def test_bb_update_patch_disables_macos_auto_update_in_the_0_48_shape(
+    tmp_path: Path,
+) -> None:
+    """0.48 shares the macOS branch with Windows; only macOS loses auto-update."""
+    git = shutil.which("git")
+    assert git is not None
+    source = tmp_path / "apps/desktop/src/desktop-update-provider.ts"
+    source.parent.mkdir(parents=True)
+    source.write_text(_DESKTOP_UPDATE_SUPPORT_0_48, encoding="utf-8")
+
+    subprocess.run(  # noqa: S603 -- fixed repository-owned patch
+        [
+            git,
+            "apply",
+            str(_PACKAGE_DIR / "patches/nix-managed-updates.patch"),
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+
+    patched = source.read_text(encoding="utf-8")
+    assert 'return { autoUpdate: args.platform !== "macos", versionCheck: true };' in (
+        patched
+    )
+    assert "autoUpdate: true" not in patched
+
+
+_PINNED_PUBLIC_SDK_DTS_FIXTURE = dedent(
+    """\
+    import { existsSync } from "node:fs";
+    import path from "node:path";
+    import { fileURLToPath } from "node:url";
+
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const packageRoot = path.resolve(here, "..");
+    const packagesRoot = path.resolve(packageRoot, "..");
+    const outDir = path.join(packageRoot, "declarations");
+
+    async function emitNativeDeclarations(directory) {
+      const config = {
+        compilerOptions: {
+          resolveJsonModule: true,
+          rootDir: packagesRoot,
+          outDir,
+          typeRoots: [path.join(packageRoot, "node_modules/@types")],
+          paths: {
+            "@bb/hono-typed-routes": [
+              path.join(packagesRoot, "hono-typed-routes/src/index.ts"),
+            ],
+          },
+        },
+      };
+      return config;
+    }
+
+    const config = await emitNativeDeclarations(null);
+    const roots = config.compilerOptions.typeRoots.filter((root) =>
+      existsSync(path.join(root, "node", "package.json")),
+    );
+    console.log(JSON.stringify(roots));
+    """
+)
+
+
+def test_bb_public_sdk_dts_supports_pnpm_10_root_hoisted_node_types(
+    tmp_path: Path,
+) -> None:
+    """Resolve the hoisted @types/node that bb-app's tsconfig requires."""
+    git = shutil.which("git")
+    assert git is not None
+    source = tmp_path / "packages" / "bb-app" / "scripts" / "build-public-sdk-dts.mjs"
+    source.parent.mkdir(parents=True)
+    source.write_text(_PINNED_PUBLIC_SDK_DTS_FIXTURE, encoding="utf-8")
+    root_types = tmp_path / "node_modules" / "@types" / "node"
+    root_types.mkdir(parents=True)
+    (root_types / "package.json").write_text("{}\n", encoding="utf-8")
+
+    def node_type_roots() -> list[str]:
+        completed = subprocess.run(  # noqa: S603 -- executes a fixed test fixture
+            ["node", str(source)],  # noqa: S607 -- resolves Node from the test PATH
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return json.loads(completed.stdout)
+
+    assert node_type_roots() == []
+    subprocess.run(  # noqa: S603 -- applies a fixed repository patch fixture
+        [
+            git,
+            "apply",
+            "--include=packages/bb-app/scripts/build-public-sdk-dts.mjs",
+            str(_PACKAGE_DIR / "patches/pnpm-10-hoisted-runtime-manifest.patch"),
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert [Path(root).resolve() for root in node_type_roots()] == [
+        (tmp_path / "node_modules" / "@types").resolve()
+    ]

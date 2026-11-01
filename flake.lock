@@ -915,16 +915,16 @@
     "gitbutler": {
       "flake": false,
       "locked": {
-        "lastModified": 1787985712,
-        "narHash": "sha256-nW3yCbpbIhawLQVV+DptzGYiFBSKcyAP89NtDWHJM+0=",
+        "lastModified": 1793201495,
+        "narHash": "sha256-bAjwZRP7kEua82kbhiy+qpGV1CjvylUAdYewd3Jn59s=",
         "owner": "gitbutlerapp",
         "repo": "gitbutler",
-        "rev": "0ba35dc675c0d0eebcf2e1d5e114b73d46019942",
+        "rev": "d6feaf66d2040c764b335dfa6486b1a964b7ac5d",
         "type": "github"
       },
       "original": {
         "owner": "gitbutlerapp",
-        "ref": "release/0.22.3",
+        "ref": "release/0.23.1",
         "repo": "gitbutler",
         "type": "github"
       }

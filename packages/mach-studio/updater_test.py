@@ -4,6 +4,7 @@ import hashlib
 import json
 import plistlib
 import struct
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 
@@ -861,3 +862,95 @@ def test_renderer_rejects_mixed_source_and_vendor_inventory(complete: str) -> No
     }
     with pytest.raises(module.PatchError, match="mixed Mach Studio"):
         module.patch_renderer(payloads[complete])
+
+
+_LOCKED_SOURCE_PROVISIONER_0_1_221 = (
+    b"async provisionLocalMoeEngine(e,t){try{let n=await Q9e();let r=n.enginePath,"
+    b"i=s.default.join(r,`uv.lock`);let a=s.default.join(e.managedRoot,"
+    b"`mlx_runtime_contract.py`),o=await oF();if(await this.runCommand(o.binaryPath,"
+    b"[`sync`,`--locked`,`--no-dev`,`--project`,r,`--python`,e.pythonExecutable,"
+    b"`--extra`,`dev`,`--extra`,`dflash`],e.managedRoot,"
+    b"{UV_PROJECT_ENVIRONMENT:e.localMoeVenvRoot},t),!0)throw 0;"
+    b"return await this.runCommand(e.localMoePythonExecutable,[a,`--lock`,i],"
+    b"e.managedRoot,void 0,t),{state:`ready`}}catch(e){}}"
+)
+
+
+def _locked_source_main(module: ModuleType) -> bytes:
+    return (
+        b"constructor(e){"
+        + module._CURRENT_ENABLED_GATE
+        + b"}"
+        + _LOCKED_SOURCE_PROVISIONER_0_1_221
+    )
+
+
+def test_mach_studio_0_1_221_locked_source_policy_closes_only_the_gate() -> None:
+    """0.1.221's vendor `uv sync --locked` provisioner stays; the updater closes."""
+    module = _load_policy_module()
+    payload = _locked_source_main(module)
+
+    patched = module.patch_main(payload)
+
+    assert len(patched) == len(payload)
+    assert module._CURRENT_ENABLED_GATE not in patched
+    assert module._CURRENT_DISABLED_GATE in patched
+    assert _LOCKED_SOURCE_PROVISIONER_0_1_221 in patched
+    assert module.patch_main(patched) == patched
+
+
+@pytest.mark.parametrize(
+    "drift",
+    [
+        lambda p: p + b"[`pip`,`install`,`--python`",
+        lambda p: p.replace(b"`mlx_runtime_contract.py`", b"`skip.py`"),
+        lambda p: p.replace(b"[a,`--lock`,i]", b"[a]"),
+        lambda p: p + p,
+    ],
+)
+def test_mach_studio_0_1_221_locked_source_policy_rejects_drift(
+    drift: Callable[[bytes], bytes],
+) -> None:
+    """Any change to the reviewed locked-source provisioner fails closed."""
+    module = _load_policy_module()
+
+    with pytest.raises(module.PatchError, match="locked-source"):
+        module.patch_main(drift(_locked_source_main(module)))
+
+
+def test_mach_studio_0_1_221_bundle_needs_no_renderer_rewrite(
+    tmp_path: Path,
+) -> None:
+    """The source-only renderer has no wheel copy, so only main is rewritten."""
+    module = _load_policy_module()
+    renderer = b"renderer without engine wheel copy"
+    asar_path, plist_path = _write_policy_bundle(
+        tmp_path, _locked_source_main(module), renderer
+    )
+    (tmp_path / "vendor/local_moe_engine").mkdir(parents=True)
+    original_size = asar_path.stat().st_size
+
+    first = module.patch_bundle(asar_path, plist_path)
+
+    assert asar_path.stat().st_size == original_size
+    assert read_packed_file(asar_path, f"dist/assets/{_RENDERER_NAME}") == renderer
+    patched_main = read_packed_file(asar_path, "dist-electron/main.js")
+    assert module._CURRENT_ENABLED_GATE not in patched_main
+    assert module.patch_bundle(asar_path, plist_path) == first
+    check_info_plist_hash(plist_path, asar_path)
+
+
+def test_mach_studio_0_1_221_bundle_rejects_legacy_renderer_copy(
+    tmp_path: Path,
+) -> None:
+    """Wheel-era renderer copy next to the locked-source main is mixed drift."""
+    module = _load_policy_module()
+    asar_path, plist_path = _write_policy_bundle(
+        tmp_path,
+        _locked_source_main(module),
+        module._WHEEL_MISSING_DESCRIPTION,
+    )
+    (tmp_path / "vendor/local_moe_engine").mkdir(parents=True)
+
+    with pytest.raises(module.PatchError, match="legacy engine renderer"):
+        module.patch_bundle(asar_path, plist_path)

@@ -9,11 +9,14 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _INDEX_PATH = "electron/main/index.ts"
+# 1.1.21 spreads the UpdateService options over several lines; only the
+# `enabled` gate is Nix-owned, the install-confirmation callbacks stay vendor.
 _UPDATER_ANCHOR = (
-    "const updates = new UpdateService(getAutoUpdater(), { enabled: app.isPackaged })"
+    "const updates = new UpdateService(getAutoUpdater(), {\n"
+    "    enabled: app.isPackaged,\n"
 )
 _NIX_MANAGED_UPDATER = (
-    "const updates = new UpdateService(getAutoUpdater(), { enabled: false })"
+    "const updates = new UpdateService(getAutoUpdater(), {\n    enabled: false,\n"
 )
 _PATCHES = (SourcePatch(_INDEX_PATH, _UPDATER_ANCHOR, _NIX_MANAGED_UPDATER),)
 
