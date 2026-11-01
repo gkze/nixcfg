@@ -16,6 +16,7 @@ flowchart TD
   index --> appear["appearance.md<br/>macOS appearance"]
   index --> upd["update/README.md<br/>update subsystem"]
   upd --> updci["update/ci.md<br/>hosted builders"]
+  updci --> bk["buildkite.md<br/>parallel Buildkite agents"]
   upd --> updrt["update/runtime.md<br/>durable execution"]
   upd --> updsafe["update/safety.md<br/>safety invariants"]
   upd --> updfree["update/free-tier-ceiling.md<br/>runner time budget"]
@@ -35,6 +36,7 @@ flowchart TD
 | [appearance.md](appearance.md)                             | macOS appearance bridging for tools without paired-theme settings  |
 | [update/README.md](update/README.md)                       | Update pipeline, entry points, and promotion boundary              |
 | [update/ci.md](update/ci.md)                               | Update workflow on disposable GitHub-hosted builders               |
+| [buildkite.md](buildkite.md)                               | Parallel Buildkite agents for the same Actions job graph           |
 | [update/runtime.md](update/runtime.md)                     | Durable execution, admission, scheduling, and observability        |
 | [update/safety.md](update/safety.md)                       | Executable safety invariants, each with its owning code and test   |
 | [update/free-tier-ceiling.md](update/free-tier-ceiling.md) | Measured Update wall clock against the free-tier runner ceiling    |
@@ -50,7 +52,8 @@ Use one of these paths to reach the relevant document quickly:
   edit.
 - **Debug an update or a CI failure.** Start at
   [update/README.md](update/README.md), then open
-  [update/ci.md](update/ci.md) for hosted builders or
+  [update/ci.md](update/ci.md) for hosted builders,
+  [buildkite.md](buildkite.md) for the parallel Buildkite agents, or
   [update/runtime.md](update/runtime.md) for local execution.
 - **Add or change a test.** Read the testing strategy in
   [development.md](development.md) first: Nix logic is tested in `tests/nix/`,

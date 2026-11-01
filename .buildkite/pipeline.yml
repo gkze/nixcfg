@@ -1,0 +1,12 @@
+---
+# Bootstrap only. The job graph is generated from .github/workflows so the
+# two systems cannot drift by hand. See docs/buildkite.md.
+steps:
+  - label: Generate pipeline
+    key: generate
+    command: nix develop --command python -m lib.buildkite upload
+    agents:
+      queue: linux-x86
+    concurrency: 1
+    concurrency_group: nixcfg-generate-$BUILDKITE_BRANCH
+    timeout_in_minutes: 60

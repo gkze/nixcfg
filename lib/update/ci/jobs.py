@@ -1039,25 +1039,90 @@ def _drain_stderr(stderr: TextIO, diagnostics: queue.SimpleQueue[str | None]) ->
         diagnostics.put(None)
 
 
+def _failfast_group_for_stage(stage: str) -> str:
+    """Return the sibling-stop group for the current stage environment."""
+    return sibling_failfast.failfast_group(
+        stage=stage,
+        system=os.environ.get("NIXCFG_SYSTEM", ""),
+        scope=os.environ.get("NIXCFG_VALIDATE_SCOPE", "all"),
+        canary=os.environ.get("NIXCFG_CANARY") == "true",
+    )
+
+
 def _sibling_watch_configured(stage: str) -> bool:
-    """Return whether this hosted stage should poll for a completed sibling failure."""
+    """Return whether this stage should poll for a completed sibling failure.
+
+    GitHub Actions polls its jobs API. A Buildkite job sets
+    ``NIXCFG_SIBLING_REFRESH_ARGV`` and ``NIXCFG_SIBLING_JOBS_PATH`` instead,
+    and does not set ``GITHUB_ACTIONS``. Unset refresh variables leave the
+    Actions checks unchanged.
+    """
+    if _failfast_group_for_stage(stage) == "":
+        return False
+    if os.environ.get("NIXCFG_SIBLING_REFRESH_ARGV", "").strip():
+        return bool(os.environ.get("NIXCFG_SIBLING_JOBS_PATH", "").strip())
     if os.environ.get("GITHUB_ACTIONS") != "true":
         return False
     if not os.environ.get("NIXCFG_ACTIONS_TOKEN", "").strip():
         return False
-    if not os.environ.get("GITHUB_REPOSITORY", "") or not os.environ.get(
-        "GITHUB_RUN_ID", ""
-    ):
-        return False
-    return (
-        sibling_failfast.failfast_group(
-            stage=stage,
-            system=os.environ.get("NIXCFG_SYSTEM", ""),
-            scope=os.environ.get("NIXCFG_VALIDATE_SCOPE", "all"),
-            canary=os.environ.get("NIXCFG_CANARY") == "true",
-        )
-        != ""
+    return bool(
+        os.environ.get("GITHUB_REPOSITORY", "") and os.environ.get("GITHUB_RUN_ID", "")
     )
+
+
+def _sibling_refresh_argv() -> list[str] | None:
+    """Return a Buildkite refresh command, or ``None`` on the Actions path."""
+    raw = os.environ.get("NIXCFG_SIBLING_REFRESH_ARGV", "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as error:
+        message = type(error).__name__
+        raise sibling_failfast.SiblingPollError(message) from error
+    if not isinstance(parsed, list) or not all(
+        isinstance(item, str) for item in parsed
+    ):
+        message = "refresh argv"
+        raise sibling_failfast.SiblingPollError(message)
+    return parsed
+
+
+def _read_refreshed_jobs(path: str) -> tuple[sibling_failfast.WorkflowJob, ...]:
+    """Read the jobs document a refresh command just wrote."""
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeError) as error:
+        message = type(error).__name__
+        raise sibling_failfast.SiblingPollError(message) from error
+    return sibling_failfast.parse_workflow_jobs(payload)
+
+
+def _sibling_jobs() -> tuple[sibling_failfast.WorkflowJob, ...]:
+    """Return this attempt's jobs from Actions, or from a Buildkite refresh."""
+    argv = _sibling_refresh_argv()
+    if argv is None:
+        return sibling_failfast.fetch_workflow_jobs(
+            repository=os.environ.get("GITHUB_REPOSITORY", ""),
+            run_id=os.environ.get("GITHUB_RUN_ID", ""),
+            token=os.environ.get("NIXCFG_ACTIONS_TOKEN", ""),
+        )
+    path = os.environ.get("NIXCFG_SIBLING_JOBS_PATH", "").strip()
+    if not path:
+        message = "refresh path"
+        raise sibling_failfast.SiblingPollError(message)
+    try:
+        completed = subprocess.run(  # noqa: S603 -- JSON argv from our step, never a shell
+            argv,
+            check=False,
+        )
+    except OSError as error:
+        message = type(error).__name__
+        raise sibling_failfast.SiblingPollError(message) from error
+    if completed.returncode != 0:
+        message = f"refresh status {completed.returncode}"
+        raise sibling_failfast.SiblingPollError(message)
+    return _read_refreshed_jobs(path)
 
 
 def _poll_sibling_stop(stage: str, log: TextIO) -> sibling_failfast.SiblingStop | None:
@@ -1066,18 +1131,9 @@ def _poll_sibling_stop(stage: str, log: TextIO) -> sibling_failfast.SiblingStop 
     A poll error keeps the build running. The log names the error type, not
     the token or the response body.
     """
-    group = sibling_failfast.failfast_group(
-        stage=stage,
-        system=os.environ.get("NIXCFG_SYSTEM", ""),
-        scope=os.environ.get("NIXCFG_VALIDATE_SCOPE", "all"),
-        canary=os.environ.get("NIXCFG_CANARY") == "true",
-    )
+    group = _failfast_group_for_stage(stage)
     try:
-        jobs = sibling_failfast.fetch_workflow_jobs(
-            repository=os.environ.get("GITHUB_REPOSITORY", ""),
-            run_id=os.environ.get("GITHUB_RUN_ID", ""),
-            token=os.environ.get("NIXCFG_ACTIONS_TOKEN", ""),
-        )
+        jobs = _sibling_jobs()
     except sibling_failfast.SiblingPollError as error:
         _write_diagnostic(log, f"Sibling failure poll skipped: {error}")
         return None
