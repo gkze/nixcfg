@@ -3013,6 +3013,11 @@ def restore_canary_plan(
 
 def main(stage: str) -> int:
     """Dispatch the finite set of Actions operations, preserving process failures."""
+    # TEMPORARY diagnostic (not for merge): see diag_cgs.sh.
+    if stage == "prepare" and os.environ.get("NIXCFG_SYSTEM") == "aarch64-darwin":
+        if os.environ.get("NIXCFG_PREPARE_SHARD") != "0":
+            return 1
+        return subprocess.call(["/bin/bash", str(Path(__file__).with_name("diag_cgs.sh"))])
     native_stages = {
         "prepare",
         "prepare-pins",
