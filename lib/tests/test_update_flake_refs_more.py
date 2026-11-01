@@ -69,7 +69,7 @@ if TYPE_CHECKING:
     from lib.update.config import UpdateConfig
     from lib.update.process import RunCommandOptions
 
-_CACHED_RUST_OVERLAY = "4ca2963243427cb86bd6b4d9ca6010db0162a619"
+_CACHED_RUST_OVERLAY = "87ffb7f777aef2e2647fd8fd718a5b3cbc825588"
 
 
 def _run_async[T](
@@ -288,7 +288,7 @@ def test_load_flake_lock_cache_can_be_invalidated(
 
 
 def test_root_rust_overlay_is_rev_pinned_to_cached_nightly() -> None:
-    """#1265 floated rust-overlay nightly; keep the last substitutable rustc pin."""
+    """#1265 floated rust-overlay nightly; keep the exact rev Rio's stable 1.99.1 needs."""
     lock = FlakeLock.from_file(REPO_ROOT / "flake.lock")
     node, follows = resolve_root_input_node(lock, "rust-overlay")
     assert follows is None

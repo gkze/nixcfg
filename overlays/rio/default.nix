@@ -13,13 +13,31 @@ let
     rev = commit;
     hash = slib.sourceHash "rio" "srcHash";
   };
+  # Rio's rust-toolchain.toml pins an exact stable release that can be newer
+  # than nixpkgs' rustc (0.5.29 requires 1.99.1 while nixpkgs ships 1.99.0).
+  # The updater records that release, so build with exactly that toolchain.
+  rustToolchainVersion =
+    (selfSource.pins or { }).rustToolchain or (throw "rio sources.json is missing pins.rustToolchain");
+  rustToolchain =
+    final.rust-bin.stable.${rustToolchainVersion}.default
+      or (throw "rust-overlay has no stable Rust ${rustToolchainVersion} for Rio; advance the rust-overlay pin");
+  rustPlatform = final.makeRustPlatform {
+    cargo = rustToolchain;
+    rustc = rustToolchain;
+  };
+  # Call the nixpkgs package itself: `prev.rio` is the registry forwarder
+  # (packages/rio/default.nix, `{ rio, ... }: rio`), whose override accepts and
+  # silently drops `rustPlatform`, leaving nixpkgs' rustc in the build.
+  nixpkgsRio = final.callPackage (prev.path + "/pkgs/by-name/ri/rio/package.nix") {
+    inherit rustPlatform;
+  };
 in
 prev.lib.optionalAttrs (prev.stdenv.hostPlatform.system == "aarch64-darwin") {
-  rio = prev.rio.overrideAttrs (old: {
+  rio = nixpkgsRio.overrideAttrs (old: {
     inherit version src;
 
-    # The nixpkgs package pins an older Rio MSRV; the current source already
-    # matches this flake's pinned Rust toolchain.
+    # The nixpkgs package rewrites an older Rio MSRV; this source builds with
+    # the exact toolchain its rust-toolchain.toml pins.
     postPatch = "";
 
     cargoDeps = prev.rustPlatform.fetchCargoVendor {

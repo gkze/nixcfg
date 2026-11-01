@@ -10,5 +10,8 @@
       "hashType": "srcHash"
     }
   ],
+  "pins": {
+    "rustToolchain": "1.96.1"
+  },
   "version": "0.5.28"
 }

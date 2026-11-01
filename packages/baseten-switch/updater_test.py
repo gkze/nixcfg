@@ -157,6 +157,41 @@ def test_package_skips_headed_swift_layout_guide_check() -> None:
     )
 
 
+def test_package_prints_a_compact_backtrace_when_swift_tests_trap() -> None:
+    """A hosted XCTest SIGTRAP must name its frame inside Nix's 25-line tail."""
+    package = expect_instance(
+        parse_nix_expr(
+            (REPO_ROOT / "packages/baseten-switch/default.nix").read_text(
+                encoding="utf-8"
+            )
+        ),
+        FunctionDefinition,
+    )
+    derivation = expect_instance(
+        expect_scope_binding(package.output, "package").value,
+        FunctionCall,
+    )
+    check_phase = expect_instance(
+        expect_binding(
+            expect_instance(derivation.argument, AttributeSet).values,
+            "checkPhase",
+        ).value,
+        IndentedString,
+    )
+
+    shell = parse_shell(indented_string_body(check_phase.rebuild()))
+    swift_tests = [
+        " ".join(command.replace("\\\n", " ").split())
+        for command in command_texts(shell, "env")
+        if "/usr/bin/swift test" in command
+    ]
+    assert len(swift_tests) == 1
+    assert (
+        'SWIFT_BACKTRACE="enable=yes,interactive=no,color=no,threads=crashed,'
+        'registers=none,images=none,limit=10,top=0" /usr/bin/swift test'
+    ) in swift_tests[0]
+
+
 def test_package_applies_the_reviewed_nix_integration_patch() -> None:
     """Retain Nix integration without patches for fixes already shipped upstream."""
     package = expect_instance(
@@ -175,8 +210,23 @@ def test_package_applies_the_reviewed_nix_integration_patch() -> None:
 
     assert_nix_ast_equal(
         expect_binding(arguments.values, "patches").value,
-        "[ ./nix-managed.patch ./raw-telemetry-test-clock.patch ]",
+        "[ ./nix-managed.patch ./raw-telemetry-test-clock.patch"
+        " ./status-item-appkit-test-setup.patch ]",
     )
+
+
+def test_status_item_tests_initialize_appkit_before_asking_for_an_item() -> None:
+    """Hosted Nix builds abort in CGSConnectionByID without NSApplication."""
+    patch = (
+        REPO_ROOT / "packages/baseten-switch/status-item-appkit-test-setup.patch"
+    ).read_text(encoding="utf-8")
+    for test_class in ("RuntimeCoordinationTests", "UpdatePresentationTests"):
+        header = f"final class {test_class}: XCTestCase {{\n"
+        assert header in patch
+        set_up = patch.split(header, 1)[1].split("\n+    }\n", 1)[0]
+        assert "+    override class func setUp() {" in set_up
+        assert "+        _ = NSApplication.shared" in set_up
+    assert "+import AppKit\n" in patch
 
 
 def test_package_embeds_the_exact_cli_used_by_the_copied_app() -> None:

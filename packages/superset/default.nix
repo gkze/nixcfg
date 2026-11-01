@@ -14,6 +14,7 @@
   fetchurl,
   libarchive,
   python3,
+  cctools,
   makeWrapper,
   zig_0_15,
   ...
@@ -180,6 +181,11 @@ let
         )
       );
       bunPackageEntries = lib.mapAttrsToList (name: package: { inherit name package; }) bunPackages;
+      bunPatchedDependencies = import ./patched-dependencies.nix {
+        manifest = packageManifest;
+        src = upstreamSrc;
+        packageNames = builtins.attrNames bunPackages;
+      };
       # Keep the scheduler graph bounded without turning the entire Bun cache
       # into one all-or-nothing derivation. A package name always selects the
       # same bucket, so lockfile churn only invalidates the affected shards.
@@ -225,6 +231,16 @@ let
             runHook prePatch
 
             patchShebangs "$out/share/bun-packages"
+            ${lib.optionalString (lib.any ({ name, ... }: bunPatchedDependencies ? ${name}) entries) ''
+              source ${./apply-bun-patch.sh}
+            ''}
+            ${lib.concatMapStringsSep "\n" (
+              { name, ... }:
+              lib.optionalString (bunPatchedDependencies ? ${name}) ''
+                applyBunPatch "$out/share/bun-packages/${name}" \
+                  ${bunPatchedDependencies.${name}}
+              ''
+            ) entries}
 
             runHook postPatch
           '';
@@ -260,6 +276,7 @@ let
       paths = builtins.attrValues (builtins.mapAttrs buildBunShard bunPackageShards);
       passthru.nixcfg = {
         packageCount = builtins.length bunPackageEntries;
+        patchedPackages = builtins.attrNames bunPatchedDependencies;
         shardCount = builtins.length shardSizes;
         maxShardSize = builtins.foldl' lib.max 0 shardSizes;
         minShardSize = builtins.foldl' lib.min (builtins.head shardSizes) (builtins.tail shardSizes);
@@ -307,8 +324,14 @@ else
     src = srcWithBun;
 
     nativeBuildInputs = [
-      bunRuntime
+      # Bun >= 1.4 no longer injects a `node` shim into `bun run` scripts, but
+      # node-gyp (via electron-builder install-app-deps) evaluates binding.gyp
+      # `<!(node -p ...)` expressions such as node-pty's node-addon-api targets.
+      bunWithFakeNode
       bun2nix.hook
+      # Electron 44 (Superset 2.x) has no matching better-sqlite3 prebuilt, so
+      # install-app-deps compiles it; gyp-mac-tool archives with `libtool`.
+      cctools
       makeWrapper
       python3
     ];
@@ -345,6 +368,9 @@ else
       export NEXT_PUBLIC_OUTLIT_KEY="nix-build"
       export CSC_IDENTITY_AUTO_DISCOVERY=false
 
+      # Fail fast if gyp's `node` would not resolve to the pinned bun runtime.
+      [ "$(node -p 'process.versions.bun')" = "${bunVersion}" ]
+
       bun run --cwd apps/desktop copy:native-modules
 
       PYTHONPATH=${
@@ -354,6 +380,26 @@ else
 
       bun run --cwd apps/desktop generate:icons
       bun run --cwd apps/desktop compile:app
+      # compile:app's bundle:transcriber resolves `swiftc` through stdenv's
+      # xcrun shim, which has no Swift toolchain, and outside CI it only warns
+      # and ships without the dictation helper. Rebuild it with Xcode's Swift
+      # (as upstream's release does) and with CI set, so a failure is fatal.
+      # Superset 1.x has no dictation helper and no such script.
+      if [ "$(node -p 'Boolean(require("./apps/desktop/package.json").scripts["bundle:transcriber"])')" = true ]; then
+        env \
+          -u AR \
+          -u CC \
+          -u CXX \
+          -u LD \
+          -u NIX_CFLAGS_COMPILE \
+          -u NIX_LDFLAGS \
+          CI=1 \
+          DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer" \
+          SDKROOT="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk" \
+          PATH="/usr/bin:$PATH" \
+          bun run --cwd apps/desktop bundle:transcriber
+        [ -x apps/desktop/dist/resources/bin/superset-transcriber ]
+      fi
       bun run --cwd apps/desktop validate:native-runtime
       bun run --cwd apps/desktop install:deps
 

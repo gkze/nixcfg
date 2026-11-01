@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from lib.tests._git_isolation import GIT_LOCAL_ENV_VARS
 from lib.tests._nix_eval import allow_nix_evaluation
 
 if TYPE_CHECKING:
@@ -20,6 +21,20 @@ def _no_hosted_github_env(monkeypatch: pytest.MonkeyPatch) -> None:
     a flush-cachix test then emptied CACHIX_DAEMON_* in that live file.
     """
     monkeypatch.delenv("GITHUB_ENV", raising=False)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Keep fixture Git commands off the repository running the suite.
+
+    The pre-push hook runs pytest with Git's hook environment; from a linked
+    worktree that includes ``GIT_DIR``, so a fixture's ``git clone --bare``
+    set ``core.bare=true`` and its ``git add`` emptied the real index. Scrub
+    the process environment once: a per-test ``monkeypatch.delenv`` is undone
+    by any test that calls ``monkeypatch.undo()``.
+    """
+    del config
+    for name in GIT_LOCAL_ENV_VARS:
+        os.environ.pop(name, None)
 
 
 @pytest.fixture(autouse=True)
