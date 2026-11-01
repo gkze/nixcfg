@@ -15,7 +15,7 @@ print("mode=\(args) uid=\(getuid())")
 switch mode {
 case "app": _ = NSApplication.shared
 case "app-prohibited": _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
-case "appload": print("NSApplicationLoad=\(NSApplicationLoad())")
+case "finish": _ = NSApplication.shared; NSApp.setActivationPolicy(.accessory); NSApp.finishLaunching()
 default: break
 }
 print("CGSession=\(CGSessionCopyCurrentDictionary() != nil)")
@@ -31,7 +31,7 @@ EOF
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swiftc -O "$W/cgs.swift" -o "$W/cgs" || exit 1
 sudo chmod -R 0777 "$W"
 for user in aqua root _nixbld1; do
-  for a in "bare" "app" "app-prohibited" "appload" "bare window" "app window"; do
+  for a in "bare" "app" "app-prohibited" "finish" "bare window" "app window"; do
     name="$user-${a// /-}"
     if [ "$user" = aqua ]; then
       "$W/cgs" $a > "$W/$name.out" 2>&1; echo "EXIT=$?" >> "$W/$name.out"

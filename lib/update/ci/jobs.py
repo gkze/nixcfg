@@ -3017,7 +3017,8 @@ def main(stage: str) -> int:
     if stage == "prepare" and os.environ.get("NIXCFG_SYSTEM") == "aarch64-darwin":
         if os.environ.get("NIXCFG_PREPARE_SHARD") != "0":
             return 1
-        return subprocess.call(["/bin/bash", str(Path(__file__).with_name("diag_cgs.sh"))])
+        script = str(Path(__file__).with_name("diag_cgs.sh"))
+        return subprocess.call(["/bin/bash", script])  # noqa: S603
     native_stages = {
         "prepare",
         "prepare-pins",
