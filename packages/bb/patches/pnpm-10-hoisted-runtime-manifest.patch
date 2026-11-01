@@ -95,3 +95,20 @@ diff --git a/packages/plugin-build/scripts/generate-plugin-theme.mjs b/packages/
  const outPath = path.join(
    packageRoot,
    "src",
+diff --git a/packages/bb-app/scripts/build-public-sdk-dts.mjs b/packages/bb-app/scripts/build-public-sdk-dts.mjs
+--- a/packages/bb-app/scripts/build-public-sdk-dts.mjs
++++ b/packages/bb-app/scripts/build-public-sdk-dts.mjs
+@@ -34,7 +34,12 @@ async function emitNativeDeclarations(directory) {
+       resolveJsonModule: true,
+       rootDir: packagesRoot,
+       outDir,
+-      typeRoots: [path.join(packageRoot, "node_modules/@types")],
++      typeRoots: [
++        path.join(packageRoot, "node_modules/@types"),
++        // pnpm 10 with node-linker=hoisted can place this direct workspace
++        // dependency only at the repository root.
++        path.join(packagesRoot, "..", "node_modules/@types"),
++      ],
+       paths: {
+         "@bb/hono-typed-routes": [
+           path.join(packagesRoot, "hono-typed-routes/src/index.ts"),

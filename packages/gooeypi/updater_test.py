@@ -839,3 +839,28 @@ def test_gooeypi_nix_policy_patch_rejects_source_drift(
     ):
         module.patch_tree(tmp_path)
     assert index_path.read_text(encoding="utf-8") == original
+
+
+def test_gooeypi_nix_policy_patch_handles_the_1_1_21_multiline_options(
+    tmp_path: Path,
+) -> None:
+    """1.1.21's multi-line UpdateService options must start disabled."""
+    module = _load_patch_module()
+    index_path = tmp_path / module._INDEX_PATH
+    index_path.parent.mkdir(parents=True)
+    index_path.write_text(
+        "  const updates = new UpdateService(getAutoUpdater(), {\n"
+        "    enabled: app.isPackaged,\n"
+        "    confirmInstall: async () => true,\n"
+        "  })\n",
+        encoding="utf-8",
+    )
+
+    module.patch_tree(tmp_path)
+
+    assert index_path.read_text(encoding="utf-8") == (
+        "  const updates = new UpdateService(getAutoUpdater(), {\n"
+        "    enabled: false,\n"
+        "    confirmInstall: async () => true,\n"
+        "  })\n"
+    )

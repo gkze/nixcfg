@@ -1,10 +1,12 @@
 """Darwin prepare slices stay disjoint and still hash every plan name once."""
 
+from dataclasses import replace
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
+from lib.nix.models.sources import SourceEntry, SourcesFile
 from lib.tests._run_updates_helpers import make_run_plan
 from lib.tests._update_workspace_helpers import init_update_workspace_repo
 from lib.update.candidate import Candidate, Preparation, ResolvedVersion, git
@@ -22,6 +24,7 @@ from lib.update.prepare_shard import (
     require_exact_prepare_coverage,
 )
 from lib.update.refs import FlakeInputRef
+from lib.update.sources import load_all_sources
 from lib.update.updaters import ensure_updaters_loaded
 
 _PLAN = ("alpha", "beta", "gamma", "delta", "epsilon", "zeta")
@@ -417,6 +420,35 @@ def test_apply_prepare_shard_filters_execution_and_keeps_targets() -> None:
     assert empty.prepare_hashed == ()
 
 
+def test_apply_prepare_shard_keeps_unplanned_sources_as_baselines() -> None:
+    """An aggregate slice still reads consumers outside the targeted plan.
+
+    PR #311 targeted electron-runtimes with two of its consumers; dropping
+    every unplanned consumer failed Darwin prepare with "consumers are missing
+    source metadata". Names hashed on a sibling shard still leave the slice.
+    """
+    plan = make_run_plan(source_names=("alpha", "beta"))
+    baseline = SourceEntry(hashes={})
+    plan = replace(
+        plan,
+        sources=SourcesFile(
+            entries={**plan.sources.entries, "unplanned": baseline},
+        ),
+    )
+    first = Preparation(
+        system="aarch64-darwin",
+        targets=("alpha", "beta"),
+        prepare_shard=0,
+        prepare_shard_count=2,
+    )
+    narrowed = _apply_prepare_shard(plan, first)
+    assert narrowed is not None
+    assert first.prepare_hashed == ("alpha",)
+    assert narrowed.resolved.source_names == ["alpha"]
+    assert set(narrowed.sources.entries) == {"alpha", "unplanned"}
+    assert narrowed.sources.entries["unplanned"] is baseline
+
+
 def test_apply_prepare_shard_claims_no_coverage_without_a_plan() -> None:
     """A selection error is not an empty successful slice."""
     sharded = Preparation(
@@ -748,3 +780,37 @@ def test_load_prepare_shard_seed_requires_one_seed_per_shard(
         pin.model_dump_json(), encoding="utf-8"
     )
     assert pipeline.load_prepare_shard_seed(shards) == pin
+
+
+def test_prepare_shard_feeds_the_real_electron_inventory_its_consumers() -> None:
+    """The real inventory updater succeeds on the shard that owns it.
+
+    PR #311 run 41268684498: prepare-darwin-0 hashed electron-runtimes with
+    only bb and gooeypi of its consumers targeted. The slice dropped the
+    other consumers' entries, so the updater raised "missing source
+    metadata" although an unsharded prepare reads their baselines.
+    """
+    sources = load_all_sources()
+    updaters = ensure_updaters_loaded()
+    consumers = aggregate_source_members(updaters, "electron-runtimes")
+    targets = ("bb", "electron-runtimes", "gooeypi", "energy", "macfuse")
+    assert [name for name in consumers if name not in targets]
+    plan = replace(make_run_plan(source_names=targets), sources=sources)
+    inventory = cast("Any", updaters["electron-runtimes"])
+    owners = []
+    for shard in range(5):
+        preparation = Preparation(
+            system="aarch64-darwin",
+            targets=targets,
+            prepare_shard=shard,
+            prepare_shard_count=5,
+        )
+        narrowed = _apply_prepare_shard(plan, preparation)
+        if narrowed is None:
+            continue
+        sibling = set(preparation.prepare_plan) - set(preparation.prepare_hashed)
+        if "electron-runtimes" in narrowed.resolved.source_names:
+            owners.append(shard)
+            assert inventory._consumer_versions(narrowed.sources.entries)
+        assert set(narrowed.sources.entries) == set(sources.entries) - sibling
+    assert len(owners) == 1

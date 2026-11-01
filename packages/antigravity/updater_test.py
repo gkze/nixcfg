@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import plistlib
 import struct
 import subprocess
@@ -670,6 +671,48 @@ def test_signer_tracks_the_electron_44_inventory_cutover(tmp_path: Path) -> None
     assert tuple(path.relative_to(app).as_posix() for path in machos) == tuple(
         label for label in module.EXPECTED_MACHOS if label not in opengl
     )
+
+
+def test_signer_tracks_the_2_28_ble_scanner_inventory(tmp_path: Path) -> None:
+    """2.28.2 bundles add cable_ble_scanner; older bundles must not carry it."""
+    module = _load_signing_module()
+    app = _write_signing_bundle(tmp_path)
+    scanner = "Contents/Resources/bin/cable_ble_scanner"
+    info_path = app / "Contents/Info.plist"
+    for label in module._ELECTRON_44_REMOVED_MACHOS:
+        (app / label).unlink()
+    (app / scanner).write_bytes(bytes.fromhex("cffaedfe") + b"test Mach-O")
+
+    def set_version(version: str) -> None:
+        with info_path.open("wb") as info_handle:
+            plistlib.dump({"CFBundleShortVersionString": version}, info_handle)
+
+    set_version("2.25.0")
+    with pytest.raises(module.SigningError, match="Mach-O inventory"):
+        module.discover_inventory(app)
+
+    set_version("2.28.2")
+    machos, _bundles = module.discover_inventory(app)
+    labels = tuple(path.relative_to(app).as_posix() for path in machos)
+    assert scanner in labels
+    assert labels == tuple(
+        sorted(
+            (
+                *(
+                    label
+                    for label in module.EXPECTED_MACHOS
+                    if label not in module._ELECTRON_44_REMOVED_MACHOS
+                ),
+                scanner,
+            ),
+            key=os.fsencode,
+        )
+    )
+    assert module.EXPECTED_ENTITLEMENTS[scanner] == _JIT_ENTITLEMENTS
+
+    (app / scanner).unlink()
+    with pytest.raises(module.SigningError, match="Mach-O inventory"):
+        module.discover_inventory(app)
 
 
 @pytest.mark.parametrize(

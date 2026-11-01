@@ -54,7 +54,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gitbutler = {
-      url = "github:gitbutlerapp/gitbutler/release/0.22.3";
+      url = "github:gitbutlerapp/gitbutler/release/0.23.1";
       flake = false;
     };
     home-manager = {

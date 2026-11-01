@@ -1,8 +1,8 @@
 {
-  "commit": "fb1f462010075cb8dfe834f78669d21f9ca988c7",
+  "commit": "551f1bd5b601f63d5807842feacfcbb82d5c8c16",
   "hashes": [
     {
-      "hash": "sha256-OusAU24KicIXB6zgVzTQn4yG+0xanMM4huVoXxEh2Kw=",
+      "hash": "sha256-WiAD7tdOodmQ4ve6QSDoh1s/EYPCR2loIkrAV+ZqFiA=",
       "hashType": "srcHash"
     },
     {
@@ -10,8 +10,5 @@
       "hashType": "vendorHash"
     }
   ],
-  "pins": {
-    "checkSkipVersion": "0.5.1"
-  },
-  "version": "0.7.2"
+  "version": "0.8.1"
 }

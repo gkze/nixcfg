@@ -13,6 +13,8 @@ describe("Nix-managed connect credential storage", () => {
       rm: vi.fn(async () => undefined),
       writeFile: vi.fn(async () => undefined),
     };
+    const decryptString = vi.spyOn(nixManagedConnectCredentialEncryption, "decryptString");
+    const encryptString = vi.spyOn(nixManagedConnectCredentialEncryption, "encryptString");
     const cache = createConnectCredentialCache({
       encryption: nixManagedConnectCredentialEncryption,
       fs,
@@ -27,7 +29,13 @@ describe("Nix-managed connect credential storage", () => {
       serverUrl: "http://127.0.0.1:38886",
     });
 
-    expect(fs.readFile).not.toHaveBeenCalled();
+    // Upstream may read the cache file before checking availability; the
+    // preserved bytes must never reach safeStorage or be removed/replaced.
+    for (const [path] of vi.mocked(fs.readFile).mock.calls) {
+      expect(path).toBe("/preserved-user-data/connect-credential.bin");
+    }
+    expect(decryptString).not.toHaveBeenCalled();
+    expect(encryptString).not.toHaveBeenCalled();
     expect(fs.rm).not.toHaveBeenCalled();
     expect(fs.writeFile).not.toHaveBeenCalled();
     expect(preservedBytes.toString()).toBe("existing-encrypted-credential");

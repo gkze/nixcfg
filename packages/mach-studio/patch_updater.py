@@ -226,6 +226,26 @@ _UNIFIED_ENGINE_CLOSED = (
     b"e:`failed`,message:t}}}"
 )
 
+# 0.1.221 drops the wheel path: the vendor provisioner itself runs
+# `uv sync --locked` against the packaged engine project and then checks the
+# certified MLX runtime contract, so only the updater gate is Nix-owned there.
+# These identifier-free anchors pin that reviewed provisioner; any return of a
+# `pip install` provisioner, or of the wheel-era renderer copy, fails closed.
+_LOCKED_SOURCE_ENGINE_INVENTORY = (
+    (
+        b"[`sync`,`--locked`,`--no-dev`,`--project`,r,`--python`,"
+        b"e.pythonExecutable,`--extra`,`dev`,`--extra`,`dflash`]",
+        1,
+    ),
+    (b"{UV_PROJECT_ENVIRONMENT:e.localMoeVenvRoot}", 1),
+    (b"`mlx_runtime_contract.py`", 1),
+    (b"[a,`--lock`,i]", 1),
+    (b"[`pip`,`install`", 0),
+)
+_LOCKED_SOURCE_DISABLED_GATE = _CURRENT_DISABLED_GATE.ljust(
+    len(_CURRENT_ENABLED_GATE), b" "
+)
+
 _WHEEL_REINSTALL_DESCRIPTION = (
     b"Wipes the `.venv/` directory and rebuilds it from the bundled lockfile and "
     b"wheel. Use this when local models fail to start with an engine-unavailable "
@@ -277,6 +297,51 @@ def _replace_exact(
     return payload.replace(old, new)
 
 
+def _is_locked_source_main(payload: bytes) -> bool:
+    """Report whether the main chunk carries the reviewed 0.1.221 provisioner."""
+    sync_anchor = _LOCKED_SOURCE_ENGINE_INVENTORY[0][0]
+    if sync_anchor not in payload:
+        return False
+    for anchor, count in _LOCKED_SOURCE_ENGINE_INVENTORY:
+        actual_count = payload.count(anchor)
+        if actual_count != count:
+            msg = (
+                "expected the reviewed Mach Studio locked-source provisioner "
+                f"inventory: {anchor!r} appears {actual_count} time(s), not {count}"
+            )
+            raise PatchError(msg)
+    return True
+
+
+def _patch_locked_source_main(payload: bytes) -> bytes:
+    """Close only the updater gate; the reviewed provisioner stays vendor-owned."""
+    open_gate = payload.count(_CURRENT_ENABLED_GATE)
+    closed_gate = payload.count(_LOCKED_SOURCE_DISABLED_GATE)
+    if (open_gate, closed_gate) == (0, 1):
+        return payload
+    if (open_gate, closed_gate) != (1, 0):
+        msg = "expected one Mach Studio locked-source updater gate"
+        raise PatchError(msg)
+    return payload.replace(_CURRENT_ENABLED_GATE, _LOCKED_SOURCE_DISABLED_GATE, 1)
+
+
+def _require_no_legacy_renderer_inventory(asar_path: Path) -> None:
+    for relative_path in packed_file_paths(asar_path):
+        if _RENDERER_PATH_PATTERN.fullmatch(relative_path) is None:
+            continue
+        payload = read_packed_file(asar_path, relative_path)
+        if any(
+            anchor in payload
+            for inventory in (_RENDERER_VENDOR_INVENTORY, _RENDERER_SOURCE_INVENTORY)
+            for anchor, _count in inventory
+        ):
+            msg = (
+                "locked-source Mach Studio main policy with legacy engine renderer "
+                f"inventory in {relative_path}"
+            )
+            raise PatchError(msg)
+
+
 def _patch_unified_main(payload: bytes) -> bytes:
     """Patch the exact current gate/provisioner pair without changing ASAR size."""
     open_gate = payload.count(_CURRENT_ENABLED_GATE)
@@ -298,6 +363,8 @@ def _patch_unified_main(payload: bytes) -> bytes:
 
 def patch_main(payload: bytes) -> bytes:
     """Fail closed on updater or local-engine provisioning drift."""
+    if _is_locked_source_main(payload):
+        return _patch_locked_source_main(payload)
     if _CURRENT_ENABLED_GATE in payload or _CURRENT_DISABLED_GATE in payload:
         return _patch_unified_main(payload)
     patched = _replace_exact(
@@ -423,8 +490,16 @@ def patch_bundle(asar_path: Path, info_plist_path: Path) -> str:
         )
         raise PatchError(msg)
     main_policy_path = resolve_main_policy_path(asar_path)
-    renderer_path = resolve_renderer_path(asar_path)
     main_payload = read_packed_file(asar_path, main_policy_path)
+    if _is_locked_source_main(main_payload):
+        _require_no_legacy_renderer_inventory(asar_path)
+        patch_main(main_payload)
+        return patch_bundle_integrity(
+            asar_path,
+            info_plist_path,
+            lambda staged: replace_packed_file(staged, main_policy_path, patch_main),
+        )
+    renderer_path = resolve_renderer_path(asar_path)
     renderer_payload = read_packed_file(asar_path, renderer_path)
     patch_main(main_payload)
     patch_renderer(renderer_payload)
