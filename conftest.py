@@ -23,16 +23,18 @@ def _no_hosted_github_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GITHUB_ENV", raising=False)
 
 
-@pytest.fixture(autouse=True)
-def _no_invoking_repository_git_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def pytest_configure(config: pytest.Config) -> None:
     """Keep fixture Git commands off the repository running the suite.
 
     The pre-push hook runs pytest with Git's hook environment; from a linked
     worktree that includes ``GIT_DIR``, so a fixture's ``git clone --bare``
-    set ``core.bare=true`` and its ``git add`` emptied the real index.
+    set ``core.bare=true`` and its ``git add`` emptied the real index. Scrub
+    the process environment once: a per-test ``monkeypatch.delenv`` is undone
+    by any test that calls ``monkeypatch.undo()``.
     """
+    del config
     for name in GIT_LOCAL_ENV_VARS:
-        monkeypatch.delenv(name, raising=False)
+        os.environ.pop(name, None)
 
 
 @pytest.fixture(autouse=True)
