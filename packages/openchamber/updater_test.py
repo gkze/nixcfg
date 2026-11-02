@@ -1025,6 +1025,47 @@ def test_openchamber_patcher_is_transactional_and_component_scoped(
     } == opencode_before
 
 
+def test_openchamber_patcher_accepts_2_6_0_surface_shapes(tmp_path: Path) -> None:
+    """2.6.0 prepends asarUnpack entries and widens downloadUpdate's state."""
+    module = _load_patcher_module()
+    roots = _write_patcher_fixture(module, tmp_path)
+    root = roots["openchamber"]
+    electron = root / "packages/electron/package.json"
+    electron.write_text(
+        '    "asarUnpack": [\n      "node_modules/7zip-bin/win/**/*",\n'
+        + electron.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    download = module._OPENCHAMBER_PATCHES["renderer-download"].old
+    store = root / "packages/ui/src/stores/useUpdateStore.ts"
+    store.write_text(
+        store.read_text(encoding="utf-8").replace(
+            download,
+            f"{download}, downloading }} = get();",
+        ),
+        encoding="utf-8",
+    )
+
+    module.patch_component("openchamber", root)
+
+    assert (
+        '      "node_modules/7zip-bin/win/**/*",\n'
+        '      "node_modules/@openchamber/web/server/lib/git/repository-credential-helper.js",\n'
+        '      "**/*.node",\n'
+        '      "**/*.dylib"\n'
+        "    ],\n"
+    ) in electron.read_text(encoding="utf-8")
+    assert (
+        "  downloadUpdate: async () => {\n"
+        "    if (NIX_MANAGED) {\n"
+        "      set({ error: NIX_MANAGED_MESSAGE });\n"
+        "      return;\n"
+        "    }\n"
+        "\n"
+        "    const { available, runtimeType, downloading } = get();"
+    ) in store.read_text(encoding="utf-8")
+
+
 def test_openchamber_patches_v1_upgrade_before_any_side_effect(tmp_path: Path) -> None:
     """The companion uses the pinned 1.x layout and rejects managed upgrades."""
     module = _load_patcher_module()
