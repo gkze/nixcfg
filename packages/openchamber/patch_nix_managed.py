@@ -96,18 +96,11 @@ _OPENCHAMBER_PATCHES: Final = {
     ),
     "electron-asar-native-unpack": SourcePatch(
         "packages/electron/package.json",
-        """    "asarUnpack": [
-      "node_modules/@openchamber/web/server/built-in-extensions/**/*",
-      "node_modules/@openchamber/web/server/lib/git/credential-helper.js",
-      "node_modules/@openchamber/web/server/lib/git/ssh-wrapper.js",
-      "node_modules/@openchamber/web/server/lib/git/repository-credential-helper.js"
+        # Only the list's tail: 2.6.0 prepends 7zip-bin to it.
+        """      "node_modules/@openchamber/web/server/lib/git/repository-credential-helper.js"
     ],
 """,
-        """    "asarUnpack": [
-      "node_modules/@openchamber/web/server/built-in-extensions/**/*",
-      "node_modules/@openchamber/web/server/lib/git/credential-helper.js",
-      "node_modules/@openchamber/web/server/lib/git/ssh-wrapper.js",
-      "node_modules/@openchamber/web/server/lib/git/repository-credential-helper.js",
+        """      "node_modules/@openchamber/web/server/lib/git/repository-credential-helper.js",
       "**/*.node",
       "**/*.dylib"
     ],
@@ -174,17 +167,15 @@ const NIX_MANAGED_MESSAGE = 'Updates are managed by Nix.';
     ),
     "renderer-download": SourcePatch(
         "packages/ui/src/stores/useUpdateStore.ts",
-        """  downloadUpdate: async () => {
-    const { available, runtimeType } = get();
-""",
+        # Stop before the destructuring's tail: 2.6.0 added ``downloading``.
+        "  downloadUpdate: async () => {\n    const { available, runtimeType",
         """  downloadUpdate: async () => {
     if (NIX_MANAGED) {
       set({ error: NIX_MANAGED_MESSAGE });
       return;
     }
 
-    const { available, runtimeType } = get();
-""",
+    const { available, runtimeType""",
     ),
     "renderer-restart": SourcePatch(
         "packages/ui/src/stores/useUpdateStore.ts",
