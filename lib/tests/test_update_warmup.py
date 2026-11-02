@@ -25,6 +25,7 @@ from lib.update.ci.warmup import (
     SETTINGS_MEMBER_CRATES,
     SHARED_MISSING_MIN_ROOTS,
     SOURCE_FETCH_DNS_HOSTS,
+    SOURCE_FETCH_DNS_PROBES,
     SOURCE_FETCH_RETRY_BACKOFF_SECONDS,
     WARMUP_DRVS_CACHE_INFO,
     WARMUP_DRVS_NAME,
@@ -84,6 +85,7 @@ from lib.update.ci.warmup import (
     is_rust_extension_host_store_path,
     is_rust_language_models_store_path,
     is_rust_overlay_binary_component,
+    is_rust_overlay_target_tarball,
     is_rust_zed_store_path,
     is_rusty_v8_native_store_path,
     is_safe_rust_warmup_other,
@@ -2465,6 +2467,84 @@ def test_is_source_fetch_transport_error_matches_chromium_503() -> None:
     assert is_source_fetch_transport_error(
         "curl: (22) The requested URL returned error: 502"
     )
+
+
+@pytest.mark.parametrize("keep_going", [False, True])
+def test_41351558501_rust_overlay_tarball_dns_miss_is_a_retryable_fetch(
+    *, keep_going: bool
+) -> None:
+    """41351558501 slot 2: a sub-minute VM DNS outage failed rust warmup.
+
+    Nix lost the network at 04:42:38Z, could not query gkze (which serves
+    the tarball), fell back to rust-overlay's pinned fetchurl and curl (6)
+    failed on static.rust-lang.org. The mirror line was fatal because the
+    ``rustc-`` prefix is must-substitute, so the DNS-gated FOD retry never
+    ran. A target-triple tarball is a download, not a rustc bootstrap.
+    """
+    drv = (
+        "/nix/store/l2mdqrryalzclnnv7mcdg9s02975h38a-"
+        "rustc-1.98.1-aarch64-apple-darwin.tar.xz.drv"
+    )
+    cannot = f"[rust-warmup] error: Cannot build '{drv}'."
+    curl = (
+        "[rust-warmup]        > curl: (6) Could not resolve host: static.rust-lang.org"
+    )
+    mirror = (
+        "[rust-warmup]        > error: cannot download "
+        "rustc-1.98.1-aarch64-apple-darwin.tar.xz from any mirror"
+    )
+    for line in (cannot, curl, mirror):
+        assert warmup_fatal_line(line, keep_going=keep_going) is None
+        raise_if_warmup_fatal(line, keep_going=keep_going)
+    assert is_source_fetch_mirror_line(mirror)
+    assert is_source_fetch_store_path(drv)
+    assert is_rust_overlay_target_tarball("rustc-1.98.1-aarch64-apple-darwin.tar.xz")
+    assert is_rust_overlay_target_tarball(
+        "rust-std-1.98.1-x86_64-unknown-linux-gnu.tar.gz"
+    )
+    failure = DerivationValidationFailure(
+        source="rust-warmup",
+        installable=f"{drv}^*",
+        message=f"{cannot}\n{mirror}",
+    )
+    assert source_fetch_retry_drvs((failure,)) == (drv,)
+    # nixpkgs rustc / bmake / clang sources stay must-substitute.
+    for name in (
+        "rustc-1.98.1.tar.gz",
+        "rustc-1.98.1-src.tar.gz",
+        "bmake-20260313.tar.gz",
+        "clang-19.1.7.src.tar.xz",
+        "rustc-1.98.1-aarch64-apple-darwin",
+    ):
+        assert not is_rust_overlay_target_tarball(name)
+    for name in ("rustc-1.98.1.tar.gz", "bmake-20260313.tar.gz"):
+        line = f"error: cannot download {name} from any mirror"
+        assert warmup_fatal_line(line) == "cannot download from any mirror"
+
+
+def test_wait_for_source_fetch_network_polls_through_a_short_outage() -> None:
+    """41351558501 slot 2: DNS was back within a minute; one probe can miss it."""
+    sleeps: list[float] = []
+    answers = iter((False, False, False, True))
+
+    def resolve(host: str, port: int) -> object:
+        assert port == 443
+        if host == SOURCE_FETCH_DNS_HOSTS[0] and not next(answers):
+            raise OSError("Could not resolve host")
+        return [("AF_INET", host)]
+
+    assert wait_for_source_fetch_network(resolve=resolve, sleep=sleeps.append)
+    assert sleeps == [SOURCE_FETCH_RETRY_BACKOFF_SECONDS] * 4
+    dead: list[float] = []
+    assert (
+        wait_for_source_fetch_network(
+            resolve=lambda *_a: (_ for _ in ()).throw(OSError("dns")),
+            sleep=dead.append,
+        )
+        is False
+    )
+    assert dead == [SOURCE_FETCH_RETRY_BACKOFF_SECONDS] * SOURCE_FETCH_DNS_PROBES
+    assert SOURCE_FETCH_DNS_PROBES * SOURCE_FETCH_RETRY_BACKOFF_SECONDS <= 120
 
 
 def test_source_fetch_network_ready_requires_both_hosts() -> None:
