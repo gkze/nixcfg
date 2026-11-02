@@ -3403,6 +3403,7 @@ def test_rust_warmup_agent_ui_slot_realizes_agent_ui_last(
     monkeypatch.setattr(
         pipeline, "language_models_input_drvs", lambda _drvs: (language_models_drv,)
     )
+    monkeypatch.setattr(pipeline, "rust_svh_input_drvs", lambda *_a, **_k: ())
     agent_ui = "/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0"
     agent_ui_drv = "/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0.drv"
     other = "/nix/store/otheraaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_gpui-0.1.0"
@@ -3569,6 +3570,103 @@ def test_rust_warmup_agent_ui_slot_realizes_agent_ui_last(
         pipeline.validate_candidate(
             candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
         )
+
+
+def test_rust_warmup_agent_ui_slot_force_locals_every_svh_input(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """agent_ui force-locals its workspace inputs instead of racing siblings.
+
+    41399221218 slot 1: rust_agent / rust_acp_thread lived only in other
+    stripes that had not pushed yet, so the agent_ui leaf --fallback
+    streamed 43 wbb and hit the 32-cap.
+    """
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[tuple[object, bool, bool, bool]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("keep_going")),
+        ))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "compiler_input_drvs", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    language_models_drv = (
+        "/nix/store/lmdrvaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0.drv"
+    )
+    agent_drv = "/nix/store/agentaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent-0.1.0.drv"
+    acp_thread_drv = (
+        "/nix/store/acpthaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_acp_thread-0.1.0.drv"
+    )
+    agent_ui = "/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0"
+    agent_ui_drv = "/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0.drv"
+    svh_queries: list[tuple[str, ...]] = []
+
+    def svh_inputs(parents: tuple[str, ...], **_kwargs: object) -> tuple[str, ...]:
+        svh_queries.append(tuple(parents))
+        return (language_models_drv, agent_drv, acp_thread_drv)
+
+    monkeypatch.setattr(
+        pipeline, "language_models_input_drvs", lambda _drvs: (language_models_drv,)
+    )
+    monkeypatch.setattr(pipeline, "rust_svh_input_drvs", svh_inputs)
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            tree=candidate.tree,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(agent_ui,),
+            rustLayers=((agent_ui,),),
+            outputDrvs={agent_ui: agent_ui_drv},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=1, missing=1, warmup=1, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.gates == ()
+    assert svh_queries == [(agent_ui_drv,)]
+    # The force-local family carries every workspace input, so the
+    # 32-capped leaf realize only has rust_agent_ui itself left to build.
+    assert realized == [
+        ((language_models_drv, agent_drv, acp_thread_drv), True, True, True),
+        ((agent_ui_drv,), True, False, False),
+    ]
 
 
 def test_rust_warmup_zed_slot_force_locals_extension_host_family(

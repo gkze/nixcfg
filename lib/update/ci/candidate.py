@@ -1526,6 +1526,16 @@ def _realize_rust_warmup(
         if not family:
             msg = "agent_ui drv has no rust_language_models input"
             raise WarmupError(msg)
+        # 41399221218 slot 1: the agent_ui leaf --fallback streamed 43 wbb
+        # (32-cap) because rust_agent / rust_acp_thread / rust_action_log
+        # and the rest of its workspace inputs were only in sibling
+        # stripes that had not pushed yet (every slot started 07:59Z;
+        # 41339729368 passed with 2 wbb only because slot 4 had pushed
+        # them 50 min earlier). Substituting them would also link a
+        # sibling's rlibs against this slot's force-local language_models
+        # (nixpkgs#482646, E0460/E0463). Force-local every SVH input with
+        # the leaf, the same as rust_zed, so it never races siblings.
+        family = tuple(dict.fromkeys((*family, *rust_svh_input_drvs(agent_ui))))
     family = _expand_svh_family_from_stripe(family, settings, stripe_svh, others, plan)
     # Named-crate canaries take paths from every layer, so no slot owns them.
     gate = (
