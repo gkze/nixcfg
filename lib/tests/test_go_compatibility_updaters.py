@@ -30,6 +30,14 @@ _COMMIT = "a" * 40
 _REF = "v1.2.3"
 _UPDATERS = (
     pytest.param(
+        "packages/anthropic-cli/updater.py",
+        "AnthropicCliUpdater",
+        "anthropic-cli",
+        "anthropics",
+        "anthropic-cli",
+        id="anthropic-cli",
+    ),
+    pytest.param(
         "packages/axiom-cli/updater.py",
         "AxiomCliUpdater",
         "axiom-cli",
