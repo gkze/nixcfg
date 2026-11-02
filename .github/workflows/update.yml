@@ -402,6 +402,15 @@ jobs:
     needs:
       - prepare-merge
       - validate-darwin-warm-rust
+      - validate-darwin-warm-rust-faults
+      - validate-darwin-warm-rust-retry
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-merge.result == 'success' &&
+      needs.validate-darwin-warm-rust.result == 'success' &&
+      needs.validate-darwin-warm-rust-faults.result == 'success' &&
+      (needs.validate-darwin-warm-rust-retry.result == 'success' ||
+      needs.validate-darwin-warm-rust-retry.result == 'skipped')
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04-arm
@@ -413,6 +422,15 @@ jobs:
     needs:
       - prepare-merge
       - validate-darwin-warm-rust
+      - validate-darwin-warm-rust-faults
+      - validate-darwin-warm-rust-retry
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-merge.result == 'success' &&
+      needs.validate-darwin-warm-rust.result == 'success' &&
+      needs.validate-darwin-warm-rust-faults.result == 'success' &&
+      (needs.validate-darwin-warm-rust-retry.result == 'success' ||
+      needs.validate-darwin-warm-rust-retry.result == 'skipped')
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04
@@ -654,6 +672,65 @@ jobs:
       warmup_artifact: plan-shards-x86_64-linux
       warmup_slot: ${{ matrix.slot }}
     secrets: inherit
+  # A kernel block-device I/O error under a warmup slot (41339729368
+  # cascade-warmup 3) leaves that VM's store untrusted, exactly as for a
+  # prepare shard. The slot quarantines itself, uploads its evidence under
+  # a -device-fault name and succeeds with device_fault=true. A matrix cell
+  # cannot publish a job output, so -faults reads the faulted slots back
+  # from those artifact names and -retry reruns each one once on a fresh
+  # VM, after the whole stripe, so the five-runner pool is unchanged. A
+  # retry that faults again fails. Consumers need the stripe, -faults and
+  # a successful or skipped -retry.
+  validate-darwin-warm-rust-faults:
+    needs: validate-darwin-warm-rust
+    if: |-
+      always() && !cancelled() &&
+      needs.validate-darwin-warm-rust.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      slots: ${{ steps.faults.outputs.slots }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.inputs.repair_commit || github.sha }}
+          persist-credentials: false
+      - name: List device-faulted slots
+        id: faults
+        env:
+          NIXCFG_ACTIONS_TOKEN: ${{ github.token }}
+          NIXCFG_FAULT_ARTIFACT_PREFIX: validate-aarch64-darwin-rust-warmup-rust-
+          NIXCFG_FAULT_SLOTS: 0 1 2 3 4
+          NIXCFG_CI_STAGE: device-fault-slots
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+  validate-darwin-warm-rust-retry:
+    needs:
+      - validate-darwin-warm-rust
+      - validate-darwin-warm-rust-faults
+    if: |-
+      always() && !cancelled() &&
+      needs.validate-darwin-warm-rust-faults.result == 'success' &&
+      needs.validate-darwin-warm-rust-faults.outputs.slots != '[]'
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        slot: ${{ fromJSON(needs.validate-darwin-warm-rust-faults.outputs.slots) }}
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      previous: prepare-x86_64-linux
+      scope: rust-warmup
+      shard: rust-${{ matrix.slot }}
+      warmup_artifact: plan-shards-x86_64-linux
+      warmup_slot: ${{ matrix.slot }}
+      device_fault_retry: true
+    secrets: inherit
   # Shared non-rust outputs present in two or more Darwin roots. All-root
   # intersection left remaining=1724/1733 on 38130420607 (rust peel only)
   # and remaining=829/836 on 38146388927 (darwin-only shared, not home).
@@ -703,11 +780,16 @@ jobs:
       - validate-darwin-warm-rust
       - canary-warm-cascade
       - prebuild-darwin-leaves
+      - validate-darwin-warm-rust-faults
+      - validate-darwin-warm-rust-retry
     if: |-
       always() && !cancelled() &&
       needs.prepare-merge.result == 'success' &&
       needs.plan-darwin-closures.result == 'success' &&
       needs.validate-darwin-warm-rust.result == 'success' &&
+      needs.validate-darwin-warm-rust-faults.result == 'success' &&
+      (needs.validate-darwin-warm-rust-retry.result == 'success' ||
+      needs.validate-darwin-warm-rust-retry.result == 'skipped') &&
       (needs.canary-warm-cascade.result == 'success' ||
       needs.canary-warm-cascade.result == 'skipped' ||
       needs.canary-warm-cascade.result == 'failure') &&
@@ -730,6 +812,57 @@ jobs:
       warmup_artifact: plan-shards-x86_64-linux
       warmup_slot: ${{ matrix.slot }}
     secrets: inherit
+  # Same device-fault hand-off and fresh-VM retry as the rust stripe.
+  validate-darwin-cascade-warmup-faults:
+    needs: validate-darwin-cascade-warmup
+    if: |-
+      always() && !cancelled() &&
+      needs.validate-darwin-cascade-warmup.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      slots: ${{ steps.faults.outputs.slots }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.inputs.repair_commit || github.sha }}
+          persist-credentials: false
+      - name: List device-faulted slots
+        id: faults
+        env:
+          NIXCFG_ACTIONS_TOKEN: ${{ github.token }}
+          NIXCFG_FAULT_ARTIFACT_PREFIX: validate-aarch64-darwin-cascade-warmup-cascade-
+          NIXCFG_FAULT_SLOTS: 0 1 2 3 4
+          NIXCFG_CI_STAGE: device-fault-slots
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+  validate-darwin-cascade-warmup-retry:
+    needs:
+      - validate-darwin-cascade-warmup
+      - validate-darwin-cascade-warmup-faults
+    if: |-
+      always() && !cancelled() &&
+      needs.validate-darwin-cascade-warmup-faults.result == 'success' &&
+      needs.validate-darwin-cascade-warmup-faults.outputs.slots != '[]'
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        slot: ${{ fromJSON(needs.validate-darwin-cascade-warmup-faults.outputs.slots) }}
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      previous: prepare-x86_64-linux
+      scope: cascade-warmup
+      shard: cascade-${{ matrix.slot }}
+      warmup_artifact: plan-shards-x86_64-linux
+      warmup_slot: ${{ matrix.slot }}
+      device_fault_retry: true
+    secrets: inherit
   # Package inventory is certify evidence. It waits for cascade so the
   # free-tier 5 macos-15 runners stay on the 5-wide stripe
   # (38394692516 slot 2 queued ~2h20m when packages started in
@@ -740,6 +873,16 @@ jobs:
       - prepare-merge
       - plan-darwin-closures
       - validate-darwin-cascade-warmup
+      - validate-darwin-cascade-warmup-faults
+      - validate-darwin-cascade-warmup-retry
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-merge.result == 'success' &&
+      needs.plan-darwin-closures.result == 'success' &&
+      needs.validate-darwin-cascade-warmup.result == 'success' &&
+      needs.validate-darwin-cascade-warmup-faults.result == 'success' &&
+      (needs.validate-darwin-cascade-warmup-retry.result == 'success' ||
+      needs.validate-darwin-cascade-warmup-retry.result == 'skipped')
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -775,7 +918,11 @@ jobs:
       - cache-darwin-linux-deps-arm
       - cache-darwin-linux-deps-x86
       - validate-darwin-warm-rust
+      - validate-darwin-warm-rust-faults
+      - validate-darwin-warm-rust-retry
       - validate-darwin-cascade-warmup
+      - validate-darwin-cascade-warmup-faults
+      - validate-darwin-cascade-warmup-retry
     if: |-
       always() && !cancelled() &&
       needs.plan-darwin-closures.result == 'success' &&
@@ -783,7 +930,13 @@ jobs:
       needs.cache-darwin-linux-deps-arm.result == 'success' &&
       needs.cache-darwin-linux-deps-x86.result == 'success' &&
       needs.validate-darwin-warm-rust.result == 'success' &&
-      needs.validate-darwin-cascade-warmup.result == 'success'
+      needs.validate-darwin-warm-rust-faults.result == 'success' &&
+      (needs.validate-darwin-warm-rust-retry.result == 'success' ||
+      needs.validate-darwin-warm-rust-retry.result == 'skipped') &&
+      needs.validate-darwin-cascade-warmup.result == 'success' &&
+      needs.validate-darwin-cascade-warmup-faults.result == 'success' &&
+      (needs.validate-darwin-cascade-warmup-retry.result == 'success' ||
+      needs.validate-darwin-cascade-warmup-retry.result == 'skipped')
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan-darwin-closures.outputs.darwin_closure_shards) }}
@@ -838,7 +991,11 @@ jobs:
       - validate-arm
       - validate-x86
       - validate-darwin-warm-rust
+      - validate-darwin-warm-rust-faults
+      - validate-darwin-warm-rust-retry
       - validate-darwin-cascade-warmup
+      - validate-darwin-cascade-warmup-faults
+      - validate-darwin-cascade-warmup-retry
       - validate-darwin-packages
       - validate-darwin-roots
       - validate-darwin-closures
@@ -885,7 +1042,11 @@ jobs:
             validate-arm=${{ needs.validate-arm.result }}
             validate-x86=${{ needs.validate-x86.result }}
             validate-darwin-warm-rust=${{ needs.validate-darwin-warm-rust.result }}
+            validate-darwin-warm-rust-faults=${{ needs.validate-darwin-warm-rust-faults.result }}
+            validate-darwin-warm-rust-retry=${{ needs.validate-darwin-warm-rust-retry.result }}
             validate-darwin-cascade-warmup=${{ needs.validate-darwin-cascade-warmup.result }}
+            validate-darwin-cascade-warmup-faults=${{needs.validate-darwin-cascade-warmup-faults.result}}
+            validate-darwin-cascade-warmup-retry=${{needs.validate-darwin-cascade-warmup-retry.result}}
             validate-darwin-packages=${{ needs.validate-darwin-packages.result }}
             validate-darwin-roots=${{ needs.validate-darwin-roots.result }}
             validate-darwin-closures=${{ needs.validate-darwin-closures.result }}
@@ -900,7 +1061,13 @@ jobs:
           needs.validate-arm.result == 'success' &&
           needs.validate-x86.result == 'success' &&
           needs.validate-darwin-warm-rust.result == 'success' &&
+          needs.validate-darwin-warm-rust-faults.result == 'success' &&
+          (needs.validate-darwin-warm-rust-retry.result == 'success' ||
+          needs.validate-darwin-warm-rust-retry.result == 'skipped') &&
           needs.validate-darwin-cascade-warmup.result == 'success' &&
+          needs.validate-darwin-cascade-warmup-faults.result == 'success' &&
+          (needs.validate-darwin-cascade-warmup-retry.result == 'success' ||
+          needs.validate-darwin-cascade-warmup-retry.result == 'skipped') &&
           needs.validate-darwin-packages.result == 'success' &&
           needs.validate-darwin-roots.result == 'success' &&
           needs.validate-darwin-closures.result == 'success'
@@ -969,7 +1136,11 @@ jobs:
       - validate-arm
       - validate-x86
       - validate-darwin-warm-rust
+      - validate-darwin-warm-rust-faults
+      - validate-darwin-warm-rust-retry
       - validate-darwin-cascade-warmup
+      - validate-darwin-cascade-warmup-faults
+      - validate-darwin-cascade-warmup-retry
       - validate-darwin-packages
       - plan-darwin-closures
       - validate-darwin-roots

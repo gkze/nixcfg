@@ -38,11 +38,13 @@ flowchart TD
   PLAN --> CR[canary-warm-rust]
   FODS --> CR
   CR --> CC[canary-warm-cascade]
-  RUST --> CASCADE[validate-darwin-cascade-warmup: 5 slots]
+  RUST --> RF[validate-darwin-warm-rust-faults and -retry]
+  RF --> CASCADE[validate-darwin-cascade-warmup: 5 slots]
   CC --> CASCADE
-  RUST --> DEPS[cache-darwin-linux-deps-arm and -x86]
-  CASCADE --> PKG[validate-darwin-packages]
-  CASCADE --> ROOTS[validate-darwin-roots: planned shards]
+  RF --> DEPS[cache-darwin-linux-deps-arm and -x86]
+  CASCADE --> CF[validate-darwin-cascade-warmup-faults and -retry]
+  CF --> PKG[validate-darwin-packages]
+  CF --> ROOTS[validate-darwin-roots: planned shards]
   DEPS --> ROOTS
   ROOTS --> CLOS[validate-darwin-closures]
   DEPS --> CLOS
@@ -54,8 +56,8 @@ flowchart TD
   REPAIR --> START[start-repair: commit and dispatch]
 ```
 
-`publish` also needs `prepare-merge`, `plan-darwin-closures`, both warmups,
-and `validate-darwin-roots`. `repair` needs every job above it, so it can
+`publish` also needs `prepare-merge`, `plan-darwin-closures`, both warmups
+with their `-faults` and `-retry` jobs, and `validate-darwin-roots`. `repair` needs every job above it, so it can
 collect each failure. `canary-slots` reads `.github/update-kick` on a push or
 the canary inputs on a dispatch. A canary dispatch runs the prepare/merge and
 plan producers followed by the requested canary jobs; full validation and
@@ -114,7 +116,8 @@ A completed real failure of a required sibling stops the jobs that can no
 longer reach publish. `lib/update/sibling_failfast.py` owns that decision.
 The watched conclusions are `failure`, `timed_out`, and `startup_failure`.
 `cancelled` and `skipped` do not stop anyone. A device-faulted Darwin prepare
-still completes successfully so the fresh VM can retry it. The stop exits the
+or warmup slot still completes successfully so a fresh VM can retry it. A
+warmup `-retry` cell watches its own stripe group. The stop exits the
 updater process and leaves the Cachix flush in place. GitHub
 `strategy.fail-fast` stays off because cancellation skips that flush.
 
@@ -410,6 +413,31 @@ error makes the runner's store untrusted:
 Any other preparation failure is still a failure. A device fault on the retry
 also leaves preparation incomplete, so the run fails. The PR update-prepare
 check uses the same retry.
+
+The `validate-darwin-warm-rust` and `validate-darwin-cascade-warmup` slots run
+the same check after the updater exits. A slot's work is fixed by the plan and
+its slot index, so a fresh VM can redo it exactly. Run 41339729368 needed this.
+Cascade slot 3 logged 110892 kernel I/O errors, and 56 seconds later `bsdtar`
+could not open a verified `bun` tarball. The same derivation rebuilt
+bit-identical off the hosted VM.
+
+- A faulted slot quarantines its runner as above and succeeds with
+  `device_fault=true`. Its evidence uploads as
+  `validate-aarch64-darwin-<scope>-<shard>-device-fault`.
+- A matrix cell cannot set a job output, so `<stripe>-faults` runs on Ubuntu
+  after the stripe. It lists this run's artifacts and emits the faulted slots
+  as JSON. It fails closed if the artifact list cannot be read.
+- `<stripe>-retry` reruns only those slots, once each, with the stripe's
+  inputs plus `device_fault_retry: true`. It starts after the whole stripe,
+  so the run still uses at most five `macos-15` runners. A device fault on
+  the retry fails that slot.
+- Every consumer of a stripe requires the stripe and `-faults` to succeed,
+  and `-retry` to succeed or be skipped. Coverage enforces the same rule. It
+  also fails when a warmup `-device-fault` artifact has no clean artifact
+  from its retry.
+
+Canary, package, root-shard, and closure validation have no retry job. They
+do not query the kernel log, and a fault there still fails the job.
 
 ### Validation failures and timeouts
 

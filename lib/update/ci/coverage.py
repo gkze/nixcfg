@@ -61,10 +61,24 @@ _REQUIRED_JOBS = (
     "validate-arm",
     "validate-x86",
     "validate-darwin-warm-rust",
+    "validate-darwin-warm-rust-faults",
     "validate-darwin-cascade-warmup",
+    "validate-darwin-cascade-warmup-faults",
     "validate-darwin-packages",
     "validate-darwin-roots",
     "validate-darwin-closures",
+)
+# A warmup -retry only runs for slots whose first attempt handed off a
+# device fault, so a clean stripe skips it. Its result is still mandatory.
+_RETRY_JOBS = (
+    "validate-darwin-warm-rust-retry",
+    "validate-darwin-cascade-warmup-retry",
+)
+_RETRY_RESULTS = frozenset({"success", "skipped"})
+_DEVICE_FAULT_SUFFIX = "-device-fault"
+_RETRIED_FAULT_ARTIFACTS = (
+    "validate-aarch64-darwin-rust-warmup-",
+    "validate-aarch64-darwin-cascade-warmup-",
 )
 _PACKAGE_REPORTS = (
     ("validate-aarch64-linux", "aarch64-linux"),
@@ -132,8 +146,11 @@ def parse_job_results(raw: str) -> dict[str, str]:
 
 
 def require_required_jobs(results: Mapping[str, str]) -> None:
-    """Fail if a required validator was skipped, cancelled, or failed."""
-    missing = [name for name in _REQUIRED_JOBS if name not in results]
+    """Fail if a required validator was skipped, cancelled, or failed.
+
+    A warmup retry may be skipped (no slot faulted) but nothing else.
+    """
+    missing = [name for name in required_coverage_jobs() if name not in results]
     if missing:
         msg = f"coverage job results omitted required jobs: {', '.join(missing)}"
         raise CoverageError(msg)
@@ -141,9 +158,36 @@ def require_required_jobs(results: Mapping[str, str]) -> None:
         f"{name}={results[name]}"
         for name in _REQUIRED_JOBS
         if results[name] != "success"
+    ] + [
+        f"{name}={results[name]}"
+        for name in _RETRY_JOBS
+        if results[name] not in _RETRY_RESULTS
     ]
     if bad:
         msg = f"required Update jobs did not succeed: {', '.join(bad)}"
+        raise CoverageError(msg)
+
+
+def require_device_fault_retries(evidence: Path) -> None:
+    """Fail unless every device-faulted warmup slot has a clean retry artifact.
+
+    The faulted slot's own artifact keeps a ``-device-fault`` name, and the
+    fresh-VM retry uploads the clean name. A faulted slot with no clean
+    counterpart was never redone, whatever the job results say.
+    """
+    if not evidence.is_dir():
+        msg = f"coverage evidence is not a directory: {evidence}"
+        raise CoverageError(msg)
+    unretried = sorted(
+        path.name
+        for path in evidence.iterdir()
+        if path.is_dir()
+        and path.name.endswith(_DEVICE_FAULT_SUFFIX)
+        and path.name.startswith(_RETRIED_FAULT_ARTIFACTS)
+        and not (evidence / path.name.removesuffix(_DEVICE_FAULT_SUFFIX)).is_dir()
+    )
+    if unretried:
+        msg = f"device-faulted warmup slots have no retry evidence: {', '.join(unretried)}"
         raise CoverageError(msg)
 
 
@@ -762,6 +806,7 @@ def assert_update_coverage(
 ) -> None:
     """Fail closed unless every planned root, shard, and package is present."""
     require_required_jobs(job_results)
+    require_device_fault_retries(evidence)
     if not darwin_roots(manifest):
         msg = "root manifest has no Darwin roots"
         raise CoverageError(msg)
@@ -802,8 +847,8 @@ def nixos_cache_store() -> str:
 
 
 def required_coverage_jobs() -> tuple[str, ...]:
-    """Return the job names coverage treats as mandatory."""
-    return _REQUIRED_JOBS
+    """Return the job names whose results coverage must receive."""
+    return (*_REQUIRED_JOBS, *_RETRY_JOBS)
 
 
 def coverage_platform() -> str:

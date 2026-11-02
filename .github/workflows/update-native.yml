@@ -71,6 +71,10 @@ on:
         description: rust-warmup or cascade-warmup matrix slot 0-4
         default: ""
         type: string
+      device_fault_retry:
+        description: Fresh-VM rerun of a device-faulted warmup slot; a second fault fails
+        default: false
+        type: boolean
     outputs:
       darwin_closure_shards:
         description: Generated always-run Darwin closure matrix
@@ -184,6 +188,7 @@ jobs:
             ${{ inputs.warmup_artifact != '' &&
             format('{0}/warmup/warmup-plan.json', runner.temp) || '' }}
           NIXCFG_WARMUP_SLOT: ${{ inputs.warmup_slot }}
+          NIXCFG_DEVICE_FAULT_RETRY: ${{ inputs.device_fault_retry }}
           NIXCFG_PREVIOUS_CANDIDATE: |-
             ${{ inputs.previous != '' &&
             format('{0}/previous/candidate.json', runner.temp) || '' }}

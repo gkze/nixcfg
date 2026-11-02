@@ -218,6 +218,26 @@ def test_matrix_cell_failure_stops_that_matrix_only() -> None:
     assert sibling_stop("rust", [_job("prebuild-darwin-leaves / native")]) is None
 
 
+@pytest.mark.parametrize(
+    ("group", "retry"),
+    [
+        ("rust", "validate-darwin-warm-rust-retry (3) / native"),
+        ("cascade", "validate-darwin-cascade-warmup-retry (3) / native"),
+    ],
+)
+def test_warmup_retry_failure_stops_its_own_stripe_group(
+    group: str, retry: str
+) -> None:
+    """A device-fault retry cell is part of its stripe, not a longer job id."""
+    failed = _job(retry)
+    assert sibling_stop(group, [failed]) == SiblingStop(
+        group=group, job=retry, conclusion="failure", failed_step=""
+    )
+    other = "cascade" if group == "rust" else "rust"
+    assert sibling_stop(other, [failed]) is None
+    assert sibling_stop(group, [_job(f"{retry.partition(' (')[0]}-faults")]) is None
+
+
 def test_plan_failure_stops_linux_validate_and_validate_does_not_stop_plan() -> None:
     plan = _job(
         "plan-darwin-closures / native", failed_step="Prepare or validate candidate"

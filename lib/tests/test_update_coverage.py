@@ -35,6 +35,7 @@ from lib.update.ci.coverage import (
     read_json,
     realized_darwin_root_store_paths,
     require_cachix_paths,
+    require_device_fault_retries,
     require_package_inventory,
     require_required_jobs,
     require_shard_receipts,
@@ -144,6 +145,65 @@ def test_assert_update_coverage_accepts_a_complete_run(tmp_path: Path) -> None:
         },
         cachix_present=lambda _path: True,
     )
+
+
+def test_warmup_retry_may_be_skipped_but_must_report_a_result() -> None:
+    """A clean stripe skips -retry; a faulted slot needs a successful retry."""
+    for retry in (
+        "validate-darwin-warm-rust-retry",
+        "validate-darwin-cascade-warmup-retry",
+    ):
+        require_required_jobs({**_jobs(), retry: "skipped"})
+        for result in ("failure", "cancelled", ""):
+            with pytest.raises(CoverageError, match=f"{retry}={result}"):
+                require_required_jobs({**_jobs(), retry: result})
+        jobs = _jobs()
+        del jobs[retry]
+        with pytest.raises(CoverageError, match=f"omitted required jobs: {retry}"):
+            require_required_jobs(jobs)
+    for detector in (
+        "validate-darwin-warm-rust-faults",
+        "validate-darwin-cascade-warmup-faults",
+    ):
+        with pytest.raises(CoverageError, match=f"{detector}=skipped"):
+            require_required_jobs({**_jobs(), detector: "skipped"})
+
+
+def test_device_faulted_warmup_slot_needs_clean_retry_evidence(tmp_path: Path) -> None:
+    """41339729368 cascade slot 3 left only its -device-fault artifact."""
+    with pytest.raises(CoverageError, match="not a directory"):
+        require_device_fault_retries(tmp_path / "missing")
+    faulted = "validate-aarch64-darwin-cascade-warmup-cascade-3"
+    (tmp_path / f"{faulted}-device-fault").mkdir()
+    (tmp_path / "prepare-aarch64-darwin-shard-1-device-fault").mkdir()
+    (tmp_path / "validate-aarch64-darwin-rust-warmup-rust-0-device-fault").touch()
+    with pytest.raises(
+        CoverageError,
+        match=f"no retry evidence: {faulted}-device-fault$",
+    ):
+        require_device_fault_retries(tmp_path)
+    (tmp_path / faulted).mkdir()
+    require_device_fault_retries(tmp_path)
+
+
+def test_assert_update_coverage_rejects_an_unretried_faulted_slot(
+    tmp_path: Path,
+) -> None:
+    manifest = _manifest()
+    _write_reports(tmp_path)
+    _write_shards(tmp_path, plan_darwin_closure_shards(manifest))
+    (tmp_path / "validate-aarch64-darwin-rust-warmup-rust-2-device-fault").mkdir()
+    with pytest.raises(CoverageError, match="rust-warmup-rust-2-device-fault"):
+        assert_update_coverage(
+            job_results=_jobs(),
+            evidence=tmp_path,
+            tree="tree",
+            validate_all_packages=True,
+            manifest=manifest,
+            package_expected={},
+            root_paths={},
+            cachix_present=lambda _path: True,
+        )
 
 
 def test_coverage_fails_closed_on_skips_and_missing_artifacts(
