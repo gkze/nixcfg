@@ -2460,11 +2460,17 @@ def is_source_fetch_mirror_line(line: str) -> bool:
     mirror failure. 38344741255 slot 1: ``clang-sys-1.9.1.tar.gz`` is
     the same class; a bare ``clang-`` prefix must not hide it.
     41207662691 slot 3: crane's ``cargo-src-cfg_aliases-0.2.1`` is too.
+    41351558501 slot 2: ``rustc-1.98.1-aarch64-apple-darwin.tar.xz`` is
+    rust-overlay's pinned fetchurl of the prebuilt toolchain, not a
+    rustc source bootstrap. The VM lost DNS for under a minute, Nix
+    could not reach gkze (which serves it) and fell back to the fetch.
     """
     match = _MIRROR_DOWNLOAD.search(line)
     if match is None:
         return False
     name = match.group(1)
+    if is_rust_overlay_target_tarball(name):
+        return True
     if _compiler_must_substitute_name(name):
         return False
     if name.endswith(_SOURCE_FETCH_ARCHIVES) or name.startswith(
@@ -2482,6 +2488,20 @@ def is_source_fetch_mirror_line(line: str) -> bool:
 _RUST_OVERLAY_TARGET = re.compile(
     r"-(?:aarch64|x86_64)-(?:apple-darwin|unknown-linux-gnu)$"
 )
+
+
+def is_rust_overlay_target_tarball(name: str) -> bool:
+    """Return whether *name* is a rust-overlay target-triple archive.
+
+    ``rustc-1.98.1-aarch64-apple-darwin.tar.xz`` is a hash-pinned
+    download of a prebuilt component, so a mirror miss is a source-fetch
+    miss. ``rustc-1.98.1.tar.gz`` (no triple) is nixpkgs' rustc source
+    and stays must-substitute.
+    """
+    for suffix in _SOURCE_FETCH_ARCHIVES:
+        if name.endswith(suffix):
+            return bool(_RUST_OVERLAY_TARGET.search(name.removesuffix(suffix)))
+    return False
 
 
 def is_compiler_local_helper_store_path(path: str) -> bool:
@@ -2611,6 +2631,9 @@ def partition_compiler_substitute_probe_drvs(
 
 SOURCE_FETCH_DNS_HOSTS = ("github.com", "static.crates.io")
 SOURCE_FETCH_RETRY_BACKOFF_SECONDS = 15.0
+# 41351558501 slot 2 lost DNS at 04:42:38Z and had it back by 04:43:20Z.
+# One 15 s probe can land inside such an outage; poll for up to 2 min.
+SOURCE_FETCH_DNS_PROBES = 8
 
 
 def rust_warmup_output_drvs(plan: WarmupPlan) -> tuple[str, ...]:
@@ -2699,11 +2722,19 @@ def wait_for_source_fetch_network(
     resolve: Callable[[str, int], object] | None = None,
     sleep: Callable[[float], None] | None = None,
     backoff: float = SOURCE_FETCH_RETRY_BACKOFF_SECONDS,
+    probes: int = SOURCE_FETCH_DNS_PROBES,
 ) -> bool:
-    """Sleep, then prove source-fetch DNS before retrying a FOD."""
+    """Sleep, then prove source-fetch DNS before retrying a FOD.
+
+    Probe up to *probes* times, *backoff* apart, so a sub-minute VM DNS
+    outage does not fail the slot. Still fail closed if DNS stays dead.
+    """
     waiter = time.sleep if sleep is None else sleep
-    waiter(backoff)
-    return source_fetch_network_ready(resolve=resolve)
+    for _ in range(max(probes, 1)):
+        waiter(backoff)
+        if source_fetch_network_ready(resolve=resolve):
+            return True
+    return False
 
 
 def realize_source_fetch_drvs(
