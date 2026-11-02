@@ -177,6 +177,20 @@ _DEVICE_FAULT_PREDICATE = 'process == "kernel" AND eventMessage CONTAINS[c] "I/O
 _DEVICE_FAULT_QUERY_SECONDS = 300
 _DEVICE_FAULT_NAME = "device-fault.log"
 _DEVICE_FAULT_EXCERPT_LINES = 50
+# 41339729368 validate-darwin-cascade-warmup (3): 110892 kernel
+# "(IOStorageFamily) disk2s7: I/O error." lines from 00:52:44, then
+# bun-cache-shard-22's bsdtar could not open a verified tgz at 00:53:40.
+# The same drv rebuilds bit-identical off the hosted VM. The faulted slot
+# failed, slot 0 sibling-stopped and publish failed coverage. Warmup slots
+# are explicit work units like prepare shards, so they hand off the same way.
+_DEVICE_FAULT_RETRY_SCOPES = frozenset({"rust-warmup", "cascade-warmup"})
+_DEVICE_FAULT_RETRY_ENV = "NIXCFG_DEVICE_FAULT_RETRY"
+_DEVICE_FAULT_ARTIFACT_SUFFIX = "-device-fault"
+_ARTIFACT_PAGE_SIZE = 100
+_ARTIFACT_MAX_PAGES = 20
+_ARTIFACT_HTTP_TIMEOUT_SECONDS = 30.0
+_ARTIFACT_HTTP_ATTEMPTS = 3
+_ARTIFACT_HTTP_RETRY_SECONDS = 5.0
 _IMAGE_LOG_LOCK = threading.Lock()
 _UNUSED_IMAGE_PATHS = {
     "darwin": (Path("/usr/local/share/dotnet"),),
@@ -1639,7 +1653,8 @@ def _finish_native_stage(
 
     A sibling stop already blocked publish. Prefetch receipts still upload so
     the next attempt can substitute them. A device-fault retry stays reserved
-    for a prepare that finished on a faulted disk with no sibling failure.
+    for a prepare shard or warmup slot that finished on a faulted disk with
+    no sibling failure. A warmup retry that faults again fails.
     """
     if not _sibling_stop_recorded(artifacts) and (
         summary := _failure_summary(artifacts / "result.json")
@@ -1654,32 +1669,155 @@ def _finish_native_stage(
         return _publish_prefetched_receipts(receipts, log, artifacts, returncode or 1)
     # A green updater on a faulted disk still hashed untrusted bytes.
     if (
-        stage == "prepare"
+        _hands_off_device_faults(stage)
         and is_hosted_darwin_runner()
         and (faults := hosted_device_faults())
     ):
         _quarantine_faulted_runner(artifacts, faults, log)
+        if stage == "validate" and os.environ.get(_DEVICE_FAULT_RETRY_ENV) == "true":
+            return _fail_device_fault_retry(faults, returncode)
         return _hand_off_device_fault(faults, returncode)
     return _publish_prefetched_receipts(receipts, log, artifacts, returncode)
+
+
+def _hands_off_device_faults(stage: str) -> bool:
+    """Return whether a fresh-VM retry job can redo this stage's exact work.
+
+    Prepare shards and the rust/cascade warmup slots have one. Canary,
+    package, root and closure validation do not, so a fault there still
+    fails the job.
+    """
+    if stage == "prepare":
+        return True
+    return (
+        stage == "validate"
+        and os.environ.get("NIXCFG_VALIDATE_SCOPE", "all") in _DEVICE_FAULT_RETRY_SCOPES
+        and os.environ.get("NIXCFG_CANARY") != "true"
+    )
 
 
 def _hand_off_device_fault(faults: list[str], returncode: int) -> int:
     """Report a device fault as this stage's outcome; a fresh VM redoes the work.
 
-    The candidate is never consumed: it uploads under a ``-device-fault``
-    name and ``prepare-merge`` requires a fault-free attempt. Without a step
-    output nothing can hand the work off, so the stage fails instead.
+    The result is never consumed: it uploads under a ``-device-fault`` name
+    and the consumers require a fault-free attempt. Without a step output
+    nothing can hand the work off, so the stage fails instead.
     """
     if not os.environ.get("GITHUB_OUTPUT"):
         return returncode or 1
     _outputs(device_fault="true")
     sys.stdout.write(
         "::warning title=Hosted block device faulted::"
-        f"{len(faults)} kernel I/O errors; this runner's candidate is discarded "
+        f"{len(faults)} kernel I/O errors; this runner's result is discarded "
         "and the stage reruns on a fresh VM\n"
     )
     sys.stdout.flush()
     return 0
+
+
+def _fail_device_fault_retry(faults: list[str], returncode: int) -> int:
+    """Fail a warmup retry whose fresh VM faulted too; there is no third attempt."""
+    sys.stdout.write(
+        "::error title=Hosted block device faulted on retry::"
+        f"{len(faults)} kernel I/O errors on the fresh-VM retry; "
+        "this warmup slot has no result\n"
+    )
+    sys.stdout.flush()
+    return returncode or 1
+
+
+def _device_fault_slot_names() -> tuple[str, tuple[str, ...]]:
+    """Return the artifact prefix and slots ``device-fault-slots`` inspects."""
+    prefix = os.environ.get("NIXCFG_FAULT_ARTIFACT_PREFIX", "").strip()
+    slots = tuple(os.environ.get("NIXCFG_FAULT_SLOTS", "").split())
+    if not prefix or not slots or not all(slot.isdigit() for slot in slots):
+        msg = (
+            "device-fault-slots requires NIXCFG_FAULT_ARTIFACT_PREFIX and "
+            "digit NIXCFG_FAULT_SLOTS"
+        )
+        raise RuntimeError(msg)
+    return prefix, slots
+
+
+def _read_artifact_page(url: str, token: str) -> dict[str, object]:
+    """Read one run-artifacts page, retrying transient HTTP failures."""
+    request = urllib.request.Request(  # noqa: S310 -- fixed https://api.github.com URL
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    error: Exception | None = None
+    for attempt in range(_ARTIFACT_HTTP_ATTEMPTS):
+        if attempt:
+            time.sleep(_ARTIFACT_HTTP_RETRY_SECONDS)
+        try:
+            with urllib.request.urlopen(  # noqa: S310 -- fixed https://api.github.com URL
+                request, timeout=_ARTIFACT_HTTP_TIMEOUT_SECONDS
+            ) as response:
+                payload = json.loads(response.read())
+        except (OSError, ValueError) as caught:
+            error = caught
+            continue
+        if isinstance(payload, dict):
+            return payload
+        error = ValueError("artifact list is not an object")
+    msg = f"could not list this run's artifacts: {type(error).__name__}: {error}"
+    raise RuntimeError(msg)
+
+
+def run_artifact_names() -> set[str]:
+    """Return every artifact name uploaded to this workflow run so far."""
+    repository = os.environ.get("GITHUB_REPOSITORY", "")
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    token = os.environ.get("NIXCFG_ACTIONS_TOKEN", "").strip()
+    if not repository or not run_id.isdigit() or not token:
+        msg = (
+            "listing run artifacts requires GITHUB_REPOSITORY, GITHUB_RUN_ID "
+            "and NIXCFG_ACTIONS_TOKEN"
+        )
+        raise RuntimeError(msg)
+    names: set[str] = set()
+    for page in range(1, _ARTIFACT_MAX_PAGES + 1):
+        payload = _read_artifact_page(
+            f"https://api.github.com/repos/{repository}/actions/runs/{run_id}"
+            f"/artifacts?per_page={_ARTIFACT_PAGE_SIZE}&page={page}",
+            token,
+        )
+        items = payload.get("artifacts")
+        total = payload.get("total_count")
+        if not isinstance(items, list) or not isinstance(total, int):
+            msg = "artifact list is missing artifacts or total_count"
+            raise TypeError(msg)
+        names.update(
+            item["name"]
+            for item in items
+            if isinstance(item, dict) and isinstance(item.get("name"), str)
+        )
+        if len(items) < _ARTIFACT_PAGE_SIZE or page * _ARTIFACT_PAGE_SIZE >= total:
+            return names
+    msg = f"artifact list exceeds {_ARTIFACT_MAX_PAGES} pages"
+    raise RuntimeError(msg)
+
+
+def device_fault_slots() -> None:
+    """Emit the warmup slots whose first attempt handed off a device fault.
+
+    A matrix cell cannot publish its own job output, so the faulted slot is
+    read back from its ``<prefix><slot>-device-fault`` artifact. An answer
+    that cannot be read fails this job, and the consumers then do not run.
+    """
+    prefix, slots = _device_fault_slot_names()
+    names = run_artifact_names()
+    faulted = [
+        int(slot)
+        for slot in slots
+        if f"{prefix}{slot}{_DEVICE_FAULT_ARTIFACT_SUFFIX}" in names
+    ]
+    sys.stdout.write(f"Device-faulted slots for {prefix}*: {faulted}\n")
+    _outputs(slots=json.dumps(faulted, separators=(",", ":")))
 
 
 def _candidate_identity() -> dict[str, str]:
@@ -3037,6 +3175,7 @@ def main(stage: str) -> int:
         "reclaim-store": reclaim_hosted_store,
         "record-storage": record_named_storage,
         "dump-storage-fault": dump_hosted_storage_fault,
+        "device-fault-slots": device_fault_slots,
         "require-cachix-daemon": require_cachix_daemon,
         "bootstrap": bootstrap,
         "quality": quality,

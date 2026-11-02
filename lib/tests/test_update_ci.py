@@ -10,6 +10,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+from email.message import Message
 from io import StringIO
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -2260,6 +2262,112 @@ def test_native_fault_evidence_and_artifact_contract() -> None:
     )
 
 
+def _requires_warmup(stripe: str, condition: str) -> bool:
+    """Return whether *condition* needs a clean stripe and any retry to pass."""
+    folded = " ".join(condition.split())
+    return (
+        f"needs.{stripe}.result == 'success' && "
+        f"needs.{stripe}-faults.result == 'success' && "
+        f"(needs.{stripe}-retry.result == 'success' || "
+        f"needs.{stripe}-retry.result == 'skipped')"
+    ) in folded
+
+
+def test_requires_warmup_rejects_a_stripe_only_gate() -> None:
+    stripe = "needs.validate-darwin-warm-rust.result == 'success'"
+    assert not _requires_warmup("validate-darwin-warm-rust", stripe)
+
+
+@pytest.mark.parametrize(
+    ("stripe", "scope", "shard"),
+    [
+        ("validate-darwin-warm-rust", "rust-warmup", "rust"),
+        ("validate-darwin-cascade-warmup", "cascade-warmup", "cascade"),
+    ],
+)
+def test_device_faulted_warmup_slot_reruns_once_on_a_fresh_vm(
+    stripe: str, scope: str, shard: str
+) -> None:
+    """41339729368: a faulted cascade slot failed the run instead of retrying.
+
+    The slot's hand-off artifact names the faulted slot; -faults reads it back
+    and -retry reruns that slot with the stripe's exact inputs.
+    """
+    workflow = yaml.load(
+        (ROOT / ".github/workflows/update.yml").read_text(), Loader=yaml.BaseLoader
+    )
+    jobs = workflow["jobs"]
+    first, faults, retry = (
+        jobs[stripe],
+        jobs[f"{stripe}-faults"],
+        jobs[f"{stripe}-retry"],
+    )
+    assert faults["needs"] == stripe
+    assert " ".join(faults["if"].split()) == (
+        f"always() && !cancelled() && needs.{stripe}.result == 'success'"
+    )
+    assert faults["runs-on"] == "ubuntu-24.04"
+    assert faults["outputs"]["slots"] == "${{ steps.faults.outputs.slots }}"
+    checkout, step = faults["steps"]
+    assert checkout["uses"].startswith("actions/checkout@")
+    assert checkout["with"] == {
+        "ref": "${{ github.event.inputs.repair_commit || github.sha }}",
+        "persist-credentials": "false",
+    }
+    assert step["id"] == "faults"
+    assert step["shell"] == "python"
+    assert step["env"] == {
+        "NIXCFG_ACTIONS_TOKEN": "${{ github.token }}",
+        "NIXCFG_FAULT_ARTIFACT_PREFIX": (
+            f"validate-{first['with']['system']}-{scope}-{shard}-"
+        ),
+        "NIXCFG_FAULT_SLOTS": " ".join(first["strategy"]["matrix"]["slot"]),
+        "NIXCFG_CI_STAGE": "device-fault-slots",
+    }
+    assert first["with"]["shard"] == f"{shard}-${{{{ matrix.slot }}}}"
+    assert first["with"]["scope"] == scope
+    assert set(retry["needs"]) == {stripe, f"{stripe}-faults"}
+    assert " ".join(retry["if"].split()) == (
+        f"always() && !cancelled() && needs.{stripe}-faults.result == 'success' && "
+        f"needs.{stripe}-faults.outputs.slots != '[]'"
+    )
+    assert retry["strategy"] == {
+        "fail-fast": "false",
+        "max-parallel": "5",
+        "matrix": {"slot": f"${{{{ fromJSON(needs.{stripe}-faults.outputs.slots) }}}}"},
+    }
+    assert retry["uses"] == first["uses"]
+    assert retry["with"] == {**first["with"], "device_fault_retry": "true"}
+    assert retry["secrets"] == "inherit"
+    publish = jobs["publish"]
+    results = publish["steps"][
+        next(
+            index
+            for index, item in enumerate(publish["steps"])
+            if "NIXCFG_JOB_RESULTS" in item.get("env", {})
+        )
+    ]["env"]["NIXCFG_JOB_RESULTS"]
+    for name in (stripe, f"{stripe}-faults", f"{stripe}-retry"):
+        assert f"{name}=${{{{needs.{name}.result}}}}" in results.replace(" ", "")
+        assert name in jobs["repair"]["needs"]
+    native = yaml.load(
+        (ROOT / ".github/workflows/update-native.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    retry_input = native["on"]["workflow_call"]["inputs"]["device_fault_retry"]
+    assert retry_input["type"] == "boolean"
+    assert retry_input["default"] == "false"
+    candidate = next(
+        item
+        for item in native["jobs"]["native"]["steps"]
+        if item.get("id") == "candidate"
+    )
+    assert (
+        candidate["env"]["NIXCFG_DEVICE_FAULT_RETRY"]
+        == "${{ inputs.device_fault_retry }}"
+    )
+
+
 def _assert_device_fault_retry(jobs: dict) -> None:
     """Only a device-faulted Darwin shard reruns, on a fresh VM, unchanged."""
     folded = jobs["prepare-darwin-merge"]
@@ -2407,10 +2515,13 @@ def _assert_cascade_warmup_job(workflow_jobs: dict) -> None:
         "prepare-merge",
         "plan-darwin-closures",
         "validate-darwin-warm-rust",
+        "validate-darwin-warm-rust-faults",
+        "validate-darwin-warm-rust-retry",
         "canary-warm-cascade",
         "prebuild-darwin-leaves",
     }
     cascade_if = " ".join(cascade["if"].split())
+    assert _requires_warmup("validate-darwin-warm-rust", cascade_if)
     assert "canary-warm-cascade.result == 'skipped'" in cascade_if
     assert "canary-warm-cascade.result == 'failure'" in cascade_if
     assert "prebuild-darwin-leaves.result == 'skipped'" in cascade_if
@@ -2463,7 +2574,10 @@ def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
         "prepare-merge",
         "plan-darwin-closures",
         "validate-darwin-cascade-warmup",
+        "validate-darwin-cascade-warmup-faults",
+        "validate-darwin-cascade-warmup-retry",
     }
+    assert _requires_warmup("validate-darwin-cascade-warmup", packages["if"])
     assert packages["with"]["scope"] == "packages"
     assert "warmup_artifact" not in packages["with"]
     plan = workflow_jobs["plan-darwin-closures"]
@@ -2484,13 +2598,17 @@ def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
         "cache-darwin-linux-deps-arm",
         "cache-darwin-linux-deps-x86",
         "validate-darwin-warm-rust",
+        "validate-darwin-warm-rust-faults",
+        "validate-darwin-warm-rust-retry",
         "validate-darwin-cascade-warmup",
+        "validate-darwin-cascade-warmup-faults",
+        "validate-darwin-cascade-warmup-retry",
     }
     roots_if = " ".join(roots["if"].split())
     assert "always() && !cancelled()" in roots_if
     assert "needs.plan-darwin-closures.result == 'success'" in roots_if
-    assert "needs.validate-darwin-warm-rust.result == 'success'" in roots_if
-    assert "needs.validate-darwin-cascade-warmup.result == 'success'" in roots_if
+    assert _requires_warmup("validate-darwin-warm-rust", roots_if)
+    assert _requires_warmup("validate-darwin-cascade-warmup", roots_if)
     assert "validate-darwin-packages.result" not in roots_if
     assert "closure_complete" not in roots_if
     assert roots["strategy"]["fail-fast"] == "false"
@@ -2565,7 +2683,11 @@ def _assert_coverage_and_publish(workflow_jobs: dict) -> None:
         "validate-arm",
         "validate-x86",
         "validate-darwin-warm-rust",
+        "validate-darwin-warm-rust-faults",
+        "validate-darwin-warm-rust-retry",
         "validate-darwin-cascade-warmup",
+        "validate-darwin-cascade-warmup-faults",
+        "validate-darwin-cascade-warmup-retry",
         "validate-darwin-packages",
         "validate-darwin-roots",
         "validate-darwin-closures",
@@ -2604,6 +2726,8 @@ def _assert_coverage_and_publish(workflow_jobs: dict) -> None:
         "validate-darwin-closures",
     ):
         assert f"needs.{name}.result == 'success'" in certify_if
+    assert _requires_warmup("validate-darwin-warm-rust", certify_if)
+    assert _requires_warmup("validate-darwin-cascade-warmup", certify_if)
     publish_if = " ".join(publish["if"].split())
     assert "always() && !cancelled()" in publish_if
     assert "closure_complete" not in publish_if
@@ -2816,8 +2940,11 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
         assert set(job["needs"]) == {
             "prepare-merge",
             "validate-darwin-warm-rust",
+            "validate-darwin-warm-rust-faults",
+            "validate-darwin-warm-rust-retry",
         }
         assert "validate-darwin-cascade-warmup" not in job["needs"]
+        assert _requires_warmup("validate-darwin-warm-rust", job["if"])
         assert job["with"]["stage"] == "cache-root-deps"
         assert job["with"]["previous"] == "prepare-x86_64-linux"
     assert (
@@ -2825,12 +2952,17 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
         == "ubuntu-24.04-arm"
     )
     assert cache_jobs["cache-darwin-linux-deps-x86"]["with"]["runner"] == "ubuntu-24.04"
+    fault_detectors = {name for name in jobs if name.endswith("-faults")}
     validators = {
-        name: job for name, job in jobs.items() if name.startswith("validate-")
+        name: job
+        for name, job in jobs.items()
+        if name.startswith("validate-") and name not in fault_detectors
     }
     assert {
         job["with"]["system"]: job["with"]["runner"] for job in validators.values()
     } == {row["system"]: row["runner"] for row in matrix}
+    assert fault_detectors <= set(jobs["publish"]["needs"])
+    assert fault_detectors <= set(jobs["repair"]["needs"])
     for job in validators.values():
         assert job["with"]["previous"] == "prepare-x86_64-linux"
         assert job["with"]["stage"] == "validate"
@@ -5172,6 +5304,281 @@ def test_hosted_validation_does_not_query_device_faults(
 
     monkeypatch.setattr(jobs, "hosted_device_faults", unexpected)
     assert jobs.native("validate") == 0
+
+
+def _finish_faulted_validate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    returncode: int,
+    **env: str,
+) -> tuple[int, Path, Path]:
+    """Finish a hosted validate stage whose VM logged one device fault."""
+    artifacts = tmp_path / "update-artifacts"
+    artifacts.mkdir()
+    output = tmp_path / "github-output"
+    for key in ("NIXCFG_CANARY", "NIXCFG_DEVICE_FAULT_RETRY", "CACHIX_DAEMON_DIR"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(jobs, "is_hosted_darwin_runner", lambda: True)
+    monkeypatch.setattr(jobs, "hosted_device_faults", lambda: [_KERNEL_DEVICE_FAULT])
+    result = jobs._finish_native_stage(
+        "validate",
+        artifacts,
+        artifacts / "prefetch-receipts.jsonl",
+        StringIO(),
+        returncode,
+    )
+    return result, artifacts, output
+
+
+@pytest.mark.parametrize("scope", ["rust-warmup", "cascade-warmup"])
+@pytest.mark.parametrize("returncode", [0, 1])
+def test_faulted_warmup_slot_hands_off_to_a_fresh_vm(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    scope: str,
+    returncode: int,
+) -> None:
+    """41339729368 cascade-warmup 3: bsdtar EIO after 110892 kernel I/O errors."""
+    result, artifacts, output = _finish_faulted_validate(
+        tmp_path, monkeypatch, returncode, NIXCFG_VALIDATE_SCOPE=scope
+    )
+    assert result == 0
+    assert output.read_text() == "device_fault=true\n"
+    assert (artifacts / "device-fault.log").is_file()
+    out = capsys.readouterr().out
+    assert "::warning title=Hosted block device faulted::" in out
+    assert "result is discarded" in out
+
+
+@pytest.mark.parametrize("returncode", [0, 9])
+def test_device_fault_on_a_warmup_retry_fails_the_slot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    returncode: int,
+) -> None:
+    """The fresh-VM retry is the last attempt; a second fault has no result."""
+    result, artifacts, output = _finish_faulted_validate(
+        tmp_path,
+        monkeypatch,
+        returncode,
+        NIXCFG_VALIDATE_SCOPE="cascade-warmup",
+        NIXCFG_DEVICE_FAULT_RETRY="true",
+    )
+    assert result == (returncode or 1)
+    assert not output.exists()
+    assert (artifacts / "device-fault.log").is_file()
+    assert "::error title=Hosted block device faulted on retry::" in (
+        capsys.readouterr().out
+    )
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        {"NIXCFG_VALIDATE_SCOPE": "rust-warmup", "NIXCFG_CANARY": "true"},
+        {"NIXCFG_VALIDATE_SCOPE": "packages"},
+        {"NIXCFG_VALIDATE_SCOPE": "closure-shard"},
+        {"NIXCFG_VALIDATE_SCOPE": "cascade-canary"},
+    ],
+)
+def test_validation_without_a_retry_job_keeps_its_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env: dict[str, str]
+) -> None:
+    """Canary, packages and root shards have no fresh-VM rerun to hand off to."""
+
+    def unexpected() -> list[str]:
+        raise AssertionError("this scope must not query device faults")
+
+    artifacts = tmp_path / "update-artifacts"
+    artifacts.mkdir()
+    monkeypatch.delenv("NIXCFG_CANARY", raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(jobs, "is_hosted_darwin_runner", lambda: True)
+    monkeypatch.setattr(jobs, "hosted_device_faults", unexpected)
+    receipts = artifacts / "prefetch-receipts.jsonl"
+    assert (
+        jobs._finish_native_stage("validate", artifacts, receipts, StringIO(), 3) == 3
+    )
+
+
+def test_healthy_warmup_slot_keeps_its_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    artifacts = tmp_path / "update-artifacts"
+    artifacts.mkdir()
+    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "rust-warmup")
+    monkeypatch.delenv("NIXCFG_CANARY", raising=False)
+    monkeypatch.setattr(jobs, "is_hosted_darwin_runner", lambda: True)
+    monkeypatch.setattr(jobs, "hosted_device_faults", list)
+    receipts = artifacts / "prefetch-receipts.jsonl"
+    assert (
+        jobs._finish_native_stage("validate", artifacts, receipts, StringIO(), 5) == 5
+    )
+    assert not (artifacts / "device-fault.log").exists()
+
+
+class _ArtifactPage:
+    def __init__(self, payload: object) -> None:
+        self._body = json.dumps(payload).encode()
+
+    def __enter__(self) -> _ArtifactPage:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self._body
+
+
+def _artifact_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    output = tmp_path / "github-output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "gkze/nixcfg")
+    monkeypatch.setenv("GITHUB_RUN_ID", "41339729368")
+    monkeypatch.setenv("NIXCFG_ACTIONS_TOKEN", "token")
+    monkeypatch.setenv(
+        "NIXCFG_FAULT_ARTIFACT_PREFIX",
+        "validate-aarch64-darwin-cascade-warmup-cascade-",
+    )
+    monkeypatch.setenv("NIXCFG_FAULT_SLOTS", "0 1 2 3 4")
+    monkeypatch.setattr(jobs.time, "sleep", lambda _seconds: None)
+    return output
+
+
+def test_device_fault_slots_reads_every_artifact_page(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """41339729368 uploaded ...-cascade-3-device-fault; only slot 3 reruns."""
+    output = _artifact_env(monkeypatch, tmp_path)
+    monkeypatch.setattr(jobs, "_ARTIFACT_PAGE_SIZE", 2)
+    pages = {
+        1: [
+            {"name": "validate-aarch64-darwin-cascade-warmup-cascade-0"},
+            {"name": "validate-aarch64-darwin-rust-warmup-rust-1-device-fault"},
+        ],
+        2: [
+            {"name": "validate-aarch64-darwin-cascade-warmup-cascade-1"},
+            {"name": "validate-aarch64-darwin-cascade-warmup-cascade-3-device-fault"},
+        ],
+        3: [{"id": 7}, "not an artifact"],
+    }
+    seen: list[tuple[str, dict[str, str], float]] = []
+
+    def urlopen(request, timeout: float) -> _ArtifactPage:
+        seen.append((request.full_url, dict(request.header_items()), timeout))
+        page = int(request.full_url.rsplit("page=", 1)[1])
+        return _ArtifactPage({"total_count": 6, "artifacts": pages[page]})
+
+    monkeypatch.setattr(jobs.urllib.request, "urlopen", urlopen)
+    jobs.device_fault_slots()
+    assert output.read_text() == "slots=[3]\n"
+    assert [url for url, _headers, _timeout in seen] == [
+        "https://api.github.com/repos/gkze/nixcfg/actions/runs/41339729368"
+        f"/artifacts?per_page=2&page={page}"
+        for page in (1, 2, 3)
+    ]
+    assert seen[0][1]["Authorization"] == "Bearer token"
+    assert seen[0][2] == jobs._ARTIFACT_HTTP_TIMEOUT_SECONDS
+
+
+def test_device_fault_slots_reports_a_clean_stripe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = _artifact_env(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        jobs.urllib.request,
+        "urlopen",
+        lambda _request, timeout: _ArtifactPage({"total_count": 0, "artifacts": []}),
+    )
+    jobs.device_fault_slots()
+    assert output.read_text() == "slots=[]\n"
+
+
+def test_device_fault_slots_retries_then_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unreadable artifact list must not look like a clean stripe."""
+    output = _artifact_env(monkeypatch, tmp_path)
+    calls: list[int] = []
+
+    def flaky(_request, timeout: float) -> _ArtifactPage:
+        calls.append(1)
+        if len(calls) == 1:
+            raise urllib.error.URLError("reset")
+        if len(calls) == 2:
+            return _ArtifactPage(["not", "an", "object"])
+        return _ArtifactPage({"total_count": 1, "artifacts": []})
+
+    monkeypatch.setattr(jobs.urllib.request, "urlopen", flaky)
+    jobs.device_fault_slots()
+    assert output.read_text() == "slots=[]\n"
+    assert len(calls) == 3
+
+    def down(_request, timeout: float) -> _ArtifactPage:
+        raise urllib.error.HTTPError("url", 502, "bad gateway", Message(), None)
+
+    monkeypatch.setattr(jobs.urllib.request, "urlopen", down)
+    with pytest.raises(RuntimeError, match="could not list this run's artifacts"):
+        jobs.device_fault_slots()
+    monkeypatch.setattr(
+        jobs.urllib.request, "urlopen", lambda _request, timeout: _ArtifactPage({})
+    )
+    with pytest.raises(TypeError, match="missing artifacts or total_count"):
+        jobs.device_fault_slots()
+
+
+def test_device_fault_slots_bounds_the_artifact_list(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _artifact_env(monkeypatch, tmp_path)
+    monkeypatch.setattr(jobs, "_ARTIFACT_PAGE_SIZE", 1)
+    monkeypatch.setattr(jobs, "_ARTIFACT_MAX_PAGES", 2)
+    monkeypatch.setattr(
+        jobs.urllib.request,
+        "urlopen",
+        lambda _request, timeout: _ArtifactPage({
+            "total_count": 9,
+            "artifacts": [{"name": "x"}],
+        }),
+    )
+    with pytest.raises(RuntimeError, match="exceeds 2 pages"):
+        jobs.device_fault_slots()
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "match"),
+    [
+        ("NIXCFG_FAULT_ARTIFACT_PREFIX", "", "requires NIXCFG_FAULT_ARTIFACT_PREFIX"),
+        ("NIXCFG_FAULT_SLOTS", "", "requires NIXCFG_FAULT_ARTIFACT_PREFIX"),
+        ("NIXCFG_FAULT_SLOTS", "0 x", "requires NIXCFG_FAULT_ARTIFACT_PREFIX"),
+        ("GITHUB_RUN_ID", "run", "requires GITHUB_REPOSITORY"),
+        ("GITHUB_REPOSITORY", "", "requires GITHUB_REPOSITORY"),
+        ("NIXCFG_ACTIONS_TOKEN", " ", "requires GITHUB_REPOSITORY"),
+    ],
+)
+def test_device_fault_slots_requires_its_inputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    value: str,
+    match: str,
+) -> None:
+    _artifact_env(monkeypatch, tmp_path)
+    monkeypatch.setenv(name, value)
+
+    def unexpected(_request, timeout: float) -> _ArtifactPage:
+        raise AssertionError("inputs are checked before any request")
+
+    monkeypatch.setattr(jobs.urllib.request, "urlopen", unexpected)
+    with pytest.raises(RuntimeError, match=match):
+        jobs.device_fault_slots()
 
 
 def test_quarantine_tolerates_a_missing_or_exited_cachix_daemon(
