@@ -43,3 +43,4 @@ canary-slots: 0
 2026-10-28T00:07:00Z one Update run after b52c8089 (twilight hashes the live feed build, not the checkpointed resolve)
 2026-11-01T03:06:11Z one Update run after the Darwin upstream-drift fixes (11 packages bumped)
 2026-11-01T18:32:38Z one Update run after the Update 41275217088 Darwin fixes (rio toolchain, superset 2.x native build, baseten-switch AppKit test setup)
+2026-11-02T22:42:00Z one Update run after 8668c4c8 (anthropic-cli go_1_27; Update 41527009563 prepare failed on go 1.26.10)
