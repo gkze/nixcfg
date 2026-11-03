@@ -172,10 +172,14 @@ The app executable of Superconductor is `super.engineering`. The
 `packages/cli/package.json` without the Effect updater service, so
 OpenChamber keeps the 1.x upgrade patch.
 
-Baseten Switch 0.7.2 participates in bulk updates after native Darwin Go
-and Swift validation passed. The earlier 0.6.0 hold followed headless
-macos-15 Swift SIGTRAP failures. The package keeps its historical 0.5.1
-check-phase exception and named headless-test skips; those exceptions do
+Baseten Switch participates in bulk updates. The 0.6.0 hold followed
+headless macos-15 Swift SIGTRAP failures and is lifted, and the 0.5.1
+check-phase exception is gone. The check still skips two headless XCTest
+cases (`testUnusableSecondaryReceiptRetainsRecoveryGate` and
+`testRouterWindowContentUsesNonObscuredLayoutGuide`) and passes
+`--disable-swift-testing`. The suite has no Swift Testing tests;
+`swiftpm-testing-helper` reports zero tests and then SIGTRAPs on teardown
+(signal 5), which fails the build (Update 41616086680). Those limits do
 not place the current release on hold.
 
 Hosted Darwin validation builds native `root-closures` in continuation

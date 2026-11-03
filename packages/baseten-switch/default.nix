@@ -125,6 +125,13 @@ let
       # 41275217088) while Nix kept only a 25-line tail with no crash frame.
       # The Swift runtime backtracer prints the crashed thread compactly, so a
       # trap names its frame without changing which tests run.
+      #
+      # `swift test` also starts swiftpm-testing-helper. This suite is XCTest
+      # only: Testing Library 124.4 reports 0 tests, then the helper SIGTRAPs
+      # on teardown (signal 5 at 0x1980c077c) and SwiftPM fails the derivation
+      # while XCTest is still running (Update 41616086680, both attempts).
+      # `--disable-swift-testing` leaves the XCTest suite, and its headless
+      # skips, in place.
       (
         cd "$repo_root/mac/BasetenSwitch"
         env \
@@ -144,6 +151,7 @@ let
           SWIFT_BACKTRACE="enable=yes,interactive=no,color=no,threads=crashed,registers=none,images=none,limit=10,top=0" \
           /usr/bin/swift test \
             --disable-sandbox \
+            --disable-swift-testing \
             --scratch-path "$swift_test_build" \
             --skip testUnusableSecondaryReceiptRetainsRecoveryGate \
             --skip testRouterWindowContentUsesNonObscuredLayoutGuide
