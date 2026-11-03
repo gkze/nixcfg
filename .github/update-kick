@@ -45,3 +45,4 @@ canary-slots: 0
 2026-11-01T18:32:38Z one Update run after the Update 41275217088 Darwin fixes (rio toolchain, superset 2.x native build, baseten-switch AppKit test setup)
 2026-11-02T22:42:00Z one Update run after 8668c4c8 (anthropic-cli go_1_27; Update 41527009563 prepare failed on go 1.26.10)
 2026-11-03T06:02:00Z one Update run after 1fb8f44d (OpenChamber 2.6.0 after-pack codesign PATH; Update 41540342864 cascade slot 0 ENOENT)
+2026-11-03T07:35:00Z one Update run after 84cdc07d (Paseo 0.15.0 Claude handoff tail; Update 41588056564 prepare-darwin-0)
