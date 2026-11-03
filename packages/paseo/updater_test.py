@@ -100,6 +100,22 @@ _NATIVE_MANIFEST_CASES = [
         97,
         "2608.0.0",
     ),
+    (
+        "0.15.0",
+        "native-manifest-0.14.0.txt",
+        "16bdd9a3bf63ee848c3853baa0d0f50b367845edb3e6415d7f29ef851b5570bb",
+        201,
+        96,
+        "2601.0.0",
+    ),
+    (
+        "0.15.0",
+        "native-manifest-0.14.0-abseil-20260817.txt",
+        "2f64aeaf2727f47450f498540488b03845190b4e99487c01a26cea95ab721dec",
+        203,
+        97,
+        "2608.0.0",
+    ),
 ]
 _MSGPACKR_EXTRACT_ADDON = (
     "node_modules/@msgpackr-extract/msgpackr-extract-darwin-arm64/node.napi.glibc.node"
@@ -2656,9 +2672,12 @@ def test_paseo_every_selected_native_manifest_is_reviewed() -> None:
     assert {name for _release, name in selected} == {
         path.name for path in _PACKAGE_DIR.glob("native-manifest*.txt")
     }
-    assert {release for release, _name in selected} == {
-        *_load_patcher_module()._RELEASE_LAYOUTS
-    }
+    # 0.15.0 matches the 0.14.0 buildOptions layout, so it is not a new layout
+    # key. It still needs its own reviewed release because sources.json records
+    # the release version.
+    releases = {release for release, _name in selected}
+    assert set(_load_patcher_module()._RELEASE_LAYOUTS) <= releases
+    assert releases - set(_load_patcher_module()._RELEASE_LAYOUTS) == {"0.15.0"}
 
 
 @pytest.mark.nix_eval(
@@ -2676,6 +2695,8 @@ def test_paseo_selects_only_reviewed_protobuf_abseil_inventories() -> None:
         "latest": "native-manifest-abseil-20260817.txt",
         "releaseCurrent": "native-manifest-0.14.0.txt",
         "releaseLatest": "native-manifest-0.14.0-abseil-20260817.txt",
+        "release015Current": "native-manifest-0.14.0.txt",
+        "release015Latest": "native-manifest-0.14.0-abseil-20260817.txt",
         "unrelatedDependency": "native-manifest-abseil-20260817.txt",
         "unknownRelease": True,
         "missingRelease": True,

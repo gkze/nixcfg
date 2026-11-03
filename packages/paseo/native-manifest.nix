@@ -15,13 +15,20 @@ let
   # A new release or dependency tuple must add its own exact inventory and
   # native proof. 0.14.0 adds the prebuilt msgpackr-extract N-API addon that
   # @opencode/client reaches through effect and msgpackr. Drop 0.9.1 once
-  # Update promotes the 0.14.0 pin.
+  # Update promotes past that pin. 0.15.0 keeps 0.14.0's Mach-O set:
+  # electron-builder.yml is unchanged, and the lock's native packages keep
+  # the same versions. Its lock additions are JavaScript. Update 41598175853
+  # rejected the candidate at eval because this selector had no 0.15.0 entry.
   releases = {
     "0.9.1" = {
       "32.1/20260107.1" = ./native-manifest.txt;
       "32.1/20260817.0" = ./native-manifest-abseil-20260817.txt;
     };
     "0.14.0" = {
+      "32.1/20260107.1" = ./native-manifest-0.14.0.txt;
+      "32.1/20260817.0" = ./native-manifest-0.14.0-abseil-20260817.txt;
+    };
+    "0.15.0" = {
       "32.1/20260107.1" = ./native-manifest-0.14.0.txt;
       "32.1/20260817.0" = ./native-manifest-0.14.0-abseil-20260817.txt;
     };
