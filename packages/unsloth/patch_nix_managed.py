@@ -344,10 +344,19 @@ _PATCHES = (
 """,
         "",
     ),
+    # 0.1.914-beta inserts `mod native_vibrancy` between these declarations.
+    # The previous seam stays an alternative so 0.1.913-beta still declares the
+    # module. A list that matches neither seam still fails the exact-count check.
     _SourcePatch(
         Path("studio/src-tauri/src/main.rs"),
-        "mod native_path_policy;\nmod preflight;\n",
-        "mod native_path_policy;\nmod nix_managed;\nmod preflight;\n",
+        "mod native_path_policy;\nmod native_vibrancy;\nmod preflight;\n",
+        "mod native_path_policy;\nmod native_vibrancy;\nmod nix_managed;\nmod preflight;\n",
+        alternatives=(
+            (
+                "mod native_path_policy;\nmod preflight;\n",
+                "mod native_path_policy;\nmod nix_managed;\nmod preflight;\n",
+            ),
+        ),
     ),
     _SourcePatch(
         Path("studio/src-tauri/src/main.rs"),

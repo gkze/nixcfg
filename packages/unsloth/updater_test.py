@@ -3004,7 +3004,14 @@ def test_unsloth_rejects_invalid_backend_upload_time(value: str) -> None:
 
 @pytest.mark.parametrize(
     "version",
-    ["0.1.902-beta", "0.1.909-beta", "0.1.910-beta", "0.1.911-beta", "0.1.913-beta"],
+    [
+        "0.1.902-beta",
+        "0.1.909-beta",
+        "0.1.910-beta",
+        "0.1.911-beta",
+        "0.1.913-beta",
+        "0.1.914-beta",
+    ],
 )
 def test_unsloth_build_toolchain_override_is_updater_owned(version: str) -> None:
     """A release whose own lockfile needs a newer compiler is recorded, not restated in Nix."""
@@ -4229,6 +4236,72 @@ def test_unsloth_policy_patch_applies_declared_desktop_ownership_replacements(
     )
     with pytest.raises(RuntimeError, match="already applied"):
         module.patch_tree(tmp_path)
+
+
+def test_unsloth_policy_patch_declares_nix_managed_for_both_module_seams(
+    tmp_path: Path,
+) -> None:
+    """0.1.914-beta and its predecessor both declare the Nix module exactly once."""
+    module = _load_patch_module()
+    current = tmp_path / "current"
+    previous = tmp_path / "previous"
+    _write_patch_fixture(current, module)
+    _write_patch_fixture(previous, module)
+    patch = next(
+        item
+        for item in module._PATCHES
+        if item.path == Path("studio/src-tauri/src/main.rs")
+        and "mod preflight;" in item.old
+    )
+    assert len(patch.alternatives) == 1
+    previous_main = previous / patch.path
+    source = previous_main.read_text(encoding="utf-8")
+    assert source.count(patch.old) == 1
+    previous_main.write_text(
+        source.replace(patch.old, patch.alternatives[0][0], 1),
+        encoding="utf-8",
+    )
+
+    module.patch_tree(current)
+    module.patch_tree(previous)
+
+    current_main = (current / patch.path).read_text(encoding="utf-8")
+    previous_text = previous_main.read_text(encoding="utf-8")
+    assert current_main.count("mod nix_managed;\n") == 1
+    assert "mod native_vibrancy;\nmod nix_managed;\nmod preflight;\n" in current_main
+    assert previous_text.count("mod nix_managed;\n") == 1
+    assert "mod native_path_policy;\nmod nix_managed;\nmod preflight;\n" in previous_text
+    assert "mod native_vibrancy;" not in previous_text
+
+
+def test_unsloth_policy_patch_rejects_a_moved_module_seam(tmp_path: Path) -> None:
+    """A module list that matches neither seam fails before any file is written."""
+    module = _load_patch_module()
+    _write_patch_fixture(tmp_path, module)
+    patch = next(
+        item
+        for item in module._PATCHES
+        if item.path == Path("studio/src-tauri/src/main.rs")
+        and "mod preflight;" in item.old
+    )
+    main_path = tmp_path / patch.path
+    source = main_path.read_text(encoding="utf-8")
+    assert source.count(patch.old) == 1
+    drifted = source.replace(
+        patch.old,
+        "mod native_path_policy;\nmod something_else;\nmod preflight;\n",
+        1,
+    )
+    main_path.write_text(drifted, encoding="utf-8")
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"expected 1 Unsloth anchor\(s\) in studio/src-tauri/src/main.rs, found 0",
+    ):
+        module.patch_tree(tmp_path)
+
+    assert not (tmp_path / module._NIX_MODULE).exists()
+    assert main_path.read_text(encoding="utf-8") == drifted
 
 
 def test_unsloth_policy_patch_keeps_previous_resolution_and_setup_anchors(
