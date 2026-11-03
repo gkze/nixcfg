@@ -9,11 +9,10 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 from nix_manipulator import parse
-from nix_manipulator.expressions.binding import Binding
-from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
-from nix_manipulator.expressions.let import LetExpression
+from nix_manipulator.expressions.indented_string import IndentedString
+from nix_manipulator.expressions.path import NixPath
 from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
@@ -23,7 +22,7 @@ from lib.nix.models.flake_lock import FlakeLock
 from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance, expect_not_none
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
-from lib.tests._nix_source import nix_file_binding_expr
+from lib.tests._nix_source import nix_file_binding_expr, nix_file_expr
 from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
@@ -37,7 +36,6 @@ from lib.update.events import (
     expect_artifact_updates,
     ignore_event,
 )
-from lib.update.nix_expr import identifier_attr_path
 from lib.update.paths import REPO_ROOT
 from lib.update.runtime_source import runtime_source_policy, runtime_source_relpaths
 from lib.update.updaters import UpdateContext, VersionInfo
@@ -114,31 +112,17 @@ def _version_info(version: str = "0.7.2") -> VersionInfo:
     return VersionInfo(version=version, metadata={"commit": COMMIT})
 
 
-def _expected_flake_attr_expression(
-    flake_url: str,
-    *attributes: str,
-    quoted_indices: tuple[int, ...],
-) -> LetExpression:
-    """Build the expected flake selection structurally for updater assertions."""
-    quoted = set(quoted_indices)
-    return LetExpression(
-        local_variables=[
-            Binding(
-                name="flake",
-                value=FunctionCall(
-                    name=identifier_attr_path("builtins", "getFlake"),
-                    argument=StringPrimitive(value=flake_url),
-                ),
-            ),
-        ],
-        value=identifier_attr_path(
-            "flake",
-            *(
-                f'"{attribute}"' if index in quoted else attribute
-                for index, attribute in enumerate(attributes)
-            ),
-        ),
-    )
+def _expected_patched_zon2nix_source(flake_url: str, platform: str) -> str:
+    """Build the expected expression for the patched zon2nix generator."""
+    return f"""
+    let
+      root = builtins.getFlake "{flake_url}";
+    in
+      import (root.outPath + "/packages/neutils/patched-zon2nix.nix") {{
+        root = root;
+        system = "{platform}";
+      }}
+    """
 
 
 def _flake_root_inputs() -> AttributeSet:
@@ -397,7 +381,7 @@ def test_extract_archive_requires_build_zig_zon(tmp_path: Path) -> None:
 def test_zon2nix_package_expr_uses_the_declared_input_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Resolve the generator through the updater-owned input name."""
+    """Build the patched generator; the pinned input stays its source."""
     module = _load_module("neutils_updater_zon2nix_input")
     updater = module.NeutilsUpdater()
     monkeypatch.setattr(
@@ -408,18 +392,22 @@ def test_zon2nix_package_expr_uses_the_declared_input_name(
 
     assert updater.additional_input_names == ("zon2nix",)
     assert_nix_ast_equal(
-        updater._zon2nix_expr(
-            platform="aarch64-darwin",
-            repo_root=Path("/repo/root"),
+        parse_nix_expr(
+            updater._zon2nix_expr(
+                platform="aarch64-darwin",
+                repo_root=Path("/repo/root"),
+            )
         ),
-        _expected_flake_attr_expression(
-            "git+file:///repo/root?dirty=1",
-            "inputs",
-            "zon2nix",
-            "packages",
-            "aarch64-darwin",
-            "zon2nix",
-            quoted_indices=(1, 3),
+        parse_nix_expr(
+            """
+            let
+              root = builtins.getFlake "git+file:///repo/root?dirty=1";
+            in
+              import (root.outPath + "/packages/neutils/patched-zon2nix.nix") {
+                root = root;
+                system = "aarch64-darwin";
+              }
+            """
         ),
     )
 
@@ -472,6 +460,62 @@ def test_zon2nix_is_an_exact_direct_root_input_with_a_matching_lock() -> None:
         locked.repo,
         locked.rev,
     ) == expected_identity
+
+
+def test_patched_zon2nix_hashes_plain_urls_with_nix_and_pins_cacert() -> None:
+    """Plain URL hashes stay fetchurl hashes, and the wrapper pins cacert."""
+    expression = nix_file_expr("packages/neutils/patched-zon2nix.nix")
+    paths = [node.path for node in _nix_nodes(expression) if isinstance(node, NixPath)]
+    assert "./zon2nix-prefetch-file.patch" in paths
+    strings = [
+        node.value
+        for node in _nix_nodes(expression)
+        if isinstance(node, StringPrimitive | IndentedString)
+    ]
+    cert = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+    assert cert in strings
+    script = next(value for value in strings if "makeWrapper" in value)
+    for variable in ("SSL_CERT_FILE", "NIX_SSL_CERT_FILE", "CURL_CA_BUNDLE"):
+        assert f'--set {variable} "${{certFile}}"' in script
+    assert "--unpack" not in script
+    added, removed = _patch_changed_lines(
+        REPO_ROOT / "packages/neutils/zon2nix-prefetch-file.patch"
+    )
+    assert any("prefetch-file" in line for line in added)
+    assert all("--unpack" not in line for line in added)
+    assert any("std.http.Client" in line for line in removed)
+    assert any("TlsInitializationFailed" in line for line in added)
+
+
+def _nix_nodes(expression: object) -> list[object]:
+    nodes: list[object] = []
+
+    def visit(node: object) -> None:
+        if isinstance(node, list | tuple):
+            for item in node:
+                visit(item)
+            return
+        if not hasattr(node, "__dataclass_fields__"):
+            return
+        nodes.append(node)
+        for name in node.__dataclass_fields__:
+            visit(getattr(node, name))
+
+    visit(expression)
+    return nodes
+
+
+def _patch_changed_lines(path: Path) -> tuple[list[str], list[str]]:
+    added: list[str] = []
+    removed: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith(("+++", "---")):
+            continue
+        if line.startswith("+"):
+            added.append(line[1:])
+        elif line.startswith("-"):
+            removed.append(line[1:])
+    return added, removed
 
 
 @pytest.mark.parametrize("version", ["0.15.0", "0.15.2"])
@@ -975,14 +1019,9 @@ def test_render_build_zig_zon_nix_renders_artifact_with_resolved_tools(
     assert installables[1][1] is True
     assert_nix_ast_equal(
         installables[1][0],
-        _expected_flake_attr_expression(
+        _expected_patched_zon2nix_source(
             "git+file:///repo/root?dirty=1",
-            "inputs",
-            "zon2nix",
-            "packages",
             "aarch64-darwin",
-            "zon2nix",
-            quoted_indices=(1, 3),
         ),
     )
     assert command_calls[0][0][0] == "/nix/store/zon2nix-tool/bin/zon2nix"
@@ -1201,15 +1240,7 @@ def test_render_build_zig_zon_nix_yields_tool_resolution_events(
     assert resolution_messages[1].startswith("resolving ")
     assert_nix_ast_equal(
         resolution_messages[1].removeprefix("resolving "),
-        _expected_flake_attr_expression(
-            flake_url,
-            "inputs",
-            "zon2nix",
-            "packages",
-            "aarch64-darwin",
-            "zon2nix",
-            quoted_indices=(1, 3),
-        ),
+        _expected_patched_zon2nix_source(flake_url, "aarch64-darwin"),
     )
     assert events.result == "# rendered\n"
 

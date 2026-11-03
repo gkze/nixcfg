@@ -14,6 +14,17 @@ from lib.update.events import EventSink, ignore_event
 if TYPE_CHECKING:
     import aiohttp
 
+from nix_manipulator.expressions.binary import BinaryExpression
+from nix_manipulator.expressions.binding import Binding
+from nix_manipulator.expressions.function.call import FunctionCall
+from nix_manipulator.expressions.identifier import Identifier
+from nix_manipulator.expressions.let import LetExpression
+from nix_manipulator.expressions.operator import Operator
+from nix_manipulator.expressions.parenthesis import Parenthesis
+from nix_manipulator.expressions.primitive import StringPrimitive
+from nix_manipulator.expressions.select import Select
+from nix_manipulator.expressions.set import AttributeSet
+
 from lib.nix.models.sources import HashEntry, SourceHashes
 from lib.update import net as update_net
 from lib.update import nix as update_nix
@@ -30,6 +41,7 @@ from lib.update.failures import is_retryable_nix_network_failure
 from lib.update.nix import (
     _build_flake_attr_expr,
 )
+from lib.update.nix_expr import compact_nix_expr, identifier_attr_path, nix_str
 from lib.update.npm_semver import release_version_triplet
 from lib.update.paths import get_repo_file, local_flake_url
 from lib.update.process import RunCommandOptions, run_command
@@ -176,15 +188,43 @@ class NeutilsUpdater(GitHubReleaseUpdater):
 
     @classmethod
     def _zon2nix_expr(cls, *, platform: str, repo_root: Path) -> str:
-        return _build_flake_attr_expr(
-            _local_flake_url(repo_root),
-            "inputs",
-            cls.ZON2NIX_INPUT,
-            "packages",
-            platform,
-            "zon2nix",
-            quoted_indices=(1, 3),
+        """Build the patched generator, not the input's own package.
+
+        The pinned input still owns the Zig 0.15 graph. Its plain-URL
+        fetch is replaced in ``patched-zon2nix.nix`` because that package
+        hashes through Zig's HTTP client.
+        """
+        root = Identifier(name="root")
+        expression = LetExpression(
+            local_variables=[
+                Binding(
+                    name="root",
+                    value=FunctionCall(
+                        name=identifier_attr_path("builtins", "getFlake"),
+                        argument=nix_str(_local_flake_url(repo_root)),
+                    ),
+                ),
+            ],
+            value=FunctionCall(
+                name=FunctionCall(
+                    name=Identifier(name="import"),
+                    argument=Parenthesis(
+                        value=BinaryExpression(
+                            operator=Operator(name="+"),
+                            left=Select(expression=root, attribute="outPath"),
+                            right=StringPrimitive(
+                                value="/packages/neutils/patched-zon2nix.nix"
+                            ),
+                        ),
+                    ),
+                ),
+                argument=AttributeSet.from_dict({
+                    "root": root,
+                    "system": StringPrimitive(value=platform),
+                }),
+            ),
         )
+        return compact_nix_expr(expression.rebuild())
 
     @classmethod
     def _zon2nix_zig_flag(cls, selected_zig_version: str) -> str:
