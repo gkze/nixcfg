@@ -4270,7 +4270,9 @@ def test_unsloth_policy_patch_declares_nix_managed_for_both_module_seams(
     assert current_main.count("mod nix_managed;\n") == 1
     assert "mod native_vibrancy;\nmod nix_managed;\nmod preflight;\n" in current_main
     assert previous_text.count("mod nix_managed;\n") == 1
-    assert "mod native_path_policy;\nmod nix_managed;\nmod preflight;\n" in previous_text
+    assert (
+        "mod native_path_policy;\nmod nix_managed;\nmod preflight;\n" in previous_text
+    )
     assert "mod native_vibrancy;" not in previous_text
 
 
