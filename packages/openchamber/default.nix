@@ -381,7 +381,13 @@ let
       done
 
       cd packages/electron
-      ${electronBuilderExecutable} \
+      # 2.6.0 after-pack.cjs re-signs with a bare `codesign` after it
+      # rewrites the executable UUID. The Darwin sandbox has
+      # /usr/bin/codesign, not a PATH entry (Update 41540342864, cascade 0).
+      codesignPath="$TMPDIR/openchamber-codesign"
+      mkdir -p "$codesignPath"
+      ln -s /usr/bin/codesign "$codesignPath/codesign"
+      PATH="$codesignPath:$PATH" ${electronBuilderExecutable} \
         --mac \
         --arm64 \
         --dir \

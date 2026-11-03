@@ -1726,6 +1726,40 @@ def test_openchamber_uses_onnxruntime_soname_and_declares_store_linkage() -> Non
     )
 
 
+def test_openchamber_electron_builder_can_exec_host_codesign() -> None:
+    """2.6.0 after-pack.cjs runs bare codesign; the sandbox only has /usr/bin/codesign.
+
+    Update 41540342864 cascade slot 0 built openchamber-2.6.0 until
+    execFileSync('codesign') failed with ENOENT. Slot 4 then sibling-stopped.
+    """
+    package = expect_instance(
+        parse_nix_expr((_PACKAGE_DIR / "default.nix").read_text(encoding="utf-8")),
+        FunctionDefinition,
+    )
+    final = expect_instance(package.output, IfExpression)
+    real_package = expect_instance(
+        expect_binding(final.scope, "realPackage").value,
+        FunctionCall,
+    )
+    arguments = expect_instance(real_package.argument, AttributeSet)
+    build_phase = expect_instance(
+        expect_binding(arguments.values, "buildPhase").value,
+        IndentedString,
+    )
+    shell = parse_shell(indented_string_body(build_phase.rebuild()))
+
+    assert 'ln -s /usr/bin/codesign "$codesignPath/codesign"' in command_texts(
+        shell, "ln"
+    )
+    assert any(
+        command.startswith('PATH="$codesignPath:$PATH" __NIX_INTERP__')
+        and "--mac" in command
+        and "--arm64" in command
+        and "-c.mac.identity=null" in command
+        for command in command_texts(shell)
+    )
+
+
 def test_openchamber_uses_realized_workspace_cli_paths() -> None:
     """Build and verification CLIs must use paths emitted by Bun's workspace install."""
     package = expect_instance(
