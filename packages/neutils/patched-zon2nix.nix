@@ -15,6 +15,9 @@
 # the pin and replaces only the plain fetch. The child uses the Nix already
 # on PATH, the same client that is talking to this machine's daemon.
 #
+# The compiler stays the one the pinned zon2nix package already selected.
+# Replacing its src avoids a second toolchain pin in this file.
+#
 # The wrapper pins cacert. Hosted Darwin Nix injects SSL_CERT_FILE of
 # /no-cert-file.crt into sandboxed builds; a child curl then fails with
 # error 77. zon2nix runs outside that sandbox, and the wrapper still
@@ -28,9 +31,9 @@ let
     src = zon2nixFlake;
     patches = [ ./zon2nix-prefetch-file.patch ];
   };
-  unwrapped = pkgs.callPackage (src + "/package.nix") {
-    zig = zon2nixFlake.inputs.zig.packages.${system}."0.16.0";
-  };
+  unwrapped = zon2nixFlake.packages.${system}.zon2nix.overrideAttrs (_old: {
+    inherit src;
+  });
   certFile = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
 in
 pkgs.runCommand "zon2nix-with-ca-bundle"
