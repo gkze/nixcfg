@@ -2265,6 +2265,40 @@ def test_paseo_patcher_supports_the_pinned_and_candidate_release_layouts(
     )
 
 
+def test_paseo_patcher_accepts_async_build_settings_options_after_the_handoff(
+    tmp_path: Path,
+) -> None:
+    """The method after the handoff is not part of the executable seam.
+
+    Paseo 0.15.0 made that method async. Requiring its 0.14.0 signature
+    rejected the release in Update 41588056564.
+    """
+    module = _load_patcher_module()
+    root = tmp_path / "source"
+    _write_patcher_fixture(root)
+    provider = root / _CLAUDE_PROVIDER_PATH
+    source = provider.read_text(encoding="utf-8")
+    previous_method = "  private buildSettingsOptions(\n"
+    async_method = "  private async buildSettingsOptions(\n"
+    assert source.count(previous_method) == 1
+    provider.write_text(source.replace(previous_method, async_method), encoding="utf-8")
+
+    assert module.validate_claude_provider_source(
+        provider.read_text(encoding="utf-8")
+    ) == ("0.14.0")
+    module.patch_tree(
+        root,
+        claude_code_executable=_TEST_CLAUDE_CODE_EXECUTABLE,
+    )
+
+    patched = provider.read_text(encoding="utf-8")
+    assert patched.count(async_method) == 1
+    assert (
+        "    base.pathToClaudeCodeExecutable = claudeBinary;\n    return base;"
+        in patched
+    )
+
+
 def test_paseo_pinned_release_has_a_reviewed_layout() -> None:
     """The build patches the pinned source, so its release needs a layout."""
     module = _load_patcher_module()

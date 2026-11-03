@@ -46,6 +46,10 @@ async function resolveClaudeBinary(runtimeSettings?: ProviderRuntimeSettings): P
     "}\n"
 )
 _CLAUDE_BUILD_OPTIONS_RETURN = "    return base;\n"
+# The handoff is the final mutation of `base` inside buildOptions. The
+# following method is buildSettingsOptions. 0.15.0 made that method async and
+# widened its return with extraArgs, which is outside this seam, so the tail
+# stops at buildOptions' closing brace (Update 41588056564).
 _CLAUDE_BUILD_OPTIONS_TAIL = """\
     if (this.claudeSessionId && !this.pendingFreshSessionId) {
       base.resume = this.claudeSessionId;
@@ -58,8 +62,6 @@ _CLAUDE_BUILD_OPTIONS_TAIL = """\
     }
     return base;
   }
-
-  private buildSettingsOptions(
 """
 _CLAUDE_FINAL_EXECUTABLE_HANDOFF = (
     "    base.pathToClaudeCodeExecutable = claudeBinary;\n"
