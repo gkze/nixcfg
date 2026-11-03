@@ -157,6 +157,39 @@ def test_package_skips_headed_swift_layout_guide_check() -> None:
     )
 
 
+def test_package_does_not_launch_the_swift_testing_helper() -> None:
+    """The empty Swift Testing helper SIGTRAPs and fails an otherwise live XCTest run."""
+    package = expect_instance(
+        parse_nix_expr(
+            (REPO_ROOT / "packages/baseten-switch/default.nix").read_text(
+                encoding="utf-8"
+            )
+        ),
+        FunctionDefinition,
+    )
+    derivation = expect_instance(
+        expect_scope_binding(package.output, "package").value,
+        FunctionCall,
+    )
+    check_phase = expect_instance(
+        expect_binding(
+            expect_instance(derivation.argument, AttributeSet).values,
+            "checkPhase",
+        ).value,
+        IndentedString,
+    )
+
+    shell = parse_shell(indented_string_body(check_phase.rebuild()))
+    swift_tests = [
+        " ".join(command.replace("\\\n", " ").split())
+        for command in command_texts(shell, "env")
+        if "/usr/bin/swift test" in command
+    ]
+    assert len(swift_tests) == 1
+    assert "--disable-swift-testing" in swift_tests[0]
+    assert "--enable-swift-testing" not in swift_tests[0]
+
+
 def test_package_prints_a_compact_backtrace_when_swift_tests_trap() -> None:
     """A hosted XCTest SIGTRAP must name its frame inside Nix's 25-line tail."""
     package = expect_instance(
