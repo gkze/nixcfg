@@ -48,3 +48,4 @@ canary-slots: 0
 2026-11-03T07:35:00Z one Update run after 84cdc07d (Paseo 0.15.0 Claude handoff tail; Update 41588056564 prepare-darwin-0)
 2026-11-03T09:56:00Z one Update run after 033b8b20 (Paseo 0.15.0 native inventory; Update 41598175853 eval rejected the release)
 2026-11-03T18:40:26Z one Update run after 0128cb22 (baseten-switch disables swiftpm-testing-helper; Update 41616086680 signal 5)
+2026-11-03T20:33:00Z one Update run after add0bd20 (neutils zon2nix plain URLs use nix store prefetch-file; Update 41698221446 TlsInitializationFailed)
