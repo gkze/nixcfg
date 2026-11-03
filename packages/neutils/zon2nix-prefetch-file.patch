@@ -1,0 +1,222 @@
+--- a/src/nix.zig
++++ b/src/nix.zig
+@@ -16,8 +16,8 @@
+     if (std.mem.eql(u8, u.scheme, "git+http")) return try fetchGit(io, alloc, map, url, options);
+     if (std.mem.eql(u8, u.scheme, "git+https")) return try fetchGit(io, alloc, map, url, options);
+ 
+-    if (std.mem.eql(u8, u.scheme, "http")) return try fetchPlain(io, alloc, url, options);
+-    if (std.mem.eql(u8, u.scheme, "https")) return try fetchPlain(io, alloc, url, options);
++    if (std.mem.eql(u8, u.scheme, "http")) return try fetchPlain(io, alloc, map, url, options);
++    if (std.mem.eql(u8, u.scheme, "https")) return try fetchPlain(io, alloc, map, url, options);
+ 
+     return error.UnsupportedScheme;
+ }
+@@ -165,43 +165,102 @@
+     return try writer.toOwnedSlice();
+ }
+ 
+-fn fetchPlain(io: std.Io, alloc: std.mem.Allocator, url: []const u8, _: Options) !Hashes {
++fn fetchPlain(io: std.Io, alloc: std.mem.Allocator, map: *std.process.Environ.Map, url: []const u8, _: Options) !Hashes {
++    // Hash the downloaded file, not an unpacked tree. The generated
++    // expression uses fetchurl, and `nix store prefetch-file` is that
++    // hash. Zig's HTTP client reports every handshake failure as
++    // TlsInitializationFailed and does not read SSL_CERT_FILE on Darwin.
+     log.debug("nix fetch plain: {s}", .{url});
+ 
++    const stdout = try runTool(io, alloc, map, &.{
++        "nix",
++        "--extra-experimental-features",
++        "nix-command",
++        "store",
++        "prefetch-file",
++        "--json",
++        "--hash-type",
++        "sha256",
++        url,
++    }, "nix store prefetch-file");
++    defer alloc.free(stdout);
++
++    const Output = struct {
++        hash: ?[]const u8,
++    };
++    const parsed = try std.json.parseFromSlice(
++        Output,
++        alloc,
++        std.mem.trim(u8, stdout, &std.ascii.whitespace),
++        .{ .ignore_unknown_fields = true },
++    );
++    defer parsed.deinit();
++    const hash = parsed.value.hash orelse return error.HashNotFound;
++    const h = std.mem.cutPrefix(u8, hash, "sha256-") orelse return error.UnsupportedNixHash;
++    const decoder = std.base64.standard.Decoder;
+     const Hash = std.crypto.hash.sha2.Sha256;
+-    var hash: Hash = .init(.{});
++    if (try decoder.calcSizeForSlice(h) != Hash.digest_length) return error.HashLengthMismatch;
++    var final: [Hash.digest_length]u8 = undefined;
++    try decoder.decode(&final, h);
++    const hex = std.fmt.bytesToHex(final, .lower);
+ 
+-    var client = std.http.Client{
+-        .io = io,
+-        .allocator = alloc,
++    return .{
++        try alloc.dupe(u8, hash),
++        try alloc.dupe(u8, &hex),
+     };
+-    defer client.deinit();
++}
+ 
+-    var writer: std.Io.Writer.Allocating = .init(alloc);
+-    defer writer.deinit();
++fn runTool(
++    io: std.Io,
++    alloc: std.mem.Allocator,
++    map: *std.process.Environ.Map,
++    argv: []const []const u8,
++    label: []const u8,
++) ![]const u8 {
++    const stdout = stdout: {
++        var tool = std.process.spawn(
++            io,
++            .{
++                .argv = argv,
++                .stdin = .ignore,
++                .stdout = .pipe,
++                .stderr = .pipe,
++                .environ_map = map,
++            },
++        ) catch |err| switch (err) {
++            error.FileNotFound => {
++                log.err("unable to execute {s}, is it in your PATH?", .{argv[0]});
++                return error.FileNotFound;
++            },
++            else => |e| return e,
++        };
++        errdefer tool.kill(io);
+ 
+-    const status = status: {
+-        const uri = try std.Uri.parse(url);
+-        const result = try client.fetch(.{
+-            .method = .GET,
+-            .location = .{ .uri = uri },
+-            .response_writer = &writer.writer,
+-        });
+-        break :status result.status;
+-    };
++        var stdout_task = try io.concurrent(collect, .{ io, alloc, tool.stdout });
++        defer _ = stdout_task.cancel(io) catch {};
+ 
+-    if (status != .ok) return error.BadHttpStatus;
++        var stderr_task = try io.concurrent(collect, .{ io, alloc, tool.stderr });
++        defer _ = stderr_task.cancel(io) catch {};
+ 
+-    try writer.writer.flush();
++        const term = try tool.wait(io);
+ 
+-    hash.update(writer.written());
++        const stdout_bytes = try stdout_task.await(io);
++        errdefer alloc.free(stdout_bytes);
+ 
+-    var final: [Hash.digest_length]u8 = undefined;
+-    hash.final(&final);
+-    const hex = std.fmt.bytesToHex(final, .lower);
++        const stderr_bytes = try stderr_task.await(io);
++        defer alloc.free(stderr_bytes);
+ 
+-    return .{
+-        try std.fmt.allocPrint(alloc, "sha256-{b64}", .{final}),
+-        try alloc.dupe(u8, &hex),
++        switch (term) {
++            .exited => |status| {
++                if (status == 0) break :stdout stdout_bytes;
++                var it = std.mem.splitScalar(u8, stderr_bytes, '\n');
++                while (it.next()) |line| {
++                    log.err("{s} errors: {s}", .{ label, line });
++                }
++                return error.NixHashFile;
++            },
++            else => return error.NixHashFile,
++        }
+     };
++    return stdout;
+ }
+--- a/src/zig.zig
++++ b/src/zig.zig
+@@ -105,36 +105,50 @@
+     }
+ 
+     const stdout = zig_fetch: {
+-        var stdout: std.Io.Writer.Allocating = .init(alloc);
+-        defer stdout.deinit();
++        // One handshake failure used to abort the whole dependency walk.
++        // Darwin prepare retried the process, but the next URL failed the
++        // same way and the in-memory Nix hashes were discarded. Retry the
++        // fetch before giving up. These names are Zig's collapsed TLS errors,
++        // not a missing file.
++        const max_attempts = 4;
++        var attempt: u32 = 1;
++        while (attempt <= max_attempts) : (attempt += 1) {
++            log.info("zig fetch {s}", .{url});
+ 
+-        log.info("zig fetch {s}", .{url});
++            const zig_fetch = try std.process.run(
++                alloc,
++                io,
++                .{
++                    .argv = &.{ "zig", "fetch", url },
++                },
++            );
++            defer {
++                alloc.free(zig_fetch.stdout);
++                alloc.free(zig_fetch.stderr);
++            }
+ 
+-        const zig_fetch = try std.process.run(
+-            alloc,
+-            io,
+-            .{
+-                .argv = &.{ "zig", "fetch", url },
+-            },
+-        );
+-        defer {
+-            alloc.free(zig_fetch.stdout);
+-            alloc.free(zig_fetch.stderr);
+-        }
+-
+-        switch (zig_fetch.term) {
+-            .exited => |status| {
+-                if (status == 0) break :zig_fetch try alloc.dupe(u8, zig_fetch.stdout);
+-                var it = std.mem.splitScalar(u8, zig_fetch.stderr, '\n');
+-                while (it.next()) |line| {
+-                    log.err("fetching zig dep: {s}", .{line});
+-                }
+-                return error.GettingZigDep;
+-            },
+-            else => {
+-                return error.GettingZigDep;
+-            },
++            switch (zig_fetch.term) {
++                .exited => |status| {
++                    if (status == 0) break :zig_fetch try alloc.dupe(u8, zig_fetch.stdout);
++                    const transient = std.mem.indexOf(u8, zig_fetch.stderr, "TlsInitializationFailed") != null or
++                        std.mem.indexOf(u8, zig_fetch.stderr, "ConnectionTimedOut") != null or
++                        std.mem.indexOf(u8, zig_fetch.stderr, "CertificateBundleLoadFailure") != null;
++                    if (!transient or attempt == max_attempts) {
++                        var it = std.mem.splitScalar(u8, zig_fetch.stderr, '\n');
++                        while (it.next()) |line| {
++                            log.err("fetching zig dep: {s}", .{line});
++                        }
++                        return error.GettingZigDep;
++                    }
++                    log.warn("zig fetch transient TLS failure; retrying {s}", .{url});
++                },
++                else => {
++                    if (attempt == max_attempts) return error.GettingZigDep;
++                    log.warn("zig fetch did not exit; retrying {s}", .{url});
++                },
++            }
+         }
++        return error.GettingZigDep;
+     };
+     defer alloc.free(stdout);
+ 

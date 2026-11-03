@@ -301,6 +301,10 @@
       # Keep Neutils generation on the exact revision already proven with its
       # Zig 0.15 dependency graph. Review upstream's first post-v0.6.0 release,
       # including the ZIP-fetch fixes, before deliberately advancing this pin.
+      # packages/neutils/patched-zon2nix.nix replaces this revision's Zig HTTP
+      # plain-URL fetch with `nix store prefetch-file` (raw bytes, same as
+      # fetchurl). Upstream main's nix-prefetch-url --unpack would stop
+      # matching the hashes in build.zig.zon.nix.
       # Tracking: https://github.com/jcollie/zon2nix/compare/v0.6.0...main
       url = "github:jcollie/zon2nix/0ece5ed15107ecafbb121ad46aa85413dd40ff03";
     };
