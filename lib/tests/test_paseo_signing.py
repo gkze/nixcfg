@@ -34,9 +34,11 @@ _RELEASE_MANIFEST = _PACKAGE_DIR / "native-manifest-0.14.0.txt"
 _RELEASE_LATEST_MANIFEST = _PACKAGE_DIR / "native-manifest-0.14.0-abseil-20260817.txt"
 _PINNED_RELEASE = "0.9.1"
 _CANDIDATE_RELEASE = "0.14.0"
+_REUSED_INVENTORY_RELEASE = "0.15.0"
 _REVIEWED_MANIFESTS = {
     _PINNED_RELEASE: (_ORIGINAL_MANIFEST, _LATEST_MANIFEST),
     _CANDIDATE_RELEASE: (_RELEASE_MANIFEST, _RELEASE_LATEST_MANIFEST),
+    _REUSED_INVENTORY_RELEASE: (_RELEASE_MANIFEST, _RELEASE_LATEST_MANIFEST),
 }
 _EXPECTED_ENTITLEMENTS = {
     "com.apple.security.cs.allow-jit": True,
@@ -422,6 +424,18 @@ def test_paseo_signature_validator_accepts_only_the_reviewed_bundle_inventory(
             96,
             "expected 106/9/97, got 105/9/96",
         ),
+        (
+            _REUSED_INVENTORY_RELEASE,
+            _RELEASE_MANIFEST,
+            95,
+            "expected 105/9/96, got 104/9/95",
+        ),
+        (
+            _REUSED_INVENTORY_RELEASE,
+            _RELEASE_LATEST_MANIFEST,
+            96,
+            "expected 106/9/97, got 105/9/96",
+        ),
     ],
 )
 def test_paseo_signature_profiles_are_not_interchangeable(
@@ -476,6 +490,8 @@ def test_paseo_signature_validator_rejects_unknown_manifest_before_commands(
         (_PINNED_RELEASE, _RELEASE_LATEST_MANIFEST),
         (_CANDIDATE_RELEASE, _ORIGINAL_MANIFEST),
         (_CANDIDATE_RELEASE, _LATEST_MANIFEST),
+        (_REUSED_INVENTORY_RELEASE, _ORIGINAL_MANIFEST),
+        (_REUSED_INVENTORY_RELEASE, _LATEST_MANIFEST),
     ],
 )
 def test_paseo_signature_validator_rejects_another_releases_manifest(
