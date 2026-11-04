@@ -31,6 +31,7 @@ from lib.update.ci.shard_plan import (
 from lib.update.derivation_validation import (
     NO_IMPORT_FROM_DERIVATION_ARGS,
     RootClosureManifest,
+    resolve_derivation_validations,
     root_closure_check_attr,
     root_closure_installable,
 )
@@ -98,6 +99,7 @@ class GateReport(BaseModel):
     gates: tuple[str, ...]
     failures: tuple[object, ...]
     planned_installables: tuple[str, ...] = ()
+    held_installables: tuple[str, ...] = ()
 
 
 class CoverageError(RuntimeError):
@@ -258,11 +260,45 @@ def require_validation_reports(
     return reports
 
 
+def held_installables_by_system(
+    packages: Iterable[str],
+    *,
+    updaters: Mapping[str, type[object]],
+    systems: Iterable[str],
+) -> dict[str, frozenset[str]]:
+    """Return installables held at last-good for each validation system.
+
+    The resolver flags match ``assert-coverage`` so a held package is the
+    same installable the inventory expected.
+    """
+    names = tuple(packages)
+    return {
+        system: frozenset(
+            request.installable
+            for request in resolve_derivation_validations(
+                names,
+                updaters=updaters,
+                all_declared_systems=True,
+                native_builds_only=True,
+                native_system=system,
+            )
+        )
+        for system in systems
+    }
+
+
 def require_package_inventory(
     reports: Sequence[GateReport],
     expected: Mapping[str, frozenset[str]],
+    held: Mapping[str, frozenset[str]] | None = None,
 ) -> None:
-    """Fail if a packages gate silently dropped declared installables."""
+    """Fail if a packages gate silently dropped declared installables.
+
+    Quarantined installables may be absent from the planned set. They count
+    as held, not missing. Any other missing installable, any extra, or a
+    reported held set that disagrees with the candidate still fails.
+    """
+    held = {} if held is None else held
     for report in reports:
         if "packages" not in report.gates:
             continue
@@ -271,15 +307,27 @@ def require_package_inventory(
         if wanted is None:
             msg = f"no declared package inventory for {report.system}"
             raise CoverageError(msg)
-        if planned != wanted:
-            missing = ", ".join(sorted(wanted - planned)) or "<none>"
-            extra = ", ".join(sorted(planned - wanted)) or "<none>"
+        held_for = held.get(report.system, frozenset())
+        if not held_for <= wanted:
             msg = (
-                f"{report.system} package inventory drifted "
-                f"(missing={missing}; extra={extra})"
+                f"{report.system} quarantined installables are not in "
+                "the declared inventory"
             )
             raise CoverageError(msg)
-        if report.validate_all_packages and not planned:
+        missing = wanted - planned
+        extra = planned - wanted
+        if extra or not missing <= held_for:
+            missing_text = ", ".join(sorted(missing)) or "<none>"
+            extra_text = ", ".join(sorted(extra)) or "<none>"
+            msg = (
+                f"{report.system} package inventory drifted "
+                f"(missing={missing_text}; extra={extra_text})"
+            )
+            raise CoverageError(msg)
+        if frozenset(report.held_installables) != held_for:
+            msg = f"{report.system} held installables do not match the quarantined set"
+            raise CoverageError(msg)
+        if report.validate_all_packages and not planned and not held_for:
             msg = f"{report.system} claimed all packages but planned none"
             raise CoverageError(msg)
 
@@ -803,6 +851,7 @@ def assert_update_coverage(
     root_paths: Mapping[str, str],
     cachix_present: Callable[[str], bool],
     costs: ShardCosts | None = None,
+    package_held: Mapping[str, frozenset[str]] | None = None,
 ) -> None:
     """Fail closed unless every planned root, shard, and package is present."""
     require_required_jobs(job_results)
@@ -816,7 +865,7 @@ def assert_update_coverage(
         tree=tree,
         validate_all_packages=validate_all_packages,
     )
-    require_package_inventory(reports, package_expected)
+    require_package_inventory(reports, package_expected, package_held)
     require_shard_receipts(evidence, shards, tree=tree)
     planned_roots = {compose_kind_name(root.kind, root.name) for root in manifest.roots}
     missing_paths = planned_roots - set(root_paths)

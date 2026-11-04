@@ -193,6 +193,29 @@ flowchart TD
    metadata-only `--validate` cannot be combined with repair. (`repair`,
    `ci.jobs.start_repair`, `lib/tests/test_update_repair.py`)
 
+## CI package quarantine (24–25)
+
+1. **A package failure reverts before the candidate is sealed.** CI
+   preparation reverts a failed package and its coupled companions to the
+   last-good pin, records one quarantine entry, and captures that tree as
+   prepared. Plan, validation, coverage, and certification all see that
+   tree. Local `nixcfg update` still withholds and exits non-zero; this
+   seal is only the CI preparation path. An infrastructure failure
+   (runner, store, authentication, cancellation, plan, or workspace)
+   does not quarantine and does not publish a partial candidate.
+   (`cli._quarantine_ci_preparation`, `quarantine.failure_is_infra`)
+
+1. **Quarantine stays visible until the package updates cleanly.** The
+   publish job opens or updates one issue per package and closes it only
+   when validation reports show that package was attempted and did not
+   fail. The issue's original `since` is the rot clock. Seven days after
+   that stamp (`since + 7 days <= now`) the surface step fails before
+   certify, so the package cannot ride isolation for a second weekly run.
+   Coverage counts quarantined installables as held. A non-quarantined
+   miss still fails coverage.
+   (`quarantine.plan_issue_sync`, `coverage.require_package_inventory`,
+   `ci.jobs.sync_quarantines`)
+
 ## Related
 
 - [runtime.md](runtime.md): the durable-execution runtime that keeps these

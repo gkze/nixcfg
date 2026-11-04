@@ -7,6 +7,7 @@ import shutil
 import sys
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Unpack, cast
 
@@ -58,6 +59,15 @@ from lib.update.errors import format_exception
 from lib.update.event_queue import EVENT_QUEUE_SIZE, run_event_pipeline
 from lib.update.paths import get_repo_root
 from lib.update.prepare_shard import partition_prepare_targets
+from lib.update.quarantine import (
+    QuarantineEntry,
+    append_job_summary,
+    current_run_url,
+    entries_for_package_failures,
+    failures_are_package_scoped,
+    quarantine_log_line,
+    render_quarantine_summary,
+)
 from lib.update.refs import (
     FlakeInputRef,
     get_flake_inputs_with_refs,
@@ -567,6 +577,7 @@ class _RunExecutionResult:
     candidate_updates: tuple[str, ...]
     had_errors: bool
     written_paths: tuple[Path, ...]
+    error_messages: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -596,6 +607,8 @@ class _RunOutcome:
     run_dir: Path | None = None
     timings: list[dict[str, str | int | float]] | None = None
     patch: bytes = b""
+    error_messages: dict[str, str] = field(default_factory=dict)
+    quarantines: tuple[QuarantineEntry, ...] = ()
 
 
 def _record_workspace_failure(
@@ -970,6 +983,7 @@ async def _execute_run_plan_result(
         candidate_updates=candidate_updates,
         had_errors=phase_result.errors > 0,
         written_paths=tuple(written_paths or ()),
+        error_messages=dict(phase_result.error_messages),
     )
 
 
@@ -1029,13 +1043,25 @@ def _requires_root_closure_validation(changed_paths: Iterable[Path]) -> bool:
     return bool(tuple(changed_paths))
 
 
-def _emit_run_outcome(
+def _emit_quarantines(outcome: _RunOutcome) -> None:
+    """Write quarantine markers once. An empty hold stays off the JSON payload."""
+    if not outcome.quarantines:
+        return
+    text = render_quarantine_summary(outcome.quarantines)
+    sys.stderr.write(text)
+    for entry in outcome.quarantines:
+        sys.stderr.write(f"{quarantine_log_line(entry)}\n")
+    append_job_summary(text)
+
+
+def _emit_run_outcome(  # noqa: PLR0915 -- one result emission, including the quarantine projection
     outcome: _RunOutcome,
     *,
     out: OutputOptions,
     dry_run: bool,
 ) -> int:
     """Emit exactly one final result after isolated workspace teardown."""
+    _emit_quarantines(outcome)
     plan_error = outcome.plan_error
     workspace_error = outcome.workspace_error
     discarded_updates = (
@@ -1099,6 +1125,16 @@ def _emit_run_outcome(
             payload[error_key] = redact_urls(plan_error.message)
         if outcome.validation_error is not None:
             payload["validationIncomplete"] = redact_urls(outcome.validation_error)
+        if outcome.quarantines:
+            payload["quarantined"] = [
+                {
+                    "package": entry.package,
+                    "phase": entry.phase.value,
+                    "since": entry.since.isoformat(),
+                    "runUrl": entry.run_url,
+                }
+                for entry in outcome.quarantines
+            ]
         if workspace_error is not None:
             payload["error"] = redact_urls(workspace_error)
         sys.stdout.write(f"{json.dumps(payload)}\n")
@@ -1585,6 +1621,49 @@ async def _validate_and_gate(
     return True
 
 
+def _quarantine_ci_preparation(
+    workspace: update_persistence.IsolatedUpdateWorkspace,
+    run_plan: _RunPlan | _RunPlanError | None,
+    outcome: _RunOutcome,
+    *,
+    updaters: Mapping[str, UpdaterClass],
+    out: OutputOptions,
+    monitor: RunMonitor | None,
+) -> tuple[QuarantineEntry, ...] | None:
+    """Revert package failures and return their quarantine, or ``None`` to fail.
+
+    ``None`` leaves the preparation unprepared. An empty tuple is a clean
+    shard. Infrastructure, plan, and workspace failures are not quarantined
+    and are not reverted.
+    """
+    if (
+        outcome.plan_error is not None
+        or outcome.workspace_error is not None
+        or outcome.validation_error is not None
+    ):
+        return None
+    if not outcome.had_errors:
+        return ()
+    if not isinstance(run_plan, _RunPlan):
+        return None
+    failed = [
+        name for name, status in outcome.summary.statuses.items() if status == "error"
+    ]
+    if not failures_are_package_scoped(failed, outcome.error_messages):
+        return None
+    _withhold_failed_clusters(workspace, run_plan, outcome, updaters, out, monitor)
+    entries = entries_for_package_failures(
+        failed,
+        outcome.error_messages,
+        outcome.dropped,
+        now=datetime.now(UTC),
+        run_url=current_run_url(),
+    )
+    outcome.quarantines = entries
+    outcome.had_errors = False
+    return entries
+
+
 async def _gate_candidate(
     workspace: update_persistence.IsolatedUpdateWorkspace,
     run_plan: _RunPlan | _RunPlanError | None,
@@ -1601,8 +1680,17 @@ async def _gate_candidate(
     """
     opts = context.opts
     if preparation is not None:
-        # Preparation exports even failed bytes, but cannot promote. Native CI
-        # jobs validate the final assembled tree in a separate command.
+        # Package failures revert before this capture, so the sealed tree is
+        # the tree validation, coverage, and certify all see. Infrastructure
+        # failures stay unprepared and still stop sibling jobs.
+        quarantines = _quarantine_ci_preparation(
+            workspace,
+            run_plan,
+            outcome,
+            updaters=context.updaters,
+            out=context.out,
+            monitor=context.monitor,
+        )
         preparation.capture(
             workspace,
             sources=(
@@ -1611,7 +1699,8 @@ async def _gate_candidate(
                 else ()
             ),
             allowed_paths=tuple(dict.fromkeys((*allowed_paths, *_FLAKE_FILES))),
-            succeeded=not outcome.had_errors,
+            succeeded=quarantines is not None,
+            quarantines=() if quarantines is None else quarantines,
         )
         return
     if outcome.plan_error is not None or (opts.strict and outcome.had_errors):
@@ -1744,6 +1833,7 @@ async def _run_updates(
                 outcome.candidate_updates = result.candidate_updates
                 outcome.had_errors = result.had_errors
                 outcome.written_paths = tuple(result.written_paths)
+                outcome.error_messages = dict(getattr(result, "error_messages", {}))
                 allowed_paths = _workspace_allowed_paths(
                     workspace.root,
                     declared_paths,

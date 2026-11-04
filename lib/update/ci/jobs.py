@@ -1972,6 +1972,47 @@ def _queue_squash_auto_merge(branch: str) -> None:
     _run("gh", "pr", "merge", branch, "--squash")
 
 
+def _quarantine_publication_note() -> str:
+    """Count packages the sealed candidate held at their last-good pins."""
+    candidate = _temp() / "evidence" / "prepare-x86_64-linux" / "candidate.json"
+    payload = json.loads(candidate.read_bytes())
+    quarantines = payload.get("quarantines")
+    if not isinstance(quarantines, list):
+        quarantines = []
+    lines = [
+        f"Quarantined packages held at last-good pins: {len(quarantines)}",
+        "",
+    ]
+    for item in quarantines:
+        if not isinstance(item, dict):
+            continue
+        lines.append(f"- {item.get('package')} ({item.get('phase')})")
+    if quarantines:
+        lines.append("")
+    return "\n".join(lines)
+
+
+def sync_quarantines() -> None:
+    """Open or refresh one issue per quarantined package, and close clean ones.
+
+    Missing evidence is a no-op. The publish job runs this after coverage and
+    before certify, including when an earlier step failed, so a package that
+    only broke during validation still gets an issue.
+    """
+    evidence = _temp() / "evidence"
+    candidate = evidence / "prepare-x86_64-linux" / "candidate.json"
+    if not candidate.is_file() and not any(evidence.glob("validate-*/validation.json")):
+        return
+    _run(
+        _runtime(),
+        "ci",
+        "update",
+        "sync-quarantines",
+        "--evidence",
+        str(evidence),
+    )
+
+
 def publish() -> None:
     """Open the verified update as a PR against the default branch and squash-merge it.
 
@@ -2011,6 +2052,7 @@ def publish() -> None:
     )
     body.write_text(
         "Prepared and validated against one Git tree on three native platforms.\n\n"
+        f"{_quarantine_publication_note()}"
         f"Evidence: {run_url}\n"
     )
     _run(
@@ -3181,6 +3223,7 @@ def main(stage: str) -> int:
         "quality": quality,
         "certify": certify,
         "publish": publish,
+        "sync-quarantines": sync_quarantines,
         "collect-evidence": collect_evidence,
         "install-agent": install_agent,
         "repair": repair,

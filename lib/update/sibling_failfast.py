@@ -14,7 +14,10 @@ runs. ``cancelled`` and ``skipped`` are not that signal: a device-faulted
 Darwin prepare or warmup slot completes successfully and a fresh VM retries it.
 
 A green run still builds every closure. The stop only abandons work that can
-no longer reach publish.
+no longer reach publish. A per-package updater or build failure is quarantined
+inside the prepare job, which then exits 0. That success is not a sibling
+stop. Runner, cache, and authentication failures still fail the job and stop
+the group.
 """
 
 import json

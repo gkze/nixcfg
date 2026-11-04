@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 
 from lib.update.prepare_shard import partition_prepare_targets
+from lib.update.quarantine import QuarantineEntry  # noqa: TC001 -- Pydantic field
 from lib.update.updaters.metadata import MappingMetadata, VersionInfo
 
 if TYPE_CHECKING:
@@ -99,6 +100,7 @@ class Candidate(BaseModel):
     resolutions: dict[str, ResolvedVersion]
     prepared: bool
     patch: bytes
+    quarantines: tuple[QuarantineEntry, ...] = ()
 
     def apply(self, root: Path) -> None:
         """Reconstruct this candidate in a clean, isolated baseline checkout."""
@@ -178,6 +180,7 @@ class Preparation:
         sources: tuple[str, ...],
         allowed_paths: tuple[Path, ...],
         succeeded: bool,
+        quarantines: tuple[QuarantineEntry, ...] = (),
     ) -> None:
         """Export both successful and failed candidates before scratch cleanup."""
         patch = workspace.patch(allowed_paths)
@@ -198,4 +201,5 @@ class Preparation:
             resolutions=self.resolutions,
             prepared=succeeded,
             patch=patch,
+            quarantines=quarantines,
         )

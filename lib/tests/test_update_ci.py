@@ -2732,6 +2732,20 @@ def _assert_coverage_and_publish(workflow_jobs: dict) -> None:
     assert "always() && !cancelled()" in publish_if
     assert "closure_complete" not in publish_if
     assert publish["steps"].index(coverage) < publish["steps"].index(certify)
+    surface = next(
+        step
+        for step in publish["steps"]
+        if step.get("name") == "Surface quarantined packages"
+    )
+    assert (
+        publish["steps"].index(coverage)
+        < publish["steps"].index(surface)
+        < publish["steps"].index(certify)
+    )
+    assert surface["if"] == "always()"
+    assert surface["env"]["NIXCFG_CI_STAGE"] == "sync-quarantines"
+    assert surface["env"]["GH_TOKEN"] == "${{ github.token }}"  # noqa: S105 -- Actions expression, not a credential.
+    assert publish["permissions"]["issues"] == "write"
 
 
 def test_cachix_flush_proof_requires_partial_presence_after_designed_failure() -> None:
@@ -3273,6 +3287,7 @@ def test_pr_quality_certify_covers_prepare_updater_contracts() -> None:
             if values[:3] == ["uv", "run", "pytest"]:
                 pytest_files = values[3:]
                 break
+    assert "lib/tests/test_update_quarantine.py" in pytest_files
     assert "lib/tests/test_overlay_lane_updaters.py" in pytest_files
     assert "lib/tests/test_reason_package.py" in pytest_files
     assert "packages/linear-cli/updater_test.py" in pytest_files
