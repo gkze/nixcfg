@@ -80,6 +80,7 @@ from lib.update.ci.warmup import (
     is_gitbutler_family_store_path,
     is_linux_builder_image_command,
     is_linux_builder_output_store_path,
+    is_merman_family_store_path,
     is_named_rust_crate_store_path,
     is_rust_agent_ui_store_path,
     is_rust_extension_host_store_path,
@@ -2705,6 +2706,65 @@ def test_tree_sitter_wasmtime_c_api_is_svh_not_compiler_input() -> None:
         )
 
     assert compiler_input_drvs(("/nix/store/zed.drv",), run=query_run) == (
+        rustc,
+        serde,
+    )
+
+
+def test_merman_facade_is_svh_not_compiler_input() -> None:
+    """41789846000 slot 4 mixed local merman-core with Cachix merman.
+
+    rust_mermaid_render's rustc line included
+    ``--extern merman=<cachix rlib>`` and E0463'd (nixpkgs#482646).
+    Zed pins crates.io merman 0.8.0-alpha.5; this is not a Cargo
+    rename of merman-core. Force-local the facade with core and
+    render, and do not ``--max-jobs 0`` a Cachix rlib.
+    """
+    merman = "/nix/store/s39xn12r5kn7jp29m7fnzcrqgx3qnhlb-rust_merman-0.8.0-alpha.5.drv"
+    core = (
+        "/nix/store/k63z40f35f3ly31chj0svqn1afnixahq-rust_merman-core-0.8.0-alpha.5.drv"
+    )
+    render = (
+        "/nix/store/renderaaaaaaaaaaaaaaaaaaaaaaaaaaaa-"
+        "rust_merman-render-0.8.0-alpha.5.drv"
+    )
+    roughr = (
+        "/nix/store/roughraaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_roughr-merman-0.1.0.drv"
+    )
+    serde = "/nix/store/serdeaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_serde-1.0.229.drv"
+    rustc = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    assert is_named_rust_crate_store_path(merman, "merman")
+    assert is_named_rust_crate_store_path(core, "merman-core")
+    assert is_named_rust_crate_store_path(render, "merman-render")
+    assert not is_named_rust_crate_store_path(core, "merman")
+    assert not is_named_rust_crate_store_path(render, "merman")
+    assert not is_named_rust_crate_store_path(merman, "merman-core")
+    assert not is_merman_family_store_path(roughr)
+    assert is_merman_family_store_path(merman)
+    assert is_merman_family_store_path(core)
+    assert is_merman_family_store_path(render)
+    assert is_svh_sensitive_store_path(merman)
+    assert is_svh_sensitive_store_path(core)
+    assert is_svh_sensitive_store_path(render)
+    assert not is_crane_dep_store_path(merman)
+    assert not is_crane_dep_store_path(core)
+    assert is_force_local_allowed_build(merman)
+    assert is_force_local_allowed_build(core)
+    assert is_force_local_allowed_build(render)
+    assert partition_svh_sensitive_drvs((serde, merman, core, render)) == (
+        (serde,),
+        (merman, core, render),
+    )
+    assert partition_crane_dep_drvs((serde, merman, core)) == ((merman, core), (serde,))
+
+    def query_run(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args, 0, "\n".join((rustc, merman, core, render, serde)), ""
+        )
+
+    assert compiler_input_drvs(("/nix/store/mermaid.drv",), run=query_run) == (
         rustc,
         serde,
     )
