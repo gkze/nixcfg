@@ -117,7 +117,7 @@ _UPSTREAM_PATCH_SOURCES = {
     "Cargo.toml": """[workspace.dependencies]
 tauri-plugin-process = "2.4.0"
 tauri-plugin-single-instance = "2.4.2"
-tauri-plugin-updater = "2.14.0"
+tauri-plugin-updater = "2.14.1"
 tauri-plugin-window-state = "2.4.1"
 """,
     "apps/desktop/src-tauri/Cargo.toml": """[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
@@ -716,7 +716,7 @@ def test_reflect_nix_policy_rejects_drift_before_patching_any_source(
             "apps/desktop/src-tauri/tauri.conf.json",
             "releases/latest/download/latest.json",
         ),
-        ("Cargo.toml", 'tauri-plugin-updater = "2.14.0"'),
+        ("Cargo.toml", 'tauri-plugin-updater = "2.14.1"'),
         ("Cargo.toml", 'tauri-plugin-process = "2.4.0"'),
         (
             "packages/app/src/app/update-service.ts",
