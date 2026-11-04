@@ -244,7 +244,37 @@ def test_package_applies_the_reviewed_nix_integration_patch() -> None:
     assert_nix_ast_equal(
         expect_binding(arguments.values, "patches").value,
         "[ ./nix-managed.patch ./raw-telemetry-test-clock.patch"
-        " ./status-item-appkit-test-setup.patch ]",
+        " ./status-item-appkit-test-setup.patch"
+        " ./analytics-fixture-unmapped-read.patch ]",
+    )
+
+
+def test_analytics_fixture_is_read_without_data_contents_of() -> None:
+    """Hosted Darwin SIGTRAPs in Data(contentsOf:) for the approved analytics fixture."""
+    patch = (
+        REPO_ROOT / "packages/baseten-switch/analytics-fixture-unmapped-read.patch"
+    ).read_text(encoding="utf-8")
+    removed_reads = [
+        line
+        for line in patch.splitlines()
+        if line.startswith("-") and "Data(contentsOf: approvedFixtureURL())" in line
+    ]
+    added_reads = [
+        line
+        for line in patch.splitlines()
+        if line.startswith("+") and "fixtureBytes(approvedFixtureURL())" in line
+    ]
+    assert len(removed_reads) == 4
+    assert len(added_reads) == 4
+    assert any(
+        line.startswith("+") and "Darwin.open" in line for line in patch.splitlines()
+    )
+    assert any(
+        line.startswith(" ") and "JSONDecoder().decode" in line
+        for line in patch.splitlines()
+    )
+    assert not any(
+        line.startswith("+") and "--skip" in line for line in patch.splitlines()
     )
 
 
