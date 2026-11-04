@@ -137,13 +137,15 @@ jobs:
       prepare_shard: "4"
       prepare_shard_count: "5"
     secrets: inherit
-  # Same fresh-VM rerun as Update: only a kernel block-device fault retries.
+  # Same fresh-VM rerun as Update: a kernel block-device fault or a runner
+  # Nix daemon/store fault retries. A package-scoped daemon crash does not.
   prepare-darwin-retry-0:
     needs: [targets, prepare-pins, prepare-darwin-0]
     if: |-
       always() && !cancelled() &&
       needs.prepare-pins.result == 'success' &&
-      needs.prepare-darwin-0.outputs.device_fault == 'true'
+      (needs.prepare-darwin-0.outputs.device_fault == 'true' ||
+      needs.prepare-darwin-0.outputs.runner_fault == 'true')
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -159,7 +161,8 @@ jobs:
     if: |-
       always() && !cancelled() &&
       needs.prepare-pins.result == 'success' &&
-      needs.prepare-darwin-1.outputs.device_fault == 'true'
+      (needs.prepare-darwin-1.outputs.device_fault == 'true' ||
+      needs.prepare-darwin-1.outputs.runner_fault == 'true')
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -175,7 +178,8 @@ jobs:
     if: |-
       always() && !cancelled() &&
       needs.prepare-pins.result == 'success' &&
-      needs.prepare-darwin-2.outputs.device_fault == 'true'
+      (needs.prepare-darwin-2.outputs.device_fault == 'true' ||
+      needs.prepare-darwin-2.outputs.runner_fault == 'true')
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -191,7 +195,8 @@ jobs:
     if: |-
       always() && !cancelled() &&
       needs.prepare-pins.result == 'success' &&
-      needs.prepare-darwin-3.outputs.device_fault == 'true'
+      (needs.prepare-darwin-3.outputs.device_fault == 'true' ||
+      needs.prepare-darwin-3.outputs.runner_fault == 'true')
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -207,7 +212,8 @@ jobs:
     if: |-
       always() && !cancelled() &&
       needs.prepare-pins.result == 'success' &&
-      needs.prepare-darwin-4.outputs.device_fault == 'true'
+      (needs.prepare-darwin-4.outputs.device_fault == 'true' ||
+      needs.prepare-darwin-4.outputs.runner_fault == 'true')
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -255,25 +261,35 @@ jobs:
       always() && !cancelled() &&
       needs.prepare-pins.result == 'success' &&
       (needs.prepare-darwin-0.result == 'success' &&
-      needs.prepare-darwin-0.outputs.device_fault != 'true' ||
+      needs.prepare-darwin-0.outputs.device_fault != 'true' &&
+      needs.prepare-darwin-0.outputs.runner_fault != 'true' ||
       needs.prepare-darwin-retry-0.result == 'success' &&
-      needs.prepare-darwin-retry-0.outputs.device_fault != 'true') &&
+      needs.prepare-darwin-retry-0.outputs.device_fault != 'true' &&
+      needs.prepare-darwin-retry-0.outputs.runner_fault != 'true') &&
       (needs.prepare-darwin-1.result == 'success' &&
-      needs.prepare-darwin-1.outputs.device_fault != 'true' ||
+      needs.prepare-darwin-1.outputs.device_fault != 'true' &&
+      needs.prepare-darwin-1.outputs.runner_fault != 'true' ||
       needs.prepare-darwin-retry-1.result == 'success' &&
-      needs.prepare-darwin-retry-1.outputs.device_fault != 'true') &&
+      needs.prepare-darwin-retry-1.outputs.device_fault != 'true' &&
+      needs.prepare-darwin-retry-1.outputs.runner_fault != 'true') &&
       (needs.prepare-darwin-2.result == 'success' &&
-      needs.prepare-darwin-2.outputs.device_fault != 'true' ||
+      needs.prepare-darwin-2.outputs.device_fault != 'true' &&
+      needs.prepare-darwin-2.outputs.runner_fault != 'true' ||
       needs.prepare-darwin-retry-2.result == 'success' &&
-      needs.prepare-darwin-retry-2.outputs.device_fault != 'true') &&
+      needs.prepare-darwin-retry-2.outputs.device_fault != 'true' &&
+      needs.prepare-darwin-retry-2.outputs.runner_fault != 'true') &&
       (needs.prepare-darwin-3.result == 'success' &&
-      needs.prepare-darwin-3.outputs.device_fault != 'true' ||
+      needs.prepare-darwin-3.outputs.device_fault != 'true' &&
+      needs.prepare-darwin-3.outputs.runner_fault != 'true' ||
       needs.prepare-darwin-retry-3.result == 'success' &&
-      needs.prepare-darwin-retry-3.outputs.device_fault != 'true') &&
+      needs.prepare-darwin-retry-3.outputs.device_fault != 'true' &&
+      needs.prepare-darwin-retry-3.outputs.runner_fault != 'true') &&
       (needs.prepare-darwin-4.result == 'success' &&
-      needs.prepare-darwin-4.outputs.device_fault != 'true' ||
+      needs.prepare-darwin-4.outputs.device_fault != 'true' &&
+      needs.prepare-darwin-4.outputs.runner_fault != 'true' ||
       needs.prepare-darwin-retry-4.result == 'success' &&
-      needs.prepare-darwin-retry-4.outputs.device_fault != 'true')
+      needs.prepare-darwin-retry-4.outputs.device_fault != 'true' &&
+      needs.prepare-darwin-retry-4.outputs.runner_fault != 'true')
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04

@@ -176,6 +176,7 @@ _DEVICE_FAULT_LINE = re.compile(r"\(IOStorageFamily\) disk\d+(?:s\d+)*: I/O erro
 _DEVICE_FAULT_PREDICATE = 'process == "kernel" AND eventMessage CONTAINS[c] "I/O error"'
 _DEVICE_FAULT_QUERY_SECONDS = 300
 _DEVICE_FAULT_NAME = "device-fault.log"
+_RUNNER_FAULT_NAME = "runner-fault.log"
 _DEVICE_FAULT_EXCERPT_LINES = 50
 # 41339729368 validate-darwin-cascade-warmup (3): 110892 kernel
 # "(IOStorageFamily) disk2s7: I/O error." lines from 00:52:44, then
@@ -894,6 +895,11 @@ def _quarantine_faulted_runner(artifacts: Path, faults: list[str], log: TextIO) 
         f"Hosted block device faulted ({len(faults)} kernel I/O errors, first: "
         f"{faults[0].strip()}); publishing nothing from this runner",
     )
+    _drop_cachix_queue(log)
+
+
+def _drop_cachix_queue(log: TextIO) -> None:
+    """Kill the Cachix daemon without draining, so a bad store cannot upload."""
     daemon_dir = os.environ.get(_CACHIX_DAEMON_DIR_ENV, "").strip()
     if not daemon_dir:
         return
@@ -907,6 +913,24 @@ def _quarantine_faulted_runner(artifacts: Path, faults: list[str], log: TextIO) 
     except ProcessLookupError:
         return
     _write_diagnostic(log, f"Killed Cachix daemon pid={pid} without draining")
+
+
+def _discard_runner_store_attempt(artifacts: Path, log: TextIO) -> None:
+    """Keep a daemon or store fault from publishing this shard's paths.
+
+    The fresh VM reruns the shard. Paths realized on this VM stay untrusted
+    for the same reason a faulted disk's paths do: the attempt did not finish,
+    and a crashed daemon can register a partial NAR.
+    """
+    (artifacts / _RUNNER_FAULT_NAME).write_text(
+        "Nix daemon or store fault; this attempt is discarded\n",
+        encoding="utf-8",
+    )
+    _write_diagnostic(
+        log,
+        "Hosted Nix daemon or store faulted; publishing nothing from this runner",
+    )
+    _drop_cachix_queue(log)
 
 
 def reclaim_hosted_store() -> None:
@@ -1677,6 +1701,8 @@ def _finish_native_stage(
         if stage == "validate" and os.environ.get(_DEVICE_FAULT_RETRY_ENV) == "true":
             return _fail_device_fault_retry(faults, returncode)
         return _hand_off_device_fault(faults, returncode)
+    if returncode and _hands_off_runner_store_fault(stage, artifacts):
+        return _hand_off_runner_store_fault(log, artifacts, returncode)
     return _publish_prefetched_receipts(receipts, log, artifacts, returncode)
 
 
@@ -1694,6 +1720,48 @@ def _hands_off_device_faults(stage: str) -> bool:
         and os.environ.get("NIXCFG_VALIDATE_SCOPE", "all") in _DEVICE_FAULT_RETRY_SCOPES
         and os.environ.get("NIXCFG_CANARY") != "true"
     )
+
+
+def _hands_off_runner_store_fault(stage: str, artifacts: Path) -> bool:
+    """Return whether this Darwin prepare shard asked for a fresh-VM retry.
+
+    Only ``prepare`` has ``prepare-darwin-retry-N``. A pin refresh or a Linux
+    prepare has no second VM, so those failures still stop the group.
+    """
+    if stage != "prepare" or not is_hosted_darwin_runner():
+        return False
+    return _result_requests_runner_retry(artifacts / "result.json")
+
+
+def _result_requests_runner_retry(result_path: Path) -> bool:
+    """Return whether the updater JSON named a runner store fault."""
+    try:
+        result = json.loads(result_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    return isinstance(result, dict) and result.get("runnerStoreFault") is True
+
+
+def _hand_off_runner_store_fault(log: TextIO, artifacts: Path, returncode: int) -> int:
+    """Discard this shard and let a fresh VM redo it before sibling-stop.
+
+    Exiting 0 with ``runner_fault=true`` is what keeps the other prepare jobs
+    alive. The uploaded candidate uses a ``-runner-fault`` name, so merge
+    cannot consume it. A retry that faults again also exits 0 with the flag,
+    and merge then refuses the shard. Without a step output nothing can hand
+    the work off, so the stage fails instead.
+    """
+    _discard_runner_store_attempt(artifacts, log)
+    if not os.environ.get("GITHUB_OUTPUT"):
+        return returncode or 1
+    _outputs(runner_fault="true")
+    sys.stdout.write(
+        "::warning title=Hosted Nix daemon faulted::"
+        "this prepare shard lost the Nix daemon or the store; "
+        "its result is discarded and the shard reruns on a fresh VM\n"
+    )
+    sys.stdout.flush()
+    return 0
 
 
 def _hand_off_device_fault(faults: list[str], returncode: int) -> int:
@@ -3024,6 +3092,8 @@ def flush_cachix() -> None:
       successful stripe members reach gkze.
     - Block-device fault (39883371442): the ``device-fault.log`` marker
       makes this flush publish nothing from the untrusted store.
+    - Runner daemon or store fault: ``runner-fault.log`` does the same for
+      the discarded prepare attempt. The fresh VM publishes its own paths.
     """
     os.environ["NIXCFG_CI_STAGE"] = "flush-cachix"
     artifacts = _temp() / "update-artifacts"
@@ -3035,11 +3105,22 @@ def flush_cachix() -> None:
         record_runner_storage("flush-start", log)
         _retain_cachix_daemon_evidence(artifacts, log)
         if (artifacts / _DEVICE_FAULT_NAME).is_file():
+            untrusted = (
+                "this runner's block device faulted, so its store paths are untrusted"
+            )
+        elif (artifacts / _RUNNER_FAULT_NAME).is_file():
+            untrusted = (
+                "this runner's Nix daemon or store faulted, so this attempt "
+                "is discarded"
+            )
+        else:
+            untrusted = ""
+        if untrusted:
             _release_cachix_daemon_dir()
             _write_diagnostic(
                 log,
-                "Skipping Cachix flush: this runner's block device faulted, "
-                "so its store paths are untrusted; cleared CACHIX_DAEMON_DIR "
+                "Skipping Cachix flush: "
+                f"{untrusted}; cleared CACHIX_DAEMON_DIR "
                 "so cachix-action post skips its drain",
             )
             return

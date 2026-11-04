@@ -304,7 +304,10 @@
       # packages/neutils/patched-zon2nix.nix replaces this revision's Zig HTTP
       # plain-URL fetch with `nix store prefetch-file` (raw bytes, same as
       # fetchurl). Upstream main's nix-prefetch-url --unpack would stop
-      # matching the hashes in build.zig.zon.nix.
+      # matching the hashes in build.zig.zon.nix. That file builds the tool
+      # with nixpkgs' zig_0_16 and does not evaluate this input's packages:
+      # those follow zig-overlay and killed the prepare-darwin-1 worker
+      # (Update 41796475737).
       # Tracking: https://github.com/jcollie/zon2nix/compare/v0.6.0...main
       url = "github:jcollie/zon2nix/0ece5ed15107ecafbb121ad46aa85413dd40ff03";
     };

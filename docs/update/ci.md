@@ -143,8 +143,16 @@ certification. A green run still builds every closure.
 
 A package updater failure does not fail the prepare job. The job reverts that
 package and its coupled companions to the last-good pin, records a quarantine,
-and exits 0, so sibling-stop does not fire. Runner, store, and authentication
-failures still fail the job and stop the group.
+and exits 0, so sibling-stop does not fire. A Nix daemon disconnect while
+evaluating one derivation, with no store-damage markers, is that package's
+failure: Update 41796475737 died that way inside `zon2nix-with-ca-bundle`
+while the same daemon kept serving the rest of the shard. A runner store
+fault (a disconnect with no derivation, a dead daemon socket, `Illegal byte
+sequence`, SIGBUS, write-EIO, or a vanished store path) does not quarantine.
+On a Darwin prepare shard it exits 0 with `runner_fault=true`, uploads the
+attempt as `-runner-fault`, and `prepare-darwin-retry-N` reruns the shard
+once before sibling-stop. Authentication, cancellation, and plan failures
+still fail the job and stop the group.
 
 ### Package quarantine
 
@@ -451,6 +459,13 @@ error makes the runner's store untrusted:
 Any other preparation failure is still a failure. A device fault on the retry
 also leaves preparation incomplete, so the run fails. The PR update-prepare
 check uses the same retry.
+
+A Darwin prepare shard that loses the Nix daemon or the store, and whose
+failure is not one package's derivation eval, uses the same retry jobs.
+`runner_fault=true` exits 0 so the other prepare jobs keep going. The
+attempt uploads as `prepare-aarch64-darwin-shard-N-runner-fault`. Merge
+accepts the shard only when the first attempt or the retry succeeded with
+neither flag set. A second fault leaves preparation incomplete.
 
 The `validate-darwin-warm-rust` and `validate-darwin-cascade-warmup` slots run
 the same check after the updater exits. A slot's work is fixed by the plan and

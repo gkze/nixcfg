@@ -82,6 +82,9 @@ on:
       device_fault:
         description: The hosted runner's kernel logged a block-device I/O error
         value: ${{ jobs.native.outputs.device_fault }}
+      runner_fault:
+        description: The prepare shard lost the Nix daemon or store and must rerun
+        value: ${{ jobs.native.outputs.runner_fault }}
     secrets:
       UPDATE_SELF_HEAL_GITHUB_TOKEN:
         required: true
@@ -99,6 +102,7 @@ jobs:
       device_fault: |-
         ${{ steps.candidate.outputs.device_fault ||
         steps.storage.outputs.device_fault }}
+      runner_fault: ${{ steps.candidate.outputs.runner_fault }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -243,7 +247,8 @@ jobs:
             format('{0}-{1}', inputs.stage, inputs.system) ||
             format('{0}-{1}-{2}', inputs.stage, inputs.system, inputs.scope),
             (steps.candidate.outputs.device_fault == 'true' ||
-            steps.storage.outputs.device_fault == 'true') && '-device-fault' || '') }}
+            steps.storage.outputs.device_fault == 'true') && '-device-fault' ||
+            steps.candidate.outputs.runner_fault == 'true' && '-runner-fault' || '') }}
           path: ${{ runner.temp }}/update-artifacts
           if-no-files-found: warn
           overwrite: true

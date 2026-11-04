@@ -38,6 +38,12 @@ from lib.update.cli import (
 )
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import UpdateEvent, UpdateEventKind
+from lib.update.failures import (
+    is_package_scoped_daemon_crash,
+    is_retryable_nix_store_failure,
+    is_runner_store_fault,
+    is_transient_store_interruption,
+)
 from lib.update.quarantine import (
     EXCERPT_MAX,
     IssueSyncAction,
@@ -171,6 +177,109 @@ def test_package_text_is_not_infrastructure() -> None:
     assert not failure_is_infra("hash mismatch in fixed-output derivation")
     assert not failure_is_infra("HTTP error 503 from the upstream")
     assert not failure_is_infra("")
+
+
+_PACKAGE_DAEMON_CRASH = (
+    "… while evaluating derivation 'zon2nix-with-ca-bundle'\n"
+    "… while evaluating attribute 'buildCommand' of derivation "
+    "'zon2nix-with-ca-bundle'\n"
+    "error: Nix daemon disconnected unexpectedly (maybe it crashed?)\n"
+)
+_BARE_DAEMON_DISCONNECT = (
+    "error: Nix daemon disconnected unexpectedly (maybe it crashed?)"
+)
+
+
+def test_package_scoped_daemon_crash_quarantines_that_package() -> None:
+    """41796475737: one derivation eval killed neutils's worker, not the runner.
+
+    The same daemon kept serving the rest of the shard. That text is still a
+    store interruption for validation retry. It is not an infra failure, so
+    prepare quarantines the package instead of sibling-stopping the group.
+    """
+    assert is_package_scoped_daemon_crash(_PACKAGE_DAEMON_CRASH)
+    assert not failure_is_infra(_PACKAGE_DAEMON_CRASH)
+    assert not is_runner_store_fault(_PACKAGE_DAEMON_CRASH)
+    assert is_transient_store_interruption(_PACKAGE_DAEMON_CRASH)
+    assert is_retryable_nix_store_failure(stdout="", stderr=_PACKAGE_DAEMON_CRASH)
+    assert failures_are_package_scoped(("neutils",), {"neutils": _PACKAGE_DAEMON_CRASH})
+    # Several frames of the same build are still that one package.
+    nested = (
+        "while evaluating derivation 'zon2nix'\n"
+        "while evaluating derivation 'zon2nix-with-ca-bundle'\n"
+        "Nix daemon disconnected unexpectedly\n"
+    )
+    assert is_package_scoped_daemon_crash(nested)
+    assert not failure_is_infra(nested)
+
+
+def test_runner_daemon_fault_retries_before_sibling_stop() -> None:
+    """A dead daemon or a damaged store is the runner, not the package."""
+    damaged = _PACKAGE_DAEMON_CRASH + "Illegal byte sequence\n"
+    dead_socket = (
+        "error: cannot open connection to remote store 'daemon': "
+        "Nix daemon disconnected unexpectedly (maybe it crashed?)"
+    )
+    bus = _BARE_DAEMON_DISCONNECT + "\nbuilder terminated by signal 10\n"
+    vanished_drv = (
+        _BARE_DAEMON_DISCONNECT + "\n"
+        'error: opening file "/nix/store/'
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo.drv": No such file or directory\n'
+    )
+    vanished_input = (
+        _BARE_DAEMON_DISCONNECT + "\n"
+        "build input /nix/store/fyaryjvghbkpfnsyw97hb3lyb37s1pd6-"
+        "move-lib64.sh does not exist\n"
+    )
+    for text in (
+        _BARE_DAEMON_DISCONNECT,
+        damaged,
+        dead_socket,
+        bus,
+        vanished_drv,
+        vanished_input,
+        "terminated by signal 10",
+    ):
+        assert not is_package_scoped_daemon_crash(text)
+        assert failure_is_infra(text)
+        assert is_runner_store_fault(text)
+        assert not failures_are_package_scoped(("neutils",), {"neutils": text})
+    assert not is_runner_store_fault("authentication failed")
+    assert failure_is_infra("authentication failed")
+    assert not is_runner_store_fault("error: builder for /nix/store/abc.drv failed")
+
+
+def test_runner_store_fault_flag_reads_every_failure_channel() -> None:
+    """The fresh-VM flag follows the message, wherever the run recorded it."""
+    bare = "Nix daemon disconnected unexpectedly (maybe it crashed?)"
+    assert update_cli._outcome_is_runner_store_fault(_RunOutcome()) is False
+    assert (
+        update_cli._outcome_is_runner_store_fault(
+            _RunOutcome(error_messages={"neutils": bare})
+        )
+        is True
+    )
+    assert (
+        update_cli._outcome_is_runner_store_fault(_RunOutcome(workspace_error=bare))
+        is True
+    )
+    assert (
+        update_cli._outcome_is_runner_store_fault(_RunOutcome(validation_error=bare))
+        is True
+    )
+    plan_error = _RunPlanError(
+        message=bare, unknown_targets=(), available_targets=("neutils",)
+    )
+    assert (
+        update_cli._outcome_is_runner_store_fault(_RunOutcome(plan_error=plan_error))
+        is True
+    )
+    assert (
+        update_cli._outcome_is_runner_store_fault(
+            _RunOutcome(error_messages={"neutils": "error: builder for x"})
+        )
+        is False
+    )
 
 
 def test_only_real_package_names_can_be_isolated() -> None:

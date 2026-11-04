@@ -714,8 +714,47 @@ def test_package_failure_quarantines_and_completes_the_platform(
     assert extended.resolutions["example"].version == "2"
 
 
+_PACKAGE_DAEMON_CRASH = (
+    "while evaluating attribute 'buildCommand' of derivation "
+    "'zon2nix-with-ca-bundle'\n"
+    "error: Nix daemon disconnected unexpectedly (maybe it crashed?)\n"
+)
+
+
+def test_package_scoped_daemon_crash_completes_the_platform(
+    prepared_run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """41796475737 named one derivation. Quarantine it; do not ask for a retry."""
+    _root, _operations, state = prepared_run
+    state["fail"] = True
+    state["fail_message"] = _PACKAGE_DAEMON_CRASH
+    candidate, status = pipeline.prepare_candidate(("example",))
+    assert status == 0
+    assert candidate.prepared
+    assert tuple(entry.package for entry in candidate.quarantines) == ("example",)
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["success"] is True
+    assert "runnerStoreFault" not in payload
+
+
+def test_bare_daemon_disconnect_requests_a_fresh_vm(
+    prepared_run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A disconnect with no derivation is the runner. The shard stays unprepared."""
+    _root, _operations, state = prepared_run
+    state["fail"] = True
+    state["fail_message"] = "Nix daemon disconnected unexpectedly (maybe it crashed?)"
+    candidate, status = pipeline.prepare_candidate(("example",))
+    assert status == 1
+    assert not candidate.prepared
+    assert candidate.quarantines == ()
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["success"] is False
+    assert payload["runnerStoreFault"] is True
+
+
 def test_infra_preparation_failure_is_not_a_completed_platform(
-    prepared_run,
+    prepared_run, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Runner and store failures stay unprepared so a later platform cannot extend them."""
     root, operations, state = prepared_run
@@ -729,6 +768,9 @@ def test_infra_preparation_failure_is_not_a_completed_platform(
     assert candidate.resolutions["example"].version == "2"
     assert operations == ["resolve", "hash:aarch64-darwin"]
     assert not git(root, "status", "--porcelain")
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["success"] is False
+    assert "runnerStoreFault" not in payload
     with pytest.raises(ValueError, match="failed preparation"):
         Preparation(system="x86_64-linux", targets=("example",), previous=candidate)
 

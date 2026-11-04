@@ -2225,6 +2225,14 @@ def test_native_fault_evidence_and_artifact_contract() -> None:
         native["on"]["workflow_call"]["outputs"]["device_fault"]["value"]
         == "${{ jobs.native.outputs.device_fault }}"
     )
+    assert (
+        native["jobs"]["native"]["outputs"]["runner_fault"]
+        == "${{ steps.candidate.outputs.runner_fault }}"
+    )
+    assert (
+        native["on"]["workflow_call"]["outputs"]["runner_fault"]["value"]
+        == "${{ jobs.native.outputs.runner_fault }}"
+    )
     names = [step.get("name") for step in native["jobs"]["native"]["steps"]]
     assert names.index("Dump hosted storage-fault evidence") < names.index(
         "Retain candidate and failure evidence"
@@ -2258,7 +2266,8 @@ def test_native_fault_evidence_and_artifact_contract() -> None:
     assert artifact.startswith("${{ format('{0}{1}', ")
     assert artifact.endswith(
         "(steps.candidate.outputs.device_fault == 'true' || "
-        "steps.storage.outputs.device_fault == 'true') && '-device-fault' || '') }}"
+        "steps.storage.outputs.device_fault == 'true') && '-device-fault' || "
+        "steps.candidate.outputs.runner_fault == 'true' && '-runner-fault' || '') }}"
     )
 
 
@@ -2386,13 +2395,16 @@ def _assert_device_fault_retry(jobs: dict) -> None:
         assert shard["with"]["runner"] == "macos-15"
         assert " ".join(retry["if"].split()) == (
             "always() && !cancelled() && needs.prepare-pins.result == 'success' && "
-            f"needs.{shard_name}.outputs.device_fault == 'true'"
+            f"(needs.{shard_name}.outputs.device_fault == 'true' || "
+            f"needs.{shard_name}.outputs.runner_fault == 'true')"
         )
         assert (
             f"(needs.{shard_name}.result == 'success' && "
-            f"needs.{shard_name}.outputs.device_fault != 'true' || "
+            f"needs.{shard_name}.outputs.device_fault != 'true' && "
+            f"needs.{shard_name}.outputs.runner_fault != 'true' || "
             f"needs.{retry_name}.result == 'success' && "
-            f"needs.{retry_name}.outputs.device_fault != 'true')"
+            f"needs.{retry_name}.outputs.device_fault != 'true' && "
+            f"needs.{retry_name}.outputs.runner_fault != 'true')"
         ) in folded_if
     assert folded["with"]["stage"] == "merge-prepare-shards"
     assert folded["with"]["runner"] == "ubuntu-24.04"
@@ -5287,6 +5299,139 @@ def test_faulted_prepare_fails_when_no_step_output_can_hand_off(
     assert jobs.native("prepare") == expected
     assert not Path(env["TEST_CACHE_LOG"]).exists()
     assert (artifacts / "device-fault.log").is_file()
+
+
+def test_runner_store_fault_hands_off_before_sibling_stop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A dead daemon retries the Darwin shard and does not publish this attempt."""
+    artifacts = tmp_path / "update-artifacts"
+    artifacts.mkdir()
+    (artifacts / "result.json").write_text(
+        json.dumps({
+            "success": False,
+            "errors": ["neutils"],
+            "runnerStoreFault": True,
+        }),
+        encoding="utf-8",
+    )
+    output = tmp_path / "github-output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.delenv("CACHIX_DAEMON_DIR", raising=False)
+    monkeypatch.setattr(jobs, "is_hosted_darwin_runner", lambda: True)
+    monkeypatch.setattr(jobs, "hosted_device_faults", list)
+    log = StringIO()
+    result = jobs._finish_native_stage(
+        "prepare", artifacts, artifacts / "prefetch-receipts.jsonl", log, 1
+    )
+    assert result == 0
+    assert output.read_text() == "runner_fault=true\n"
+    assert (artifacts / "runner-fault.log").is_file()
+    assert "publishing nothing from this runner" in log.getvalue()
+    assert "::warning title=Hosted Nix daemon faulted::" in capsys.readouterr().out
+
+
+def test_runner_retry_flag_rejects_unreadable_results(tmp_path: Path) -> None:
+    """A missing or malformed result must not request a fresh VM."""
+    assert jobs._result_requests_runner_retry(tmp_path / "missing.json") is False
+    broken = tmp_path / "broken.json"
+    broken.write_text("{", encoding="utf-8")
+    assert jobs._result_requests_runner_retry(broken) is False
+    listed = tmp_path / "list.json"
+    listed.write_text("[]", encoding="utf-8")
+    assert jobs._result_requests_runner_retry(listed) is False
+    clean = tmp_path / "clean.json"
+    clean.write_text('{"runnerStoreFault": false}\n', encoding="utf-8")
+    assert jobs._result_requests_runner_retry(clean) is False
+
+
+def test_runner_handoff_without_a_step_output_keeps_the_updater_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No GITHUB_OUTPUT cannot hand the shard off, including a zero status."""
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    log = StringIO()
+    assert jobs._hand_off_runner_store_fault(log, tmp_path, 0) == 1
+    assert jobs._hand_off_runner_store_fault(log, tmp_path, 9) == 9
+    assert (tmp_path / "runner-fault.log").is_file()
+
+
+def test_flush_skips_a_discarded_runner_store_attempt(
+    native_job, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A daemon-faulted shard must not push the attempt it is about to redo."""
+    env, checkout = native_job
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    artifacts.mkdir(parents=True)
+    (artifacts / "prefetch-receipts.jsonl").write_text(
+        '{"storePath": "/nix/store/faulted.zip"}\n'
+    )
+    (artifacts / "runner-fault.log").write_text("discarded\n")
+    daemon_dir = _cachix_daemon_dir(Path(env["RUNNER_TEMP"]))
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
+    monkeypatch.chdir(checkout)
+    assert jobs.main("flush-cachix") == 0
+    assert not Path(env["TEST_CACHE_LOG"]).exists()
+    flush_log = (artifacts / "cachix-flush.log").read_text()
+    assert "Nix daemon or store faulted" in flush_log
+    assert "prefetched store paths" not in flush_log
+
+
+def test_runner_store_fault_without_a_step_output_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No GITHUB_OUTPUT means nothing can rerun the shard, so the stage fails."""
+    artifacts = tmp_path / "update-artifacts"
+    artifacts.mkdir()
+    (artifacts / "result.json").write_text(
+        '{"success": false, "runnerStoreFault": true}\n', encoding="utf-8"
+    )
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    monkeypatch.setattr(jobs, "is_hosted_darwin_runner", lambda: True)
+    monkeypatch.setattr(jobs, "hosted_device_faults", list)
+    result = jobs._finish_native_stage(
+        "prepare", artifacts, artifacts / "missing.jsonl", StringIO(), 1
+    )
+    assert result == 1
+    assert (artifacts / "runner-fault.log").is_file()
+
+
+@pytest.mark.parametrize(
+    ("stage", "hosted", "returncode"),
+    [
+        ("prepare", False, 1),
+        ("validate", True, 1),
+        ("prepare", True, 0),
+    ],
+)
+def test_runner_store_fault_does_not_hand_off_outside_a_failed_darwin_prepare(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+    hosted: bool,
+    returncode: int,
+) -> None:
+    """Linux, validation, and a successful shard keep the updater's status."""
+    artifacts = tmp_path / "update-artifacts"
+    artifacts.mkdir()
+    (artifacts / "result.json").write_text(
+        '{"success": false, "runnerStoreFault": true}\n', encoding="utf-8"
+    )
+    output = tmp_path / "github-output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr(jobs, "is_hosted_darwin_runner", lambda: hosted)
+    monkeypatch.setattr(jobs, "hosted_device_faults", list)
+    result = jobs._finish_native_stage(
+        stage, artifacts, artifacts / "missing.jsonl", StringIO(), returncode
+    )
+    assert result == returncode
+    assert not (artifacts / "runner-fault.log").exists()
+    assert not output.exists() or output.read_text() == ""
 
 
 def test_healthy_hosted_prepare_still_publishes_prefetch_receipts(
