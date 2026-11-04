@@ -52,13 +52,11 @@ let
       # StatusItemController tests ask NSStatusBar for an item before anything
       # created NSApplication; SkyLight then aborts in CGSConnectionByID
       # (Update run 41275217088). Initialize AppKit in those test classes'
-      # setUp the way the app does at launch, so the tests still run headless.
+      # setUp the way the app does at launch, on the main thread. swift test
+      # runs that nonisolated hook on the XCTest worker, and creating
+      # NSApplication there made the worker's next Data(contentsOf:) SIGTRAP
+      # (signal 5, "System trap"; Updates 41616086680 and 41733265858).
       ./status-item-appkit-test-setup.patch
-      # After that setUp, Data(contentsOf:) of the approved analytics fixture
-      # is the first file read on the XCTest worker thread. Hosted Darwin
-      # SIGTRAPs in the shared cache (signal 5, "System trap"; Updates
-      # 41616086680 and 41733265858). Read the fixture with POSIX instead.
-      ./analytics-fixture-unmapped-read.patch
     ];
 
     # Match upstream's release build: one universal Go CLI plus one universal,
@@ -134,9 +132,8 @@ let
       # `swift test` also starts swiftpm-testing-helper. This suite is XCTest
       # only. On Update 41616086680 attempt 2 the helper SIGTRAPped on
       # teardown while XCTest kept running, and SwiftPM failed the build.
-      # `--disable-swift-testing` stops that helper. It does not cover the
-      # analytics fixture SIGTRAP, which still happens with the helper off
-      # (Update 41733265858). That read is the POSIX patch above.
+      # `--disable-swift-testing` stops that helper. The analytics fixture
+      # SIGTRAP is the main-thread NSApplication setUp above, not this flag.
       (
         cd "$repo_root/mac/BasetenSwitch"
         env \
