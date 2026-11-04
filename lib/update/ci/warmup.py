@@ -1906,6 +1906,17 @@ TREE_SITTER_MEMBER_CRATES = (
     "wasmtime-wasi-io",
 )
 
+# 41789846000 slot 4 built rust_merman-core and rust_merman-render,
+# then substituted Cachix rust_merman. rust_mermaid_render passed
+# --extern merman=<that rlib> and E0463'd (nixpkgs#482646). Same pair
+# as 41178394324. Zed pins crates.io merman =0.8.0-alpha.5; the
+# facade's lib name is merman, not a rename of merman-core.
+MERMAN_MEMBER_CRATES = (
+    "merman",
+    "merman-core",
+    "merman-render",
+)
+
 
 def is_settings_family_store_path(path: str) -> bool:
     """Return whether *path* is a rust_settings SVH-family crate."""
@@ -1926,6 +1937,17 @@ def is_tree_sitter_family_store_path(path: str) -> bool:
     )
 
 
+def is_merman_family_store_path(path: str) -> bool:
+    """Return whether *path* is the merman facade or its intern crates.
+
+    ``rust_merman-`` does not match ``rust_merman-core`` or
+    ``rust_merman-render``; each member is named on its own.
+    """
+    return any(
+        is_named_rust_crate_store_path(path, crate) for crate in MERMAN_MEMBER_CRATES
+    )
+
+
 def partition_settings_family_drvs(
     drvs: Sequence[str],
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -1943,10 +1965,10 @@ def partition_settings_family_drvs(
 def is_crane_dep_store_path(path: str) -> bool:
     """Return whether *path* is a crates.io rust_* crane would vendor first.
 
-    Workspace rust_*-0.1.0, settings, extension_host, and zed leaves stay
-    in the SVH family. crates.io rust_* (serde-1.0.x, lsp-types-0.95.1)
-    populate the store before force-local so --no-substitute does not
-    rebuild them.
+    Workspace rust_*-0.1.0, settings, extension_host, zed leaves, and
+    the merman facade stay in the SVH family. Other crates.io rust_*
+    (serde-1.0.x, lsp-types-0.95.1) populate the store before
+    force-local so --no-substitute does not rebuild them.
     """
     return is_crate2nix_rust_output(path) and not is_svh_sensitive_store_path(path)
 
@@ -2146,11 +2168,16 @@ def is_zed_workspace_crate_store_path(path: str) -> bool:
 
 
 def is_svh_sensitive_store_path(path: str) -> bool:
-    """Return whether substituting *path* can mix extension_host-family SVHs."""
+    """Return whether substituting *path* can mix a crate2nix rlib SVH.
+
+    Includes extension_host, settings, tree-sitter, workspace
+    rust_*-0.1.0, rust_zed, nightly, and the merman facade.
+    """
     return (
         is_extension_host_family_store_path(path)
         or is_settings_family_store_path(path)
         or is_tree_sitter_family_store_path(path)
+        or is_merman_family_store_path(path)
         or is_zed_workspace_crate_store_path(path)
         or is_rust_zed_store_path(path)
         or is_zed_editor_nightly_store_path(path)
@@ -2355,7 +2382,8 @@ def compiler_input_drvs(
     ``--max-jobs 0`` so only the SVH-sensitive rust_* compile.
     Excluding every rust_* (eab3998a) made extension_host --no-substitute
     will-be-built 682 on 38083709508. Third-party rust_* stay here;
-    tree-sitter and rust_*-0.1.0 workspace crates are SVH-sensitive.
+    tree-sitter, the merman facade, and rust_*-0.1.0 workspace crates
+    are SVH-sensitive.
     """
     return tuple(
         path
