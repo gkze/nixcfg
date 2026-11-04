@@ -4,13 +4,17 @@ import asyncio
 import json
 import math
 import os
+import subprocess
 import sys
+import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal, NamedTuple, cast
+from urllib.parse import urlencode
 
 import typer
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -27,6 +31,7 @@ from lib.update.ci.coverage import (
     assert_cached_darwin_boundary,
     assert_update_coverage,
     check_path_in_cachix,
+    held_installables_by_system,
     load_planned_root_out_paths,
     parse_job_results,
     require_required_jobs,
@@ -126,6 +131,21 @@ from lib.update.prepare_shard import (
     parse_prepare_coverage,
     require_exact_prepare_coverage,
 )
+from lib.update.quarantine import (
+    IssueSyncAction,
+    OpenQuarantineIssue,
+    QuarantineEntry,
+    QuarantineListTruncatedError,
+    QuarantineRotError,
+    append_job_summary,
+    current_run_url,
+    merge_quarantine_entries,
+    package_build_quarantines,
+    parse_search_payload,
+    quarantine_log_line,
+    render_quarantine_summary,
+    sync_quarantine_issues,
+)
 from lib.update.repair import check_applied_repair, propose_repair
 from lib.update.updaters import ensure_updaters_loaded
 
@@ -191,6 +211,8 @@ class ValidationReport(BaseModel):
     gates: tuple[ValidationGate, ...] = ("packages", "closures")
     failures: tuple[validation.DerivationValidationFailure, ...]
     planned_installables: tuple[str, ...] = ()
+    quarantines: tuple[QuarantineEntry, ...] = ()
+    held_installables: tuple[str, ...] = ()
 
 
 class RootDependencyCacheReport(BaseModel):
@@ -728,6 +750,10 @@ def merge_prepared_candidates(
         resolutions={**left.resolutions, **right.resolutions},
         prepared=True,
         patch=patch,
+        quarantines=merge_quarantine_entries((
+            *left.quarantines,
+            *right.quarantines,
+        )),
     )
 
 
@@ -877,6 +903,9 @@ def merge_same_platform_partials(
         ]),
         prepared=True,
         patch=patch,
+        quarantines=merge_quarantine_entries(
+            tuple(entry for candidate in candidates for entry in candidate.quarantines)
+        ),
     )
 
 
@@ -2074,6 +2103,25 @@ def validate_candidate(
                     prior=failures,
                 )
         workspace.validate_changes(allowed)
+    observed = datetime.now(UTC)
+    run_url = current_run_url()
+    quarantines = merge_quarantine_entries((
+        *candidate.quarantines,
+        *package_build_quarantines(
+            tuple((failure.source, failure.message) for failure in failures),
+            now=observed,
+            run_url=run_url,
+        ),
+    ))
+    held_installables = tuple(
+        sorted(
+            held_installables_by_system(
+                tuple(entry.package for entry in candidate.quarantines),
+                updaters=updaters,
+                systems=(system,),
+            ).get(system, frozenset())
+        )
+    )
     return ValidationReport(
         tree=candidate.tree,
         system=system,
@@ -2081,6 +2129,8 @@ def validate_candidate(
         failures=failures,
         validate_all_packages=candidate.validate_all_packages,
         planned_installables=planned_installables,
+        quarantines=quarantines,
+        held_installables=held_installables,
     )
 
 
@@ -2531,6 +2581,11 @@ def assert_coverage(
                 )
                 for system in prepared.systems
             }
+            package_held = held_installables_by_system(
+                tuple(entry.package for entry in prepared.quarantines),
+                updaters=updaters,
+                systems=prepared.systems,
+            )
     assert_update_coverage(
         job_results=results,
         evidence=evidence,
@@ -2541,4 +2596,140 @@ def assert_coverage(
         root_paths=cache.root_paths,
         cachix_present=check_path_in_cachix,
         costs=costs,
+        package_held=package_held,
     )
+
+
+def load_quarantine_sync_inputs(
+    evidence: Path,
+) -> tuple[
+    tuple[QuarantineEntry, ...],
+    tuple[str, ...] | None,
+    tuple[tuple[str, str], ...],
+    bool,
+]:
+    """Read the sealed candidate and every validation report under *evidence*."""
+    candidate_path = evidence / "prepare-x86_64-linux" / "candidate.json"
+    targets: tuple[str, ...] | None = None
+    entries: list[QuarantineEntry] = []
+    if candidate_path.is_file():
+        prepared = Candidate.model_validate_json(candidate_path.read_bytes())
+        targets = prepared.targets
+        entries.extend(prepared.quarantines)
+    failures: list[tuple[str, str]] = []
+    reports = sorted(evidence.glob("validate-*/validation.json"))
+    for path in reports:
+        report = ValidationReport.model_validate_json(path.read_bytes())
+        entries.extend(report.quarantines)
+        failures.extend(
+            (failure.source, failure.message) for failure in report.failures
+        )
+    return merge_quarantine_entries(entries), targets, tuple(failures), bool(reports)
+
+
+def list_open_quarantine_issues() -> tuple[tuple[OpenQuarantineIssue, ...], bool]:
+    """Return open quarantine issues from one GitHub search page."""
+    repo = os.environ["GITHUB_REPOSITORY"]
+    query = f'repo:{repo} is:issue is:open "nixcfg quarantine:" in:title'
+    url = "search/issues?" + urlencode({"q": query, "per_page": "100"})
+    completed = subprocess.run(  # noqa: S603 -- fixed gh argv, query is a URL argument
+        ["gh", "api", url],  # noqa: S607 -- gh is the Actions runtime client
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    issues, truncated = parse_search_payload(json.loads(completed.stdout))
+    return issues, truncated
+
+
+def _issue_body_file(action: IssueSyncAction) -> tuple[list[str], Path]:
+    """Write the issue body beside the process and return the gh argv prefix."""
+    if action.kind == "open":
+        command = ["gh", "issue", "create", "--title", action.title]
+    else:
+        if action.number is None:
+            msg = "updating a quarantine issue requires its number"
+            raise ValueError(msg)
+        command = ["gh", "issue", "edit", str(action.number)]
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        suffix=".md",
+        delete=False,
+    ) as handle:
+        handle.write(action.body)
+        path = Path(handle.name)
+    command.extend(["--body-file", str(path)])
+    return command, path
+
+
+def apply_issue_action(action: IssueSyncAction) -> None:
+    """Create, update, or close one issue. The body is a file, not an argument."""
+    if action.kind == "close":
+        if action.number is None:
+            msg = "closing a quarantine issue requires its number"
+            raise ValueError(msg)
+        subprocess.run(  # noqa: S603 -- fixed gh argv, comment is the action text
+            [  # noqa: S607 -- gh is the Actions runtime client
+                "gh",
+                "issue",
+                "close",
+                str(action.number),
+                "--reason",
+                action.close_reason,
+                "--comment",
+                action.comment,
+            ],
+            check=True,
+        )
+        return
+    command, path = _issue_body_file(action)
+    try:
+        subprocess.run(command, check=True)  # noqa: S603 -- argv is gh plus a body file
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def sync_quarantine_evidence(
+    evidence: Path,
+    *,
+    list_issues: (
+        Callable[
+            [],
+            tuple[tuple[OpenQuarantineIssue, ...], bool],
+        ]
+        | None
+    ) = None,
+    apply_action: Callable[[IssueSyncAction], None] | None = None,
+    now: datetime | None = None,
+) -> None:
+    """Surface quarantines and close issues for packages that updated cleanly."""
+    quarantines, targets, failures, reports_present = load_quarantine_sync_inputs(
+        evidence
+    )
+    text = render_quarantine_summary(quarantines)
+    sys.stderr.write(text)
+    for entry in quarantines:
+        sys.stderr.write(f"{quarantine_log_line(entry)}\n")
+    append_job_summary(text)
+    sync_quarantine_issues(
+        quarantines=quarantines,
+        targets=targets,
+        failures=failures,
+        reports_present=reports_present,
+        now=now if now is not None else datetime.now(UTC),
+        list_issues=list_open_quarantine_issues if list_issues is None else list_issues,
+        apply_action=apply_issue_action if apply_action is None else apply_action,
+    )
+
+
+@app.command("sync-quarantines")
+def sync_quarantines(
+    evidence: Annotated[Path, typer.Option(help="Downloaded Update artifacts.")],
+) -> None:
+    """Open, update, or close one GitHub issue per quarantined package."""
+    try:
+        sync_quarantine_evidence(evidence)
+    except (QuarantineRotError, QuarantineListTruncatedError) as error:
+        sys.stderr.write(f"{error}\n")
+        raise typer.Exit(1) from error

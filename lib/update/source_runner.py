@@ -123,6 +123,7 @@ class UpdatePhaseResult:
         default_factory=dict
     )
     terminal_events: tuple[UpdateEvent, ...] = ()
+    error_messages: dict[str, str] = field(default_factory=dict)
 
     @property
     def errors(self) -> int:
@@ -137,6 +138,7 @@ class UpdatePhaseResult:
             source_updates={**self.source_updates, **other.source_updates},
             artifact_updates={**self.artifact_updates, **other.artifact_updates},
             terminal_events=(*self.terminal_events, *other.terminal_events),
+            error_messages={**self.error_messages, **other.error_messages},
         )
 
 
@@ -148,10 +150,12 @@ def _summarize_source_results(
     artifact_updates: dict[str, list[GeneratedArtifact]] = {}
     details: dict[str, SummaryStatus] = {}
     source_updates: dict[str, SourceEntry] = {}
+    error_messages: dict[str, str] = {}
     for name in source_names:
         result = results.get(name, SourceTaskResult(completed=False))
         if not result.completed:
             details[name] = "error"
+            error_messages[name] = _failure_text(result.error)
             continue
         if result.source_update is not None:
             source_updates[name] = result.source_update
@@ -176,7 +180,25 @@ def _summarize_source_results(
         artifact_updates={
             name: tuple(updates) for name, updates in artifact_updates.items()
         },
+        error_messages=error_messages,
     )
+
+
+def _failure_text(event: UpdateEvent | None) -> str:
+    """Return the diagnostic text for one failed target."""
+    if event is None:
+        return "updater failed"
+    return event.detail or event.message or "updater failed"
+
+
+def _terminal_error_messages(events: tuple[UpdateEvent, ...]) -> dict[str, str]:
+    """Keep the last terminal error text for each ref target."""
+    messages: dict[str, str] = {}
+    for event in events:
+        if event.kind is not UpdateEventKind.ERROR:
+            continue
+        messages[event.source] = event.detail or event.message or "updater failed"
+    return messages
 
 
 def _source_input_requests(
@@ -369,9 +391,11 @@ async def run_ref_phase(
                 for inp in ref_inputs
             }
         details = {name: task.result() for name, task in tasks.items()}
+        events = tuple(terminal_events)
         return UpdatePhaseResult(
             details=details,
-            terminal_events=tuple(terminal_events),
+            terminal_events=events,
+            error_messages=_terminal_error_messages(events),
             # Receipts exist only for tasks that completed a verified refresh
             # or remote check; failed tasks keep their receipts local so they
             # can never seed a later source phase.

@@ -192,7 +192,7 @@ def prepared_run(
             if state.get("darwin_only") and state["system"] != "aarch64-darwin":
                 return {"aarch64-darwin": _HASH}
             if state["fail"]:
-                msg = "upstream packaging changed"
+                msg = str(state.get("fail_message") or "upstream packaging changed")
                 raise RuntimeError(msg)
             return {str(state["system"]): _HASH}
 
@@ -572,10 +572,14 @@ def test_sharded_goose_chain_matches_the_unsharded_candidate(
     assert runtime.hashes.mapping["aarch64-darwin"] == runtime_new
 
 
-def test_prepare_shard_coverage_is_only_written_for_a_prepared_slice(
+def test_prepare_shard_coverage_follows_preparation(
     prepared_run, tmp_path: Path
 ) -> None:
-    """A failed shard and an unsharded prepare leave no coverage sidecar."""
+    """A prepared shard writes coverage, including one that quarantined a package.
+
+    An unsharded prepare has no slice to record. An infrastructure failure
+    leaves the shard unprepared, so it writes no sidecar.
+    """
     _root, _operations, state = prepared_run
     plain = tmp_path / "plain" / "prepare-coverage.json"
     candidate, status = pipeline.prepare_candidate(("example",), coverage_path=plain)
@@ -583,16 +587,30 @@ def test_prepare_shard_coverage_is_only_written_for_a_prepared_slice(
     assert candidate.prepared
     assert not plain.exists()
     state["fail"] = True
-    failed = tmp_path / "failed" / "prepare-coverage.json"
+    quarantined = tmp_path / "quarantined" / "prepare-coverage.json"
     candidate, status = pipeline.prepare_candidate(
         ("example",),
         prepare_shard=0,
         prepare_shard_count=5,
-        coverage_path=failed,
+        coverage_path=quarantined,
+    )
+    assert status == 0
+    assert candidate.prepared
+    assert tuple(entry.package for entry in candidate.quarantines) == ("example",)
+    coverage = coverage_from_json(quarantined.read_text(encoding="utf-8"))
+    assert coverage.hashed == ("example",)
+    state["fail_message"] = "the runner has received a shutdown signal"
+    infra = tmp_path / "infra" / "prepare-coverage.json"
+    candidate, status = pipeline.prepare_candidate(
+        ("example",),
+        prepare_shard=0,
+        prepare_shard_count=5,
+        coverage_path=infra,
     )
     assert status == 1
     assert not candidate.prepared
-    assert not failed.exists()
+    assert candidate.quarantines == ()
+    assert not infra.exists()
 
 
 def test_prepare_command_writes_and_rejects_shard_flags(
@@ -669,16 +687,45 @@ def test_preparation_streams_progress_separately_from_json(
     assert "example" in captured.err
 
 
-def test_failed_preparation_retains_resolution_and_is_not_a_completed_platform(
+def test_package_failure_quarantines_and_completes_the_platform(
     prepared_run,
 ) -> None:
-    """Repair evidence survives a domain failure, without certifying or promoting it."""
+    """A package updater failure reverts to last-good and still completes the platform.
+
+    The attempted resolution stays on the candidate so a later platform can
+    extend the same request. The sealed tree is the baseline, because the
+    failed package's source change was withheld.
+    """
     root, operations, state = prepared_run
     state["fail"] = True
+    candidate, status = pipeline.prepare_candidate(("example",))
+    assert status == 0
+    assert candidate.prepared
+    assert candidate.systems == ("aarch64-darwin",)
+    assert candidate.tree == candidate.base_tree
+    assert candidate.resolutions["example"].version == "2"
+    assert tuple(entry.package for entry in candidate.quarantines) == ("example",)
+    assert candidate.quarantines[0].phase.value == "updater"
+    assert operations == ["resolve", "hash:aarch64-darwin"]
+    assert not git(root, "status", "--porcelain")
+    extended = Preparation(
+        system="x86_64-linux", targets=("example",), previous=candidate
+    )
+    assert extended.resolutions["example"].version == "2"
+
+
+def test_infra_preparation_failure_is_not_a_completed_platform(
+    prepared_run,
+) -> None:
+    """Runner and store failures stay unprepared so a later platform cannot extend them."""
+    root, operations, state = prepared_run
+    state["fail"] = True
+    state["fail_message"] = "the runner has received a shutdown signal"
     candidate, status = pipeline.prepare_candidate(("example",))
     assert status == 1
     assert not candidate.prepared
     assert candidate.systems == ()
+    assert candidate.quarantines == ()
     assert candidate.resolutions["example"].version == "2"
     assert operations == ["resolve", "hash:aarch64-darwin"]
     assert not git(root, "status", "--porcelain")
@@ -4926,19 +4973,25 @@ def test_assert_coverage_fails_closed_when_planner_cache_missing(
     assert ROOT_OUT_PATHS_NAME in str(result.exception)
 
 
-def test_prepare_command_exports_failure_evidence_outside_checkout(
+def test_prepare_command_exports_quarantine_evidence_outside_checkout(
     prepared_run, tmp_path: Path
 ) -> None:
-    """The CLI emits machine-readable diagnostics and saves a failed candidate."""
+    """A package failure is a prepared candidate, with the quarantine on stdout."""
     root, _, state = prepared_run
     state["fail"] = True
     output = tmp_path / "artifacts" / "candidate.json"
     result = CliRunner().invoke(
         pipeline.app, ["prepare", "--output", str(output), "example"]
     )
-    assert result.exit_code == 1, result.output
-    assert not Candidate.model_validate_json(output.read_bytes()).prepared
-    assert json.loads(result.stdout)["errors"] == ["example"]
+    assert result.exit_code == 0, result.output
+    candidate = Candidate.model_validate_json(output.read_bytes())
+    assert candidate.prepared
+    assert tuple(entry.package for entry in candidate.quarantines) == ("example",)
+    payload = json.loads(result.stdout)
+    assert payload["success"] is True
+    assert payload["errors"] == ["example"]
+    assert payload["quarantined"][0]["package"] == "example"
+    assert payload["quarantined"][0]["phase"] == "updater"
     rejected = CliRunner().invoke(
         pipeline.app, ["prepare", "--output", str(root / "candidate.json")]
     )

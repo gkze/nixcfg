@@ -157,7 +157,10 @@ policy remain explicit.
 
 The [Update workflow](../../.github/workflows/update.yml) prepares one candidate
 on disposable macOS ARM64, Linux ARM64, and Linux x86_64 builders. It validates
-that candidate on all three, then proposes the changes in a pull request. Read [ci.md](ci.md) for
+that candidate on all three, then proposes the changes in a pull request. A
+single package updater failure is quarantined at its last-good pin so the
+other packages still publish. The run reports that count and opens one issue
+per package. Read [ci.md](ci.md) for
 the job graph, credentials, and retry behavior.
 
 ## Related

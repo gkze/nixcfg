@@ -141,6 +141,44 @@ cascade-canary failures stay non-gates. The poll interval is 60 seconds.
 Publish still requires every validation job, the coverage assertion, and
 certification. A green run still builds every closure.
 
+A package updater failure does not fail the prepare job. The job reverts that
+package and its coupled companions to the last-good pin, records a quarantine,
+and exits 0, so sibling-stop does not fire. Runner, store, and authentication
+failures still fail the job and stop the group.
+
+### Package quarantine
+
+Quarantine is per package and is sealed before validation. The prepare job
+reverts the package's lock and source files, then captures the candidate.
+Plan, validate, coverage, and certify all see that one tree, with the failed
+package held at its last-good pin. The other packages proceed. A run that
+only quarantined packages is a successful publish. The PR body states the
+count and each package's phase.
+
+A checkPhase or build failure discovered only during validation cannot rewrite
+that sealed tree in the same run. The validation job still fails, the publish
+job records a `build` quarantine, and the next run retries the updater. The
+updater is not skipped on later runs. Skipping it would leave the issue open
+until the rot guard fired, and the package would never get another attempt.
+
+The publish job's "Surface quarantined packages" step runs after coverage and
+before certify, with `if: always()`. Coverage stays the first step that could
+see a write token, and that step still blanks `GITHUB_TOKEN` and `GH_TOKEN`.
+The surface step holds `issues: write` only on the publish job. It opens or
+updates one GitHub issue per package, titled `nixcfg quarantine: <package>`,
+and closes that issue when a later run updates the package cleanly. The issue
+body's original `since` is the rot clock. The threshold is 7 days, compared
+as `since + 7 days <= now`. Update is weekly, on Monday at 07:17 UTC, so the
+run that first quarantines a package still publishes, and the next scheduled
+run fails before certify. That is one grace publication. A package cannot
+ride isolation into a second week. A truncated issue search fails closed
+rather than missing a rot or closing the wrong issue.
+
+Coverage treats quarantined installables as held. A missing installable is
+accepted only when it is in that held set. Any other missing installable, any
+extra installable, or a reported held set that disagrees with the candidate
+still fails coverage.
+
 Every declared package platform and every native root is still built. Shards
 are serial because the closure's slow graph is shared. Parallel host builds
 duplicate the same graph.
