@@ -11,8 +11,7 @@ let
 in
 {
   base = {
-    executor-cloud-george = executorRemote "https://executor.sh/george/mcp";
-    # Select George (george-81ff29) during OAuth; keep v1 available during validation.
+    # Select George (george-81ff29) during OAuth. Cloud George v1 retired 2026-11-04.
     executor-v2-george = executorRemote "https://mcp.executor.sh/mcp";
     executor-local = executorRemote "http://localhost:4788/mcp" // {
       # The local daemon authenticates its supervised bearer token and exposes
