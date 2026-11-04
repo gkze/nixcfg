@@ -178,9 +178,14 @@ check-phase exception is gone. The check still skips two headless XCTest
 cases (`testUnusableSecondaryReceiptRetainsRecoveryGate` and
 `testRouterWindowContentUsesNonObscuredLayoutGuide`) and passes
 `--disable-swift-testing`. The suite has no Swift Testing tests;
-`swiftpm-testing-helper` reports zero tests and then SIGTRAPs on teardown
-(signal 5), which fails the build (Update 41616086680). Those limits do
-not place the current release on hold.
+`swiftpm-testing-helper` can SIGTRAP on teardown while XCTest is still
+running (Update 41616086680, attempt 2). That flag does not cover
+`testApprovedFixtureDecodesFullAnalyticsContract`. The status-item setUp
+was calling `NSApplication.shared` on the XCTest worker, and that worker's
+next `Data(contentsOf:)` then SIGTRAPped in the shared cache (signal 5,
+"System trap"; Updates 41616086680 and 41733265858). setUp now creates the
+application on the main thread, and the fixture test still uses
+`Data(contentsOf:)`. Those limits do not place the current release on hold.
 
 Hosted Darwin validation builds native `root-closures` in continuation
 shards. Run 36672202468 showed why one job cannot do that work. After a

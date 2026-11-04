@@ -52,7 +52,10 @@ let
       # StatusItemController tests ask NSStatusBar for an item before anything
       # created NSApplication; SkyLight then aborts in CGSConnectionByID
       # (Update run 41275217088). Initialize AppKit in those test classes'
-      # setUp the way the app does at launch, so the tests still run headless.
+      # setUp the way the app does at launch, on the main thread. swift test
+      # runs that nonisolated hook on the XCTest worker, and creating
+      # NSApplication there made the worker's next Data(contentsOf:) SIGTRAP
+      # (signal 5, "System trap"; Updates 41616086680 and 41733265858).
       ./status-item-appkit-test-setup.patch
     ];
 
@@ -127,11 +130,10 @@ let
       # trap names its frame without changing which tests run.
       #
       # `swift test` also starts swiftpm-testing-helper. This suite is XCTest
-      # only: Testing Library 124.4 reports 0 tests, then the helper SIGTRAPs
-      # on teardown (signal 5 at 0x1980c077c) and SwiftPM fails the derivation
-      # while XCTest is still running (Update 41616086680, both attempts).
-      # `--disable-swift-testing` leaves the XCTest suite, and its headless
-      # skips, in place.
+      # only. On Update 41616086680 attempt 2 the helper SIGTRAPped on
+      # teardown while XCTest kept running, and SwiftPM failed the build.
+      # `--disable-swift-testing` stops that helper. The analytics fixture
+      # SIGTRAP is the main-thread NSApplication setUp above, not this flag.
       (
         cd "$repo_root/mac/BasetenSwitch"
         env \

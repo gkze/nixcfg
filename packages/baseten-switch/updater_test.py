@@ -258,7 +258,10 @@ def test_status_item_tests_initialize_appkit_before_asking_for_an_item() -> None
         assert header in patch
         set_up = patch.split(header, 1)[1].split("\n+    }\n", 1)[0]
         assert "+    override class func setUp() {" in set_up
-        assert "+        _ = NSApplication.shared" in set_up
+        assert "+        if Thread.isMainThread {" in set_up
+        assert "+            DispatchQueue.main.sync(execute: openAppKit)" in set_up
+        assert "+                _ = NSApplication.shared" in set_up
+        assert "--skip" not in set_up
     assert "+import AppKit\n" in patch
 
 

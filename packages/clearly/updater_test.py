@@ -148,6 +148,10 @@ def test_clearly_update_pins_source_and_swift_dependency_closure(
     """The updater should persist only immutable source and dependency commits."""
     module = _load_module()
     updater = module.ClearlyUpdater()
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
     _install_release_network(monkeypatch, module)
     assert updater.get_derivation_validations() == (
         DerivationValidation(
