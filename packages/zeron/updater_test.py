@@ -98,17 +98,23 @@ def _install_release_source(
     return urls
 
 
+@pytest.mark.parametrize("layout", ["0.2.115", "0.2.136"])
 def test_zeron_resolves_the_release_tag_to_an_immutable_public_commit(
     monkeypatch: pytest.MonkeyPatch,
+    layout: str,
 ) -> None:
-    """Release discovery must pin a commit rather than trust a mutable tag."""
+    """Release discovery must pin a commit rather than trust a mutable tag.
+
+    0.2.136 stays acceptable: its channel fetch and channel-scoped download
+    are ownership anchors, so the pins stage admits that release.
+    """
     module = _load_updater_module()
     updater = module.ZeronUpdater()
     api_paths: list[str] = []
     source_urls = _install_release_source(
         monkeypatch,
         module,
-        "\n".join(patch.old for patch in _load_patch_module()._PATCHES_115),
+        "\n".join(patch.old for patch in _load_patch_module()._LAYOUTS[layout]),
     )
 
     async def github_payload(
@@ -143,8 +149,10 @@ def test_zeron_resolves_the_release_tag_to_an_immutable_public_commit(
     ]
 
 
+@pytest.mark.parametrize("layout", ["0.2.115", "0.2.136"])
 def test_zeron_rejects_a_release_the_ownership_patch_cannot_anchor(
     monkeypatch: pytest.MonkeyPatch,
+    layout: str,
 ) -> None:
     """Anchor drift must fail the pins stage, not the Darwin patchPhase."""
     module = _load_updater_module()
@@ -153,11 +161,14 @@ def test_zeron_rejects_a_release_the_ownership_patch_cannot_anchor(
         "lib.update.updaters.github_release.fetch_github_api",
         lambda *_args, **_kwargs: asyncio.sleep(0, result=next(responses)),
     )
-    group = _load_patch_module()._PATCHES_115
+    group = _load_patch_module()._LAYOUTS[layout]
+    # Drop the channel fetch on 0.2.136. An older layout drops its last guard.
+    omitted = 2 if layout == "0.2.136" else len(group) - 1
+    owned = [patch for index, patch in enumerate(group) if index != omitted]
     _install_release_source(
         monkeypatch,
         module,
-        "\n".join(patch.old for patch in group[:-1]),
+        "\n".join(patch.old for patch in owned),
     )
 
     with pytest.raises(
@@ -293,10 +304,15 @@ def test_zeron_validates_the_materialized_bootstrap_source() -> None:
     )
 
 
-_LAYOUT_NAMES = ("0.2.115", "0.2.97", "0.2.94", "primary", "fallback")
+_LAYOUT_NAMES = ("0.2.136", "0.2.115", "0.2.97", "0.2.94", "primary", "fallback")
+_DESKTOP_LAYOUT_GUARDS = (
+    ("0.2.97", 13),
+    ("0.2.115", 13),
+    ("0.2.136", 14),
+)
 _NO_LAYOUT = (
     r"^expected exactly one supported source layout in .* "
-    r"\(0\.2\.115, 0\.2\.97, 0\.2\.94, primary, fallback\), found none$"
+    r"\(0\.2\.136, 0\.2\.115, 0\.2\.97, 0\.2\.94, primary, fallback\), found none$"
 )
 
 
@@ -305,6 +321,7 @@ def test_zeron_declares_every_supported_update_layout() -> None:
     module = _load_patch_module()
 
     assert tuple(module._LAYOUTS) == _LAYOUT_NAMES
+    assert len(module._LAYOUTS["0.2.136"]) == 14
     assert len(module._LAYOUTS["0.2.115"]) == 13
     assert len(module._LAYOUTS["0.2.97"]) == 13
     assert all(
@@ -361,8 +378,14 @@ def test_zeron_nix_policy_patch_rejects_source_drift_atomically(
 
 
 @pytest.mark.parametrize("copies", [0, 2])
-@pytest.mark.parametrize("anchor_index", range(13))
-@pytest.mark.parametrize("layout", ["0.2.97", "0.2.115"])
+@pytest.mark.parametrize(
+    ("layout", "anchor_index"),
+    [
+        (layout, index)
+        for layout, count in _DESKTOP_LAYOUT_GUARDS
+        for index in range(count)
+    ],
+)
 def test_zeron_desktop_layouts_reject_drift_in_every_ownership_guard(
     tmp_path: Path,
     copies: int,
@@ -372,7 +395,7 @@ def test_zeron_desktop_layouts_reject_drift_in_every_ownership_guard(
     """New desktop and shared-checker paths must not escape atomic admission."""
     module = _load_patch_module()
     group = module._LAYOUTS[layout]
-    assert len(group) == 13
+    assert len(group) == dict(_DESKTOP_LAYOUT_GUARDS)[layout]
     target = group[anchor_index]
     patches = [
         *group[:anchor_index],

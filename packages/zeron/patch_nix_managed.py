@@ -394,8 +394,66 @@ _PATCHES_115 = (
 )
 
 
+# 0.2.136 fetches the selected channel through fetch_latest_on, and a caller
+# can ask that feed directly. Download URLs follow the manifest's channel.
+# Nix owns both fetch entries and the channel-scoped download before any
+# request; the 0.2.115 guards still own staging, apply, and relaunch.
+_PATCHES_136 = (
+    _PATCHES_115[0],
+    _update(
+        """pub async fn fetch_latest(edge_url: &str) -> anyhow::Result<Manifest> {
+    fetch_latest_on(edge_url, channel::selected()).await
+}
+""",
+        """pub async fn fetch_latest(edge_url: &str) -> anyhow::Result<Manifest> {
+    ensure_updates_mutable()?;
+    fetch_latest_on(edge_url, channel::selected()).await
+}
+""",
+    ),
+    _update(
+        (
+            "pub async fn fetch_latest_on(edge_url: &str, channel: Channel)"
+            " -> anyhow::Result<Manifest> {\n"
+            "    let mut manifest = fetch_latest_from("
+            "&channel.base(&release_base(edge_url)?)).await?;\n"
+        ),
+        (
+            "pub async fn fetch_latest_on(edge_url: &str, channel: Channel)"
+            " -> anyhow::Result<Manifest> {\n"
+            "    ensure_updates_mutable()?;\n"
+            "    let mut manifest = fetch_latest_from("
+            "&channel.base(&release_base(edge_url)?)).await?;\n"
+        ),
+    ),
+    _update(
+        """pub async fn download_release_file(
+    edge_url: &str,
+    manifest: &Manifest,
+    file: &str,
+    dest: &Path,
+) -> anyhow::Result<()> {
+    // From the feed the manifest came from: a beta's files are beta's.
+    let url = format!("{}/{file}", manifest.channel.base(&release_base(edge_url)?));
+""",
+        """pub async fn download_release_file(
+    edge_url: &str,
+    manifest: &Manifest,
+    file: &str,
+    dest: &Path,
+) -> anyhow::Result<()> {
+    ensure_updates_mutable()?;
+    // From the feed the manifest came from: a beta's files are beta's.
+    let url = format!("{}/{file}", manifest.channel.base(&release_base(edge_url)?));
+""",
+    ),
+    *_PATCHES_115[3:],
+)
+
+
 # Supported updater layouts, newest first. Exactly one must match the tree.
 _LAYOUTS = {
+    "0.2.136": _PATCHES_136,
     "0.2.115": _PATCHES_115,
     "0.2.97": _PATCHES_097,
     "0.2.94": _PATCHES_094,
