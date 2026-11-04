@@ -57,6 +57,13 @@ let
       # NSApplication there made the worker's next Data(contentsOf:) SIGTRAP
       # (signal 5, "System trap"; Updates 41616086680 and 41733265858).
       ./status-item-appkit-test-setup.patch
+      # That main-thread NSApplication moved the same shared-cache SIGTRAP
+      # (page offset 0x077c) from the first worker-side fixture read to the
+      # next one, testLegacySnapshot, after Shape.path ran on the worker
+      # (Update 41824237606, slots 0 and 4). The friendly backtrace preset
+      # skips those system frames. Run the fixture reads and SwiftUI tests
+      # on the main actor and keep Data(contentsOf:).
+      ./traffic-main-actor-tests.patch
     ];
 
     # Match upstream's release build: one universal Go CLI plus one universal,
@@ -125,15 +132,15 @@ let
         "$swift_test_clang_cache" \
         "$swift_test_module_cache"
       # Hosted macos-15 builds of 0.8.1 SIGTRAPped inside XCTest (Update run
-      # 41275217088) while Nix kept only a 25-line tail with no crash frame.
-      # The Swift runtime backtracer prints the crashed thread compactly, so a
-      # trap names its frame without changing which tests run.
+      # 41275217088). The friendly backtrace preset skips system frames, so
+      # the crashed thread printed only "...". preset=full keeps the system
+      # frame that owns the trap. It does not change which tests run.
       #
       # `swift test` also starts swiftpm-testing-helper. This suite is XCTest
       # only. On Update 41616086680 attempt 2 the helper SIGTRAPped on
       # teardown while XCTest kept running, and SwiftPM failed the build.
-      # `--disable-swift-testing` stops that helper. The analytics fixture
-      # SIGTRAP is the main-thread NSApplication setUp above, not this flag.
+      # `--disable-swift-testing` stops that helper. The fixture SIGTRAP is
+      # the main-actor test patch above, not this flag.
       (
         cd "$repo_root/mac/BasetenSwitch"
         env \
@@ -150,7 +157,7 @@ let
           SDKROOT="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk" \
           CLANG_MODULE_CACHE_PATH="$swift_test_clang_cache" \
           SWIFTPM_MODULECACHE_OVERRIDE="$swift_test_module_cache" \
-          SWIFT_BACKTRACE="enable=yes,interactive=no,color=no,threads=crashed,registers=none,images=none,limit=10,top=0" \
+          SWIFT_BACKTRACE="enable=yes,interactive=no,color=no,preset=full,threads=crashed,registers=none,images=mentioned,limit=40,top=0" \
           /usr/bin/swift test \
             --disable-sandbox \
             --disable-swift-testing \

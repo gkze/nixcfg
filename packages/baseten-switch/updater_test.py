@@ -220,8 +220,9 @@ def test_package_prints_a_compact_backtrace_when_swift_tests_trap() -> None:
     ]
     assert len(swift_tests) == 1
     assert (
-        'SWIFT_BACKTRACE="enable=yes,interactive=no,color=no,threads=crashed,'
-        'registers=none,images=none,limit=10,top=0" /usr/bin/swift test'
+        'SWIFT_BACKTRACE="enable=yes,interactive=no,color=no,preset=full,'
+        'threads=crashed,registers=none,images=mentioned,limit=40,top=0"'
+        " /usr/bin/swift test"
     ) in swift_tests[0]
 
 
@@ -244,7 +245,8 @@ def test_package_applies_the_reviewed_nix_integration_patch() -> None:
     assert_nix_ast_equal(
         expect_binding(arguments.values, "patches").value,
         "[ ./nix-managed.patch ./raw-telemetry-test-clock.patch"
-        " ./status-item-appkit-test-setup.patch ]",
+        " ./status-item-appkit-test-setup.patch"
+        " ./traffic-main-actor-tests.patch ]",
     )
 
 
@@ -263,6 +265,24 @@ def test_status_item_tests_initialize_appkit_before_asking_for_an_item() -> None
         assert "+                _ = NSApplication.shared" in set_up
         assert "--skip" not in set_up
     assert "+import AppKit\n" in patch
+
+
+def test_traffic_fixture_reads_run_on_the_main_actor() -> None:
+    """The worker-side Data(contentsOf:) SIGTRAP stays on the main actor."""
+    patch = (
+        REPO_ROOT / "packages/baseten-switch/traffic-main-actor-tests.patch"
+    ).read_text(encoding="utf-8")
+    for test_name in (
+        "testLegacySnapshotLabelsInputAndOutputWithoutInventingBreakdown",
+        "testApprovedFixtureDecodesFullAnalyticsContract",
+        "testClaudeSparkUsesOfficialPressKitGeometry",
+        "testTrafficChartMotionRespectsReduceMotion",
+        "testTrafficClientUsesAdminAnalyticsEndpointAndUnixRange",
+    ):
+        marker = f"+    @MainActor\n     func {test_name}"
+        assert marker in patch
+    assert "--skip" not in patch
+    assert "Data(contentsOf:)" in patch
 
 
 def test_package_embeds_the_exact_cli_used_by_the_copied_app() -> None:
