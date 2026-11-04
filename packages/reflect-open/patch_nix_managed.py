@@ -76,8 +76,9 @@ _PATCHES = (
         ),
         ('  "permissions": ["window-state:default", "deep-link:default"]\n'),
     ),
-    # 0.16.0 moved the plugin versions into the workspace manifest; the
-    # audited versions are pinned by _ANCHORS below.
+    # 0.16.0 moved the plugin versions into the workspace manifest. 0.17.0
+    # bumped tauri-plugin-updater from 2.14.0 to 2.14.1. The audited versions
+    # are pinned by _ANCHORS below; a future drift still fails require_count.
     SourcePatch(
         "apps/desktop/src-tauri/Cargo.toml",
         (
@@ -120,7 +121,7 @@ _PATCHES = (
 
 _ANCHORS = (
     SourceAnchor("Cargo.toml", 'tauri-plugin-process = "2.4.0"\n'),
-    SourceAnchor("Cargo.toml", 'tauri-plugin-updater = "2.14.0"\n'),
+    SourceAnchor("Cargo.toml", 'tauri-plugin-updater = "2.14.1"\n'),
     SourceAnchor(
         "packages/app/src/app/update-service.ts",
         "  return updater === undefined\n",
