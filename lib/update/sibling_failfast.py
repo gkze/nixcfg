@@ -15,9 +15,11 @@ Darwin prepare or warmup slot completes successfully and a fresh VM retries it.
 
 A green run still builds every closure. The stop only abandons work that can
 no longer reach publish. A per-package updater or build failure is quarantined
-inside the prepare job, which then exits 0. That success is not a sibling
-stop. Runner, cache, and authentication failures still fail the job and stop
-the group.
+inside the prepare job, which then exits 0. A Darwin prepare shard that lost
+the Nix daemon or the store also exits 0, with ``runner_fault`` set, so a
+fresh VM can rerun it before this group stops. Those successes are not
+sibling stops. Authentication, cancellation, and a runner fault with no
+retry job still fail the job and stop the group.
 """
 
 import json

@@ -57,6 +57,7 @@ from lib.update.derivation_validation import (
 )
 from lib.update.errors import format_exception
 from lib.update.event_queue import EVENT_QUEUE_SIZE, run_event_pipeline
+from lib.update.failures import is_runner_store_fault
 from lib.update.paths import get_repo_root
 from lib.update.prepare_shard import partition_prepare_targets
 from lib.update.quarantine import (
@@ -1135,6 +1136,10 @@ def _emit_run_outcome(  # noqa: PLR0915 -- one result emission, including the qu
                 }
                 for entry in outcome.quarantines
             ]
+        if outcome.had_errors and _outcome_is_runner_store_fault(outcome):
+            # Darwin prepare reads this and reruns the shard before sibling-stop.
+            # A package-scoped daemon crash has already cleared had_errors.
+            payload["runnerStoreFault"] = True
         if workspace_error is not None:
             payload["error"] = redact_urls(workspace_error)
         sys.stdout.write(f"{json.dumps(payload)}\n")
@@ -1908,6 +1913,22 @@ async def _durable_update() -> _RunOutcome | int:
         return await collect_run_outcome(run.options, check_tools=True)
 
     return await durable.supervise(collect)
+
+
+def _outcome_is_runner_store_fault(outcome: _RunOutcome) -> bool:
+    """Return whether this failed run is a runner store fault, not one package.
+
+    The JSON flag is how the hosted prepare job asks for a fresh VM. Package
+    quarantines clear ``had_errors`` before emission, so they never set it.
+    """
+    texts = list(outcome.error_messages.values())
+    if outcome.workspace_error is not None:
+        texts.append(outcome.workspace_error)
+    if outcome.validation_error is not None:
+        texts.append(outcome.validation_error)
+    if outcome.plan_error is not None:
+        texts.append(outcome.plan_error.message)
+    return any(is_runner_store_fault(text) for text in texts)
 
 
 def emit_run_result(result: _RunOutcome | int, opts: UpdateOptions) -> int:

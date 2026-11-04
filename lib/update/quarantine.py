@@ -27,7 +27,10 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from lib.diagnostics import redact_urls
-from lib.update.failures import is_transient_store_interruption
+from lib.update.failures import (
+    is_package_scoped_daemon_crash,
+    is_transient_store_interruption,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -168,11 +171,17 @@ class QuarantineListTruncatedError(RuntimeError):
 def failure_is_infra(text: str) -> bool:
     """Return whether *text* is a runner, store, auth, or cancellation failure.
 
-    A package builder failure, a hash mismatch, an HTTP 5xx, or an empty
-    message stays package-scoped. Any infra phrase among package failures
-    fails the whole prepare job: a partial publish is not safe while auth,
-    the runner, or the store is broken.
+    A package builder failure, a hash mismatch, an HTTP 5xx, an empty
+    message, or a daemon disconnect while evaluating one derivation stays
+    package-scoped. Update 41796475737 was that last shape: only neutils's
+    worker died, and the same daemon kept serving the rest of the shard.
+    Any other infra phrase among package failures fails the whole prepare
+    job: a partial publish is not safe while auth, the runner, or the store
+    is broken. Those runner store faults retry on a fresh VM before
+    sibling-stop; they are not quarantines.
     """
+    if is_package_scoped_daemon_crash(text):
+        return False
     if is_transient_store_interruption(text):
         return True
     folded = text.casefold()

@@ -391,6 +391,64 @@ def should_consult_nix_builder_logs(*, stdout: str, stderr: str) -> bool:
     return _has_builder_exit(output) and bool(failed_derivation_paths(output))
 
 
+_DERIVATION_EVAL = re.compile(
+    r"while evaluating (?:attribute '[^']+' of )?derivation '([^']+)'",
+    re.IGNORECASE,
+)
+
+
+def _has_runner_store_damage(text: str) -> bool:
+    """Return whether *text* names store corruption or a dead daemon socket.
+
+    A disconnect while realizing one derivation is that package's worker
+    dying. These markers are the runner: the store is unreadable, or no new
+    client can open the daemon.
+    """
+    if contains_marker(
+        text,
+        (
+            "Illegal byte sequence",
+            *_WRITE_EIO_MARKERS,
+            "cannot open connection to remote store 'daemon'",
+            'opening lock file "/nix/var/nix/active-builds/',
+        ),
+    ):
+        return True
+    return (
+        _mentions_store_bus_signal(text)
+        or _has_missing_store_drv(text)
+        or _has_vanished_store_artifact(text)
+    )
+
+
+def is_package_scoped_daemon_crash(text: str) -> bool:
+    """Return whether one derivation eval killed its Nix worker.
+
+    Update 41796475737 prepare-darwin-1: neutils died while evaluating
+    ``zon2nix-with-ca-bundle`` immediately after fetching zig-overlay. The
+    trace names that derivation and nothing else. Other clients on the same
+    daemon kept building, and the kernel log had no store-damage markers.
+    That crash belongs to the package. A disconnect with store damage, a
+    dead socket, or no derivation in the trace is the runner.
+    """
+    if not contains_marker(text, ("Nix daemon disconnected unexpectedly",)):
+        return False
+    if _has_runner_store_damage(text):
+        return False
+    return _DERIVATION_EVAL.search(text) is not None
+
+
+def is_runner_store_fault(text: str) -> bool:
+    """Return whether a fresh VM should redo the shard before sibling-stop.
+
+    Package-scoped daemon crashes are excluded. Those quarantine the package.
+    Validation retry still treats both shapes as store interruptions.
+    """
+    if is_package_scoped_daemon_crash(text):
+        return False
+    return is_transient_store_interruption(text)
+
+
 def is_transient_store_interruption(text: str) -> bool:
     """Return whether validation stopped on a runner store fault.
 
@@ -443,9 +501,11 @@ __all__ = [
     "corrupt_store_paths",
     "failed_derivation_paths",
     "has_hash_mismatch_signal",
+    "is_package_scoped_daemon_crash",
     "is_retryable_fixed_output_failure",
     "is_retryable_nix_network_failure",
     "is_retryable_nix_store_failure",
+    "is_runner_store_fault",
     "is_transient_store_interruption",
     "should_consult_nix_builder_logs",
 ]

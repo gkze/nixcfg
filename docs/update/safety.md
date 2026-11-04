@@ -202,8 +202,12 @@ flowchart TD
    tree. Local `nixcfg update` still withholds and exits non-zero; this
    seal is only the CI preparation path. An infrastructure failure
    (runner, store, authentication, cancellation, plan, or workspace)
-   does not quarantine and does not publish a partial candidate.
-   (`cli._quarantine_ci_preparation`, `quarantine.failure_is_infra`)
+   does not quarantine and does not publish a partial candidate. A daemon
+   disconnect while evaluating one derivation, without store-damage
+   markers, is the package: it quarantines. A genuine runner store fault
+   retries that Darwin prepare shard on a fresh VM before sibling-stop.
+   (`cli._quarantine_ci_preparation`, `quarantine.failure_is_infra`,
+   `failures.is_package_scoped_daemon_crash`)
 
 1. **Quarantine stays visible until the package updates cleanly.** The
    publish job opens or updates one issue per package and closes it only

@@ -503,6 +503,13 @@ def test_patched_zon2nix_hashes_plain_urls_with_nix_and_pins_cacert() -> None:
     for variable in ("SSL_CERT_FILE", "NIX_SSL_CERT_FILE", "CURL_CA_BUNDLE"):
         assert f'--set {variable} "${{certFile}}"' in script
     assert "--unpack" not in script
+    attributes = [
+        node.attribute for node in _nix_nodes(expression) if isinstance(node, Select)
+    ]
+    # zig_0_16 is Nixpkgs' Zig 0.16.0. Selecting the zon2nix flake's packages
+    # evaluates zig-overlay and killed the prepare-darwin-1 worker.
+    assert "zig_0_16" in attributes
+    assert "packages" not in attributes
     added, removed = _patch_changed_lines(
         REPO_ROOT / "packages/neutils/zon2nix-prefetch-file.patch"
     )

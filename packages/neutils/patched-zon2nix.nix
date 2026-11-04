@@ -1,4 +1,4 @@
-# Build the pinned zon2nix input with a plain-URL fetch that uses Nix.
+# Build the pinned zon2nix source with a plain-URL fetch that uses Nix.
 #
 # Revision 0ece5ed hashes http(s) dependencies with Zig's std.http.Client.
 # Every handshake failure becomes TlsInitializationFailed. Zig 0.15 and the
@@ -15,8 +15,15 @@
 # the pin and replaces only the plain fetch. The child uses the Nix already
 # on PATH, the same client that is talking to this machine's daemon.
 #
-# The compiler stays the one the pinned zon2nix package already selected.
-# Replacing its src avoids a second toolchain pin in this file.
+# The pinned zon2nix flake builds that source with zig-overlay's 0.16.0.
+# Evaluating its packages forces `lib.attrNames zig.packages`, and zig-overlay
+# constructs `packages` with `lib.mapAttrs` over a nixpkgs import per system.
+# Naming the systems therefore evaluates four nixpkgs plus every Zig version.
+# Update 41796475737 prepare-darwin-1 died there: the worker disconnected
+# while realizing `zon2nix-with-ca-bundle`, immediately after fetching
+# codeberg.org/jcollie/zig-overlay, and every other client on that daemon
+# kept building. nixpkgs already ships Zig 0.16.0 as `zig_0_16`. Call the
+# upstream package with that compiler and never follow the overlay.
 #
 # The wrapper pins cacert. Hosted Darwin Nix injects SSL_CERT_FILE of
 # /no-cert-file.crt into sandboxed builds; a child curl then fails with
@@ -25,13 +32,17 @@
 { root, system }:
 let
   pkgs = import root.inputs.nixpkgs { inherit system; };
-  zon2nixFlake = root.inputs.zon2nix;
   src = pkgs.applyPatches {
     name = "zon2nix-prefetch-file";
-    src = zon2nixFlake;
+    src = root.inputs.zon2nix;
     patches = [ ./zon2nix-prefetch-file.patch ];
   };
-  unwrapped = zon2nixFlake.packages.${system}.zon2nix.overrideAttrs (_old: {
+  # package.nix sets `src = lib.cleanSource ./.` to the unpatched pin.
+  # The patched tree replaces it. `zig_0_16` is Nixpkgs' Zig 0.16.0, the
+  # compiler the pinned flake selects, without evaluating zig-overlay.
+  unwrapped = (pkgs.callPackage (root.inputs.zon2nix + "/package.nix") {
+    zig = pkgs.zig_0_16;
+  }).overrideAttrs (_old: {
     inherit src;
   });
   certFile = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
