@@ -2198,7 +2198,11 @@ def test_update_workspace_rejects_a_source_that_never_stabilizes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Do not validate a composite source view assembled across live edits."""
+    """Do not validate a composite source view assembled across live edits.
+
+    The snapshot's second pass is stat-only. Same-size rewrites can keep
+    ``st_mtime_ns``, so the two contents differ in length.
+    """
     live = tmp_path / "live"
     _init_update_workspace_repo(live)
     from lib.update import persistence as persistence_module
@@ -2211,7 +2215,7 @@ def test_update_workspace_rejects_a_source_that_never_stabilizes(
         view = original_read(*args, **kwargs)
         calls += 1
         (live / "tracked.txt").write_text(
-            "moving-a\n" if calls % 2 == 0 else "moving-b\n",
+            "moving-a\n" if calls % 2 == 0 else "moving-bb\n",
             encoding="utf-8",
         )
         return view
