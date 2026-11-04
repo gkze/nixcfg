@@ -48,6 +48,7 @@ from lib.update.ci.shard_plan import (
 )
 from lib.update.ci.warmup import (
     CRANE_DEP_CHUNK,
+    MERMAN_MEMBER_CRATES,
     SETTINGS_MEMBER_CRATES,
     TREE_SITTER_MEMBER_CRATES,
     WARMUP_DRVS_NAME,
@@ -75,6 +76,8 @@ from lib.update.ci.warmup import (
     is_extension_host_family_store_path,
     is_fixed_output_hash_mismatch,
     is_linux_builder_image_command,
+    is_merman_family_store_path,
+    is_named_rust_crate_store_path,
     is_rust_extension_host_store_path,
     is_rust_language_models_store_path,
     is_rust_zed_store_path,
@@ -1287,6 +1290,47 @@ def _canary_or_slot_paths(
     )
 
 
+def _merman_graph_parents(paths: tuple[str, ...]) -> tuple[str, ...]:
+    """Return mermaid_render and merman drvs whose references can mix SVHs."""
+    return tuple(
+        dict.fromkeys(
+            path
+            for path in paths
+            if is_merman_family_store_path(path)
+            or is_named_rust_crate_store_path(path, "mermaid_render")
+        )
+    )
+
+
+def _merge_merman_family(family: tuple[str, ...]) -> tuple[str, ...]:
+    """Force-local merman with the core and render crates it was built against.
+
+    mermaid_render is already SVH-sensitive (workspace 0.1.0). Its
+    crates.io facade is one reference hop; merman-core and
+    merman-render are the next hop. Other family drvs are not queried.
+    A crate already in *family* is not added again.
+    """
+    found: list[str] = []
+    seen = set(family)
+    parents = _merman_graph_parents(family)
+    if not parents:
+        return family
+    for _hop in range(3):
+        hop = tuple(
+            drv
+            for drv in rust_crate_input_drvs(parents, MERMAN_MEMBER_CRATES)
+            if drv not in seen
+        )
+        if not hop:
+            break
+        found.extend(hop)
+        seen.update(hop)
+        parents = hop
+    if not found:
+        return family
+    return tuple(dict.fromkeys((*family, *found)))
+
+
 def _expand_svh_family_from_stripe(
     family: tuple[str, ...],
     settings: tuple[str, ...],
@@ -1294,23 +1338,23 @@ def _expand_svh_family_from_stripe(
     others: tuple[str, ...],
     plan: WarmupPlan,
 ) -> tuple[str, ...]:
-    """Merge settings, workspace SVH, and others' settings/tree-sitter intern."""
+    """Merge settings, workspace SVH, tree-sitter, and the merman facade."""
     family = _merge_settings_family(family, settings, plan)
     family = tuple(dict.fromkeys((*family, *stripe_svh)))
     rust_others = tuple(drv for drv in others if is_crate2nix_rust_output(drv))
-    if not rust_others:
-        return family
-    family = _merge_settings_family(
-        family,
-        rust_crate_input_drvs(rust_others, SETTINGS_MEMBER_CRATES),
-        plan,
-    )
-    return tuple(
-        dict.fromkeys((
-            *family,
-            *rust_crate_input_drvs(rust_others, TREE_SITTER_MEMBER_CRATES),
-        ))
-    )
+    if rust_others:
+        family = _merge_settings_family(
+            family,
+            rust_crate_input_drvs(rust_others, SETTINGS_MEMBER_CRATES),
+            plan,
+        )
+        family = tuple(
+            dict.fromkeys((
+                *family,
+                *rust_crate_input_drvs(rust_others, TREE_SITTER_MEMBER_CRATES),
+            ))
+        )
+    return _merge_merman_family(family)
 
 
 def _slot_paths_with_gitbutler_canary(
@@ -1684,6 +1728,8 @@ def _realize_zed_warmup(
                 *rust_svh_input_drvs(parents),
             ))
         )
+    if member_drvs:
+        member_drvs = _merge_merman_family(member_drvs)
     family_drvs = tuple(dict.fromkeys((*member_drvs, *rust_zed, *zed_nightly)))
     assert_zed_family_realize_set(family_drvs, family_drvs)
     rustc_ids = rustc_generation_ids(family_drvs) if family_drvs else ()

@@ -2654,6 +2654,145 @@ def test_rust_warmup_settings_json_force_locals_tree_sitter(
     assert force_local == [(settings_json_drv, tree_sitter_drv)]
 
 
+def test_merge_merman_family_follows_two_hops_and_skips_seen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """41789846000: mermaid_render references merman, which references core."""
+    mermaid = (
+        "/nix/store/mermaidaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_mermaid_render-0.1.0.drv"
+    )
+    lonely = (
+        "/nix/store/lonelyaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_mermaid_render-0.1.0.drv"
+    )
+    merman = "/nix/store/s39xn12r5kn7jp29m7fnzcrqgx3qnhlb-rust_merman-0.8.0-alpha.5.drv"
+    core = (
+        "/nix/store/k63z40f35f3ly31chj0svqn1afnixahq-rust_merman-core-0.8.0-alpha.5.drv"
+    )
+    render = (
+        "/nix/store/renderaaaaaaaaaaaaaaaaaaaaaaaaaaaa-"
+        "rust_merman-render-0.8.0-alpha.5.drv"
+    )
+    other = "/nix/store/otheraaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_roughr-merman-0.1.0.drv"
+    queried: list[object] = []
+
+    def crate_inputs(parents: object, crates: object) -> tuple[str, ...]:
+        queried.append(parents)
+        assert "merman" in tuple(crates)
+        if parents == (mermaid,):
+            return (merman,)
+        if parents == (merman,):
+            return (merman, core)
+        if parents == (core,):
+            return (render,)
+        return ()
+
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", crate_inputs)
+    assert pipeline._merge_merman_family(()) == ()
+    assert pipeline._merge_merman_family((other,)) == (other,)
+    assert queried == []
+    assert pipeline._merge_merman_family((lonely,)) == (lonely,)
+    assert pipeline._merge_merman_family((mermaid,)) == (
+        mermaid,
+        merman,
+        core,
+        render,
+    )
+    assert pipeline._merman_graph_parents((other, mermaid, merman)) == (mermaid, merman)
+
+
+def test_rust_warmup_mermaid_render_force_locals_merman_facade(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """41789846000 slot 4: do not compile mermaid_render against Cachix merman."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[tuple[object, bool, bool, bool]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "compiler_input_drvs", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    mermaid = "/nix/store/mermaidaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_mermaid_render-0.1.0"
+    merman = "/nix/store/s39xn12r5kn7jp29m7fnzcrqgx3qnhlb-rust_merman-0.8.0-alpha.5"
+    core = "/nix/store/k63z40f35f3ly31chj0svqn1afnixahq-rust_merman-core-0.8.0-alpha.5"
+    render = (
+        "/nix/store/renderaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_merman-render-0.8.0-alpha.5"
+    )
+    mermaid_drv = f"{mermaid}.drv"
+    merman_drv = f"{merman}.drv"
+    core_drv = f"{core}.drv"
+    render_drv = f"{render}.drv"
+
+    def crate_inputs(parents: object, crates: object, **_k: object) -> tuple[str, ...]:
+        names = tuple(crates) if isinstance(crates, tuple) else ()
+        if "merman" not in names:
+            return ()
+        text = " ".join(parents) if isinstance(parents, tuple) else ""
+        if "mermaid_render" in text:
+            return (merman_drv,)
+        if "rust_merman-0.8.0-alpha.5.drv" in text and "merman-core" not in text:
+            return (merman_drv, core_drv, render_drv)
+        return ()
+
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", crate_inputs)
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            tree=candidate.tree,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(mermaid,),
+            rustLayers=((mermaid,),),
+            outputDrvs={mermaid: mermaid_drv},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=1, missing=1, warmup=1, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    report = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert report.failures == ()
+    force_local = [paths for paths, _logs, force, _sub in realized if force]
+    assert force_local == [(mermaid_drv, merman_drv, core_drv, render_drv)]
+    substituted = [paths for paths, _logs, force, sub in realized if sub or not force]
+    assert substituted == []
+
+
 def test_rust_warmup_settings_family_builds_patchutils_helper(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
