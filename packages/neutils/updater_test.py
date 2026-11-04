@@ -9,11 +9,18 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 from nix_manipulator import parse
+from nix_manipulator.expressions.binary import BinaryExpression
+from nix_manipulator.expressions.binding import Binding
+from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.indented_string import IndentedString
+from nix_manipulator.expressions.let import LetExpression
+from nix_manipulator.expressions.operator import Operator
+from nix_manipulator.expressions.parenthesis import Parenthesis
 from nix_manipulator.expressions.path import NixPath
 from nix_manipulator.expressions.primitive import StringPrimitive
+from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.commands.base import CommandResult as LibCommandResult
@@ -36,6 +43,7 @@ from lib.update.events import (
     expect_artifact_updates,
     ignore_event,
 )
+from lib.update.nix_expr import compact_nix_expr, identifier_attr_path, nix_str
 from lib.update.paths import REPO_ROOT
 from lib.update.runtime_source import runtime_source_policy, runtime_source_relpaths
 from lib.update.updaters import UpdateContext, VersionInfo
@@ -114,15 +122,37 @@ def _version_info(version: str = "0.7.2") -> VersionInfo:
 
 def _expected_patched_zon2nix_source(flake_url: str, platform: str) -> str:
     """Build the expected expression for the patched zon2nix generator."""
-    return f"""
-    let
-      root = builtins.getFlake "{flake_url}";
-    in
-      import (root.outPath + "/packages/neutils/patched-zon2nix.nix") {{
-        root = root;
-        system = "{platform}";
-      }}
-    """
+    root = Identifier(name="root")
+    expression = LetExpression(
+        local_variables=[
+            Binding(
+                name="root",
+                value=FunctionCall(
+                    name=identifier_attr_path("builtins", "getFlake"),
+                    argument=nix_str(flake_url),
+                ),
+            ),
+        ],
+        value=FunctionCall(
+            name=FunctionCall(
+                name=Identifier(name="import"),
+                argument=Parenthesis(
+                    value=BinaryExpression(
+                        operator=Operator(name="+"),
+                        left=Select(expression=root, attribute="outPath"),
+                        right=StringPrimitive(
+                            value="/packages/neutils/patched-zon2nix.nix"
+                        ),
+                    ),
+                ),
+            ),
+            argument=AttributeSet.from_dict({
+                "root": root,
+                "system": StringPrimitive(value=platform),
+            }),
+        ),
+    )
+    return compact_nix_expr(expression.rebuild())
 
 
 def _flake_root_inputs() -> AttributeSet:
@@ -399,15 +429,10 @@ def test_zon2nix_package_expr_uses_the_declared_input_name(
             )
         ),
         parse_nix_expr(
-            """
-            let
-              root = builtins.getFlake "git+file:///repo/root?dirty=1";
-            in
-              import (root.outPath + "/packages/neutils/patched-zon2nix.nix") {
-                root = root;
-                system = "aarch64-darwin";
-              }
-            """
+            _expected_patched_zon2nix_source(
+                "git+file:///repo/root?dirty=1",
+                "aarch64-darwin",
+            )
         ),
     )
 
