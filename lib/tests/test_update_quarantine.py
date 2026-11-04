@@ -551,9 +551,13 @@ def test_summary_markers_and_run_url(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    for name in ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID"):
+        monkeypatch.delenv(name, raising=False)
     assert current_run_url() == ""
     monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+    assert current_run_url() == ""
     monkeypatch.setenv("GITHUB_REPOSITORY", "example/repo")
+    assert current_run_url() == ""
     monkeypatch.setenv("GITHUB_RUN_ID", "1")
     assert current_run_url() == RUN
     text = render_quarantine_summary(())
