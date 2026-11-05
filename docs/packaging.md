@@ -132,6 +132,12 @@ that output, so Darwin roots that route the app do not carry it into cascade
 warmup. The same routing entry is activated again when the package stops
 reporting the gate.
 
+Update's package gate uses the same fact. A derivation validation marked
+`requires_export_ready` is withheld while `<installable>.exportReady`
+evaluates to false, so the packages job does not build the derivation whose
+only result is that gate failure. The updater's other declared builds stay
+required. A probe that does not return a boolean keeps the installable.
+
 `lib/mac-apps.nix` builds the activation body. `concurrentApplicationsScript`
 takes every declared scope and runs them as background jobs in the one
 nix-darwin activation shell, then waits for all of them before activation

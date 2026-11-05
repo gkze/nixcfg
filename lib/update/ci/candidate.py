@@ -2114,6 +2114,7 @@ def validate_candidate(
             )
             if "packages" in gates:
                 sources = None if candidate.validate_all_packages else candidate.sources
+                export_gate = validation.export_gate_probe(snapshot.root)
                 planned_installables = tuple(
                     request.installable
                     for request in validation.resolve_derivation_validations(
@@ -2121,6 +2122,7 @@ def validate_candidate(
                         updaters=updaters,
                         all_declared_systems=True,
                         native_builds_only=True,
+                        export_gate=export_gate,
                     )
                 )
                 failures += validation.validate_derivations(
@@ -2131,6 +2133,7 @@ def validate_candidate(
                     all_declared_systems=True,
                     native_builds_only=True,
                     progress=_hosted_validation_progress("derivations"),
+                    export_gate=export_gate,
                 )
                 jobs.record_runner_storage("after-packages")
             if "closures" in gates or scope == "closure-shard":
@@ -2612,6 +2615,7 @@ def assert_coverage(
         workspace.validate_changes(allowed)
         with workspace.validation_snapshot() as snapshot:
             costs = costs_for_tree(snapshot.root)
+            export_gate = validation.export_gate_probe(snapshot.root)
             package_expected = {
                 system: frozenset(
                     request.installable
@@ -2623,6 +2627,7 @@ def assert_coverage(
                         all_declared_systems=True,
                         native_builds_only=True,
                         native_system=system,
+                        export_gate=export_gate,
                     )
                 )
                 for system in prepared.systems
@@ -2631,6 +2636,7 @@ def assert_coverage(
                 tuple(entry.package for entry in prepared.quarantines),
                 updaters=updaters,
                 systems=prepared.systems,
+                export_gate=export_gate,
             )
     assert_update_coverage(
         job_results=results,

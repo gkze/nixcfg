@@ -250,6 +250,229 @@ def test_resolve_derivation_validations_honors_target_platforms(
     )
 
 
+class _ExportGatedUpdater:
+    derivation_validations = (
+        DerivationValidation(
+            installable="path:.#pkgs.{system}.{name}.storePathAppCandidateSmoke",
+            systems=("aarch64-darwin",),
+            mode="build",
+        ),
+        DerivationValidation(
+            installable="path:.#pkgs.{system}.{name}",
+            systems=("aarch64-darwin",),
+            mode="build",
+            requires_export_ready=True,
+        ),
+    )
+
+
+def test_closed_export_gate_withholds_only_that_installable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A false export gate drops the package build and keeps the smoke build."""
+    monkeypatch.setattr(
+        validation, "get_current_nix_platform", lambda: "aarch64-darwin"
+    )
+    probed: list[str] = []
+
+    def export_gate(installable: str) -> bool:
+        probed.append(installable)
+        return False
+
+    assert validation.resolve_derivation_validations(
+        ["demo"],
+        updaters={"demo": _ExportGatedUpdater},
+        all_declared_systems=True,
+        native_builds_only=True,
+        export_gate=export_gate,
+    ) == (
+        DerivationValidationRequest(
+            source="demo",
+            installable="path:.#pkgs.aarch64-darwin.demo.storePathAppCandidateSmoke",
+            mode="build",
+        ),
+    )
+    assert probed == ["path:.#pkgs.aarch64-darwin.demo.exportReady"]
+
+
+@pytest.mark.parametrize("decision", [True, None])
+def test_open_or_unknown_export_gate_keeps_the_installable(
+    monkeypatch: pytest.MonkeyPatch,
+    decision: bool | None,
+) -> None:
+    """True keeps the build. An unusable probe must not drop it either."""
+    monkeypatch.setattr(
+        validation, "get_current_nix_platform", lambda: "aarch64-darwin"
+    )
+    requests = validation.resolve_derivation_validations(
+        ["demo"],
+        updaters={"demo": _ExportGatedUpdater},
+        all_declared_systems=True,
+        native_builds_only=True,
+        export_gate=lambda _installable: decision,
+    )
+    assert [request.installable for request in requests] == [
+        "path:.#pkgs.aarch64-darwin.demo.storePathAppCandidateSmoke",
+        "path:.#pkgs.aarch64-darwin.demo",
+    ]
+
+
+def test_missing_export_probe_keeps_the_gated_installable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without a probe the declaration stays, so a caller cannot omit it by accident."""
+    monkeypatch.setattr(
+        validation, "get_current_nix_platform", lambda: "aarch64-darwin"
+    )
+    requests = validation.resolve_derivation_validations(
+        ["demo"],
+        updaters={"demo": _ExportGatedUpdater},
+        all_declared_systems=True,
+        native_builds_only=True,
+    )
+    assert [request.installable for request in requests] == [
+        "path:.#pkgs.aarch64-darwin.demo.storePathAppCandidateSmoke",
+        "path:.#pkgs.aarch64-darwin.demo",
+    ]
+
+
+def test_validate_derivations_does_not_build_a_closed_export(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The packages job and its planned inventory share one withhold decision."""
+    monkeypatch.setattr(
+        validation, "get_current_nix_platform", lambda: "aarch64-darwin"
+    )
+    calls: list[list[str]] = []
+
+    def run(
+        args: list[str],
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    failures = validation.validate_derivations(
+        ["demo"],
+        updaters={"demo": _ExportGatedUpdater},
+        flake_root=tmp_path,
+        run=run,
+        all_declared_systems=True,
+        native_builds_only=True,
+        export_gate=lambda _installable: False,
+    )
+    assert failures == ()
+    assert [call[-1] for call in calls] == [
+        f"path:{tmp_path}#pkgs.aarch64-darwin.demo.storePathAppCandidateSmoke"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stdout", "decision"),
+    [
+        (0, "true\n", True),
+        (0, "false\n", False),
+        (1, "true\n", None),
+        (0, "not-json", None),
+        (0, "null", None),
+        (0, "1", None),
+    ],
+)
+def test_interpret_export_gate_accepts_only_a_boolean(
+    returncode: int,
+    stdout: str,
+    decision: bool | None,
+) -> None:
+    """Only a successful JSON boolean authorizes withholding or keeping."""
+    assert validation.interpret_export_gate(returncode, stdout) is decision
+
+
+def test_export_gate_probe_evals_once_and_keeps_the_installable_on_failure(
+    tmp_path: Path,
+) -> None:
+    """A cached probe evaluates each gate once. A missing nix keeps the build."""
+    calls: list[list[str]] = []
+
+    def run(
+        args: list[str],
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="false\n", stderr="")
+
+    probe = validation.export_gate_probe(tmp_path, run=run, timeout=3)
+    installable = "path:.#pkgs.aarch64-darwin.demo.exportReady"
+    assert probe(installable) is False
+    assert probe(installable) is False
+    assert len(calls) == 1
+    assert calls[0][:4] == ["nix", "eval", "--no-update-lock-file", "--json"]
+    assert calls[0][-1] == f"path:{tmp_path}#pkgs.aarch64-darwin.demo.exportReady"
+    assert "allow-import-from-derivation" in calls[0]
+
+    def missing(
+        args: list[str],
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        raise FileNotFoundError(args[0])
+
+    assert (
+        validation.probe_export_gate(
+            installable,
+            flake_root=tmp_path,
+            run=missing,
+        )
+        is None
+    )
+
+
+def test_export_gate_probe_uses_subprocess_and_the_default_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The production runner is subprocess, bounded by the module timeout."""
+    seen: dict[str, object] = {}
+
+    def fake_run(
+        args: list[str],
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        seen.update(kwargs)
+        return subprocess.CompletedProcess(args, 0, stdout="true\n", stderr="")
+
+    monkeypatch.setattr(validation.subprocess, "run", fake_run)
+    assert (
+        validation.probe_export_gate(
+            ".#demo.exportReady",
+            flake_root=tmp_path,
+        )
+        is True
+    )
+    assert seen["timeout"] == validation._EXPORT_GATE_PROBE_TIMEOUT_SECONDS
+    assert seen["cwd"] == tmp_path
+    assert seen["check"] is False
+
+
+def test_export_gate_probe_treats_timeout_as_an_unusable_result(tmp_path: Path) -> None:
+    """A probe that does not finish must not be read as exportReady = false."""
+
+    def expire(
+        args: list[str],
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(args, 1)
+
+    assert (
+        validation.probe_export_gate(
+            "path:.#pkgs.aarch64-darwin.demo.exportReady",
+            flake_root=tmp_path,
+            run=expire,
+            timeout=1,
+        )
+        is None
+    )
+
+
 def test_updater_validation_metadata_defaults_and_unknown_crate2nix_target() -> None:
     """Keep validation opt-in and skip unregistered crate2nix mixin users."""
     assert Updater.get_derivation_validations() == ()

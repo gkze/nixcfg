@@ -82,6 +82,14 @@ flowchart TD
    its dependency cluster, so a partial candidate is never promoted. The
    rounds are bounded at three. Strict mode keeps the whole run atomic.
    (`cli._withhold_failed_clusters`, `cli._validate_and_gate`)
+1. **An export-gated package build is not a required installable.** A
+   derivation validation with `requires_export_ready` is omitted while
+   `<installable>.exportReady` evaluates to false. The Darwin packages job
+   and coverage resolve that probe against the same snapshot, so the
+   planned set and the expected set agree. A probe that does not return a
+   boolean keeps the installable. Smoke builds and every other declared
+   validation stay required.
+   (`DerivationValidation.requires_export_ready`)
 1. **Evaluations disable import-from-derivation.** Every candidate evaluation
    therefore cannot execute downstream build code during probing, including
    root manifests, shard planning, coverage out paths, and realized-root
