@@ -5,7 +5,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from nix_manipulator.expressions.set import AttributeSet
 
+from lib.tests._assertions import expect_instance
+from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
 from lib.tests._update_workspace_helpers import init_update_workspace_repo
 from lib.update.candidate import Candidate, ResolvedVersion, git
 from lib.update.ci import candidate as pipeline
@@ -208,11 +211,13 @@ def test_hold_restores_an_unmaterialized_pin_and_keeps_sibling_inputs() -> None:
     )
     assert restored["packages/superset/bun.nix"] == base["packages/superset/bun.nix"]
     assert restored["packages/superset/bun.lock"] == base["packages/superset/bun.lock"]
-    assert (
-        'url = "github:superset-sh/superset/desktop-v1.30.2"'
-        in restored["flake.nix"].content.decode()
+    flake = restored["flake.nix"].content.decode()
+    _assert_flake_input_url(
+        flake,
+        "superset",
+        "github:superset-sh/superset/desktop-v1.30.2",
     )
-    assert 'url = "github:o/other/v2"' in restored["flake.nix"].content.decode()
+    _assert_flake_input_url(flake, "other", "github:o/other/v2")
     lock = json.loads(restored["flake.lock"].content)
     assert lock["nodes"]["superset"]["locked"]["rev"] == _OLD_REV
     assert lock["nodes"]["other"]["locked"]["rev"] == _OTHER_REV_BUMPED
@@ -233,6 +238,36 @@ def test_hold_keeps_a_materialized_bump_with_a_regenerated_graph() -> None:
 
     assert held is False
     assert restored == merged
+
+
+def test_hold_keeps_a_materialized_bump_whose_graph_bytes_match() -> None:
+    """Application-only releases keep the same workspace list in bun.nix."""
+    base = _tree()
+    merged = _tree(
+        superset_url="github:superset-sh/superset/desktop-v2.0.5",
+        superset_rev=_NEW_REV,
+        version="2.0.5",
+        commit=_NEW_REV,
+    )
+
+    restored, held = hold_unmaterialized_superset_pin(base, merged)
+
+    assert held is False
+    assert restored is merged
+
+
+def test_hold_keeps_a_regenerated_graph_when_sources_stay_on_baseline() -> None:
+    """A new bun.nix is the graph for the moved input, even without new hashes."""
+    base = _tree()
+    merged = _tree(
+        superset_url="github:superset-sh/superset/desktop-v2.0.5",
+        bun_nix="workspace graph without apps/admin\n",
+    )
+
+    restored, held = hold_unmaterialized_superset_pin(base, merged)
+
+    assert held is False
+    assert restored is merged
 
 
 def test_hold_restores_a_moved_input_whose_graph_was_not_regenerated() -> None:
@@ -455,7 +490,11 @@ def test_hold_skips_flake_restore_when_one_side_has_no_flake() -> None:
     assert held_current is True
     assert "flake.nix" not in missing_current
     assert held_base is True
-    assert "desktop-v2.0.5" in missing_base["flake.nix"].content.decode()
+    _assert_flake_input_url(
+        missing_base["flake.nix"].content.decode(),
+        "superset",
+        "github:superset-sh/superset/desktop-v2.0.5",
+    )
     assert (
         missing_base["packages/superset/sources.json"]
         == only_base["packages/superset/sources.json"]
@@ -536,8 +575,13 @@ def test_merge_holds_the_pin_a_reverted_platform_cannot_outrank(tmp_path: Path) 
     merged = pipeline.merge_prepared_candidates(pin, other, repo=root)
 
     merged.apply(root)
-    assert "desktop-v1.30.2" in (root / "flake.nix").read_text(encoding="utf-8")
-    assert "github:o/other/v2" in (root / "flake.nix").read_text(encoding="utf-8")
+    flake = (root / "flake.nix").read_text(encoding="utf-8")
+    _assert_flake_input_url(
+        flake,
+        "superset",
+        "github:superset-sh/superset/desktop-v1.30.2",
+    )
+    _assert_flake_input_url(flake, "other", "github:o/other/v2")
     assert json.loads((root / "packages/superset/sources.json").read_text())[
         "version"
     ] == ("1.30.2")
@@ -578,7 +622,11 @@ def test_merge_keeps_an_updater_quarantine_instead_of_adding_another(
     superset = [entry for entry in merged.quarantines if entry.package == "superset"]
     assert len(superset) == 1
     assert superset[0].error_excerpt == "nix hash path failed after auto-GC"
-    assert "desktop-v1.30.2" in merged_text(merged, root, "flake.nix")
+    _assert_flake_input_url(
+        merged_text(merged, root, "flake.nix"),
+        "superset",
+        "github:superset-sh/superset/desktop-v1.30.2",
+    )
 
 
 def test_merge_records_the_hold_beside_another_package_quarantine(
@@ -639,7 +687,11 @@ def test_merge_promotes_a_materialized_superset_bump(tmp_path: Path) -> None:
     merged = pipeline.merge_prepared_candidates(pin, other, repo=root)
 
     merged.apply(root)
-    assert "desktop-v2.0.5" in (root / "flake.nix").read_text(encoding="utf-8")
+    _assert_flake_input_url(
+        (root / "flake.nix").read_text(encoding="utf-8"),
+        "superset",
+        "github:superset-sh/superset/desktop-v2.0.5",
+    )
     assert (
         json.loads((root / "packages/superset/sources.json").read_text())["version"]
         == "2.0.5"
@@ -649,6 +701,59 @@ def test_merge_promotes_a_materialized_superset_bump(tmp_path: Path) -> None:
     ) == "workspace graph without apps/admin\n"
     assert merged.resolutions["superset"].version == "2.0.5"
     assert merged.quarantines == ()
+
+
+def test_merge_promotes_a_materialized_bump_with_the_same_workspace_graph(
+    tmp_path: Path,
+) -> None:
+    """A hashed release whose bun.nix bytes did not change is still a bump."""
+    root = tmp_path / "repo"
+    init_update_workspace_repo(root, tracked_files=_tracked_baseline())
+    pin = _candidate(
+        root,
+        {
+            **_unmaterialized_pin_files(),
+            "packages/superset/sources.json": _sources(
+                version="2.0.5",
+                commit=_NEW_REV,
+                hashes=[_HASH],
+            ),
+            "packages/superset/bun.nix": "old workspace graph\n",
+        },
+        systems=("aarch64-darwin", "aarch64-linux"),
+        resolutions={"superset": ResolvedVersion(version="2.0.5")},
+    )
+    other = _candidate(
+        root,
+        {"arm.txt": "arm\n"},
+        systems=("aarch64-darwin", "x86_64-linux"),
+    )
+
+    merged = pipeline.merge_prepared_candidates(pin, other, repo=root)
+
+    merged.apply(root)
+    _assert_flake_input_url(
+        (root / "flake.nix").read_text(encoding="utf-8"),
+        "superset",
+        "github:superset-sh/superset/desktop-v2.0.5",
+    )
+    assert (
+        json.loads((root / "packages/superset/sources.json").read_text())["version"]
+        == "2.0.5"
+    )
+    assert merged.resolutions["superset"].version == "2.0.5"
+    assert merged.quarantines == ()
+
+
+def _assert_flake_input_url(source: str, name: str, url: str) -> None:
+    """Assert one input's url binding, not a substring of the file."""
+    root = expect_instance(parse_nix_expr(source), AttributeSet)
+    inputs = expect_instance(expect_binding(root.values, "inputs").value, AttributeSet)
+    declaration = expect_instance(
+        expect_binding(inputs.values, name).value,
+        AttributeSet,
+    )
+    assert_nix_ast_equal(expect_binding(declaration.values, "url").value, f'"{url}"')
 
 
 def _tracked_baseline() -> dict[str, str]:

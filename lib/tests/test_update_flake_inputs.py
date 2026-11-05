@@ -155,10 +155,13 @@ def test_restore_input_declaration_puts_one_input_back() -> None:
     )
     restored = restore_input_declaration(current, baseline, "github-desktop")
 
-    assert 'ref   =   "refs/tags/release-3.5.9-beta1";' in restored
-    assert 'url = "github:owner/plain/v2";' in restored
-    assert input_declaration_text(restored, "plain") == input_declaration_text(
-        current, "plain"
+    assert_nix_ast_equal(
+        expect_binding(_input(restored, "github-desktop").values, "ref").value,
+        '"refs/tags/release-3.5.9-beta1"',
+    )
+    assert_nix_ast_equal(
+        expect_binding(_input(restored, "plain").values, "url").value,
+        '"github:owner/plain/v2"',
     )
     assert restore_input_declaration(baseline, baseline, "github-desktop") == baseline
 

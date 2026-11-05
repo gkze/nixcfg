@@ -8,10 +8,11 @@ the pin wins. Plan-shards then evaluates the new tree with the previous
 ``bun.nix`` and aborts on the first workspace path upstream removed
 (Update 42032332040, ``apps/admin`` at ``624219c``).
 
-A promotable bump has materialized hashes, or a ``bun.nix`` regenerated for
-the new input. Anything else returns the package files and that one input
-to the baseline. Other inputs in the same ``flake.nix`` and ``flake.lock``
-stay.
+A promotable bump has materialized hashes. Those hashes mean the updater
+regenerated the workspace graph and checked it against the locked tree,
+including when that graph's bytes did not change. A flake input that moved
+while ``sources.json`` and ``bun.nix`` stayed on the baseline is restored.
+Other inputs in the same ``flake.nix`` and ``flake.lock`` stay.
 """
 
 import json
@@ -63,11 +64,17 @@ def hold_unmaterialized_superset_pin(
 
 
 def _should_hold(base: dict[str, FileBlob], merged: dict[str, FileBlob]) -> bool:
-    """Return whether the merged Superset pin must not be promoted."""
+    """Return whether the merged Superset pin must not be promoted.
+
+    Materialized hashes are a completed regeneration. ``bun.nix`` can stay
+    byte-identical when a release changes application code but not the
+    workspace list. The stale graph is the baseline ``sources.json`` paired
+    with a flake input that moved and a ``bun.nix`` that did not.
+    """
     sources = merged[_SOURCES]
     baseline_sources = base[_SOURCES]
-    if sources != baseline_sources and not _hashes_materialized(sources.content):
-        return True
+    if sources != baseline_sources:
+        return not _hashes_materialized(sources.content)
     return _input_moved(base, merged) and merged.get(_BUN_NIX) == base.get(_BUN_NIX)
 
 
