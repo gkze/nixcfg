@@ -132,6 +132,22 @@ _NATIVE_MANIFEST_CASES = [
         97,
         "2608.0.0",
     ),
+    (
+        "0.15.2",
+        "native-manifest-0.14.0.txt",
+        "16bdd9a3bf63ee848c3853baa0d0f50b367845edb3e6415d7f29ef851b5570bb",
+        201,
+        96,
+        "2601.0.0",
+    ),
+    (
+        "0.15.2",
+        "native-manifest-0.14.0-abseil-20260817.txt",
+        "2f64aeaf2727f47450f498540488b03845190b4e99487c01a26cea95ab721dec",
+        203,
+        97,
+        "2608.0.0",
+    ),
 ]
 _MSGPACKR_EXTRACT_ADDON = (
     "node_modules/@msgpackr-extract/msgpackr-extract-darwin-arm64/node.napi.glibc.node"
@@ -809,7 +825,11 @@ def _validate_manifests(
 
 
 def test_paseo_accepts_a_compatible_future_release_version() -> None:
-    """A routine later release must not require changing an updater version pin."""
+    """Manifest checks accept a later version string without a new pin.
+
+    Release selection is a separate gate: only a reviewed native-inventory
+    key can be resolved, so this acceptance does not admit an unreviewed tag.
+    """
     module = _load_updater_module()
 
     _validate_manifests(module, release_version="9.8.7")
@@ -870,22 +890,37 @@ def test_paseo_rejects_unreviewed_native_inventory_versions(
 def test_paseo_resolves_exact_release_and_native_source_graph(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Discovery must accept the current release from relational source evidence."""
+    """Discovery must accept the reviewed release from relational source evidence."""
     module = _load_updater_module()
     updater = module.PaseoUpdater()
     claude_sdk_version = "0.3.246"
     api_paths: list[str] = []
     fetched_urls: list[str] = []
 
-    async def release_payload(
+    async def release_pages(
         _session: object,
         path: str,
         *,
         config: object,
-    ) -> dict[str, str]:
+        per_page: int,
+        max_pages: int,
+    ) -> list[dict[str, object]]:
+        assert path == "repos/getpaseo/paseo/releases"
         assert config == updater.config
-        api_paths.append(path)
-        return {"tag_name": _LATEST_TAG}
+        assert per_page == module._RELEASE_LIST_PAGE_SIZE
+        assert max_pages == module._RELEASE_LIST_MAX_PAGES
+        return [
+            {
+                "tag_name": "v9.9.9",
+                "draft": False,
+                "prerelease": False,
+            },
+            {
+                "tag_name": _LATEST_TAG,
+                "draft": False,
+                "prerelease": False,
+            },
+        ]
 
     commits = {
         f"repos/getpaseo/paseo/commits/{_LATEST_TAG}": _LATEST_COMMIT,
@@ -972,10 +1007,15 @@ def test_paseo_resolves_exact_release_and_native_source_graph(
         *,
         config: object,
     ) -> dict[str, str]:
-        if "/commits/" in path:
-            return await commit_payload(session, path, config=config)
-        return await release_payload(session, path, config=config)
+        assert "/commits/" in path
+        return await commit_payload(session, path, config=config)
 
+    monkeypatch.setattr(
+        module,
+        "reviewed_release_versions",
+        lambda: frozenset({_LATEST_VERSION}),
+    )
+    monkeypatch.setattr(module, "fetch_github_api_paginated", release_pages)
     monkeypatch.setattr(
         "lib.update.updaters.github_release.fetch_github_api",
         github_payload,
@@ -991,7 +1031,6 @@ def test_paseo_resolves_exact_release_and_native_source_graph(
         claude_sdk_version=claude_sdk_version,
     )
     assert api_paths == [
-        "repos/getpaseo/paseo/releases/latest",
         f"repos/getpaseo/paseo/commits/{_LATEST_TAG}",
         "repos/k2-fsa/sherpa-onnx/commits/v1.12.28",
         "repos/microsoft/onnxruntime/commits/v1.23.2",
@@ -1003,6 +1042,261 @@ def test_paseo_resolves_exact_release_and_native_source_graph(
         "repos/dcleblanc/safeint/commits/3.0.28",
     ]
     assert len(fetched_urls) == 7
+    assert all("v9.9.9" not in path for path in api_paths)
+
+
+def _published_release(tag: str, **overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "tag_name": tag,
+        "draft": False,
+        "prerelease": False,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _reviewed_manifest(source: str) -> str:
+    if source.startswith("let"):
+        return "{ protobuf, paseoVersion }: " + source
+    return source
+
+
+def test_paseo_reviewed_release_parser_accepts_one_literal_inventory() -> None:
+    """A reviewed release is a release version mapped to inventory paths."""
+    module = _load_updater_module()
+
+    assert module.reviewed_release_versions_from_source(
+        _reviewed_manifest(
+            "let version = ./other.txt; inherit version; "
+            'releases = { "1.2.3" = { "32.1/1" = ./native-manifest.txt; }; }; '
+            "in releases"
+        )
+    ) == frozenset({"1.2.3"})
+
+
+@pytest.mark.parametrize(
+    ("source", "error", "match"),
+    [
+        ("{", RuntimeError, "declaring the reviewed release set"),
+        ("1", RuntimeError, "declaring the reviewed release set"),
+        (
+            "{ protobuf, paseoVersion }: 1",
+            RuntimeError,
+            "missing the reviewed release set",
+        ),
+        ("let releases = 1; in releases", TypeError, "literal attribute set"),
+        ("let releases = { }; in releases", RuntimeError, "no reviewed releases"),
+        (
+            'let version = "0.1.0"; releases = { inherit version; }; in releases',
+            TypeError,
+            "literal version bindings",
+        ),
+        (
+            "let releases = { foo = { a = ./native-manifest.txt; }; }; in releases",
+            RuntimeError,
+            "JSON string",
+        ),
+        (
+            "let releases = { true = { a = ./native-manifest.txt; }; }; in releases",
+            TypeError,
+            "must be a string",
+        ),
+        (
+            'let releases = { "latest" = { a = ./native-manifest.txt; }; }; in releases',
+            RuntimeError,
+            "exact semantic version",
+        ),
+        (
+            'let releases = { "0.1.0-rc.1" = { a = ./native-manifest.txt; }; }; in releases',
+            RuntimeError,
+            "without prerelease",
+        ),
+        (
+            'let releases = { "0.1.0" = { }; }; in releases',
+            RuntimeError,
+            "no native inventory",
+        ),
+        (
+            'let releases = { "0.1.0" = ./native-manifest.txt; }; in releases',
+            TypeError,
+            "inventory attribute set",
+        ),
+        (
+            'let releases = { "0.1.0" = { a = "text"; }; }; in releases',
+            TypeError,
+            "native inventory path",
+        ),
+        (
+            "let version = ./native-manifest.txt; "
+            'releases = { "0.1.0" = { inherit version; }; }; in releases',
+            TypeError,
+            "native inventory path",
+        ),
+    ],
+)
+def test_paseo_reviewed_release_parser_rejects_an_unreviewed_shape(
+    source: str,
+    error: type[Exception],
+    match: str,
+) -> None:
+    """The selection gate fails closed when the inventory declaration is not literal."""
+    module = _load_updater_module()
+
+    with pytest.raises(error, match=match):
+        module.reviewed_release_versions_from_source(_reviewed_manifest(source))
+
+
+def test_paseo_selects_the_newest_published_reviewed_release(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A newer unreviewed tag, draft, or prerelease cannot pass the inventory gate."""
+    module = _load_updater_module()
+    updater = module.PaseoUpdater()
+    reviewed = module.reviewed_release_versions()
+    newest = max(
+        reviewed,
+        key=lambda version: module.release_version_triplet(
+            version, context="Paseo reviewed release"
+        ),
+    )
+    seen: list[str] = []
+
+    async def release_pages(
+        _session: object,
+        path: str,
+        *,
+        config: object,
+        per_page: int,
+        max_pages: int,
+    ) -> list[dict[str, object]]:
+        assert path.endswith("/releases")
+        assert config == updater.config
+        assert per_page == module._RELEASE_LIST_PAGE_SIZE
+        assert max_pages == module._RELEASE_LIST_MAX_PAGES
+        seen.append(path)
+        return [
+            _published_release("v9.9.9"),
+            _published_release(f"v{newest}", draft=True),
+            _published_release("v0.15.3-rc.1"),
+            _published_release("v0.15.3-rc.2", prerelease=True),
+            _published_release("nightly"),
+            *(_published_release(f"v{version}") for version in sorted(reviewed)),
+        ]
+
+    monkeypatch.setattr(module, "fetch_github_api_paginated", release_pages)
+
+    assert run_async(updater._select_reviewed_release(object())) == (
+        newest,
+        f"v{newest}",
+    )
+    assert seen == ["repos/getpaseo/paseo/releases"]
+
+
+def test_paseo_holds_a_draft_of_the_newest_reviewed_release(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unpublished newest review cannot hide the previous published review."""
+    module = _load_updater_module()
+    updater = module.PaseoUpdater()
+
+    async def release_pages(
+        *_args: object, **_kwargs: object
+    ) -> list[dict[str, object]]:
+        return [
+            _published_release("v0.15.2", draft=True),
+            _published_release("v0.15.1"),
+            _published_release("v0.9.1"),
+        ]
+
+    monkeypatch.setattr(module, "fetch_github_api_paginated", release_pages)
+
+    assert run_async(updater._select_reviewed_release(object())) == (
+        "0.15.1",
+        "v0.15.1",
+    )
+
+
+def test_paseo_refuses_a_truncated_release_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A full final page may hide a newer reviewed release, so selection stops."""
+    module = _load_updater_module()
+    updater = module.PaseoUpdater()
+    monkeypatch.setattr(module, "_RELEASE_LIST_PAGE_SIZE", 1)
+    monkeypatch.setattr(module, "_RELEASE_LIST_MAX_PAGES", 1)
+
+    async def release_pages(
+        *_args: object, **_kwargs: object
+    ) -> list[dict[str, object]]:
+        return [_published_release("v0.15.2")]
+
+    monkeypatch.setattr(module, "fetch_github_api_paginated", release_pages)
+
+    with pytest.raises(RuntimeError, match="may be truncated"):
+        run_async(updater._select_reviewed_release(object()))
+
+
+def test_paseo_refuses_published_releases_without_a_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No reviewed published tag is an error, not a fallback to GitHub's latest."""
+    module = _load_updater_module()
+    updater = module.PaseoUpdater()
+
+    async def release_pages(
+        *_args: object, **_kwargs: object
+    ) -> list[dict[str, object]]:
+        return [_published_release("v9.9.9")]
+
+    monkeypatch.setattr(module, "fetch_github_api_paginated", release_pages)
+
+    with pytest.raises(RuntimeError, match="no reviewed native inventory"):
+        run_async(updater._select_reviewed_release(object()))
+
+
+@pytest.mark.parametrize(
+    ("payload", "error", "match"),
+    [
+        (["not-a-release"], TypeError, "Unexpected Paseo release payload type"),
+        (
+            [{"tag_name": "v0.15.2", "draft": "no", "prerelease": False}],
+            TypeError,
+            "draft or prerelease",
+        ),
+        (
+            [{"tag_name": "v0.15.2", "draft": False, "prerelease": None}],
+            TypeError,
+            "draft or prerelease",
+        ),
+        (
+            [{"draft": False, "prerelease": False}],
+            RuntimeError,
+            "Missing tag_name",
+        ),
+        (
+            [{"tag_name": "", "draft": False, "prerelease": False}],
+            RuntimeError,
+            "Missing tag_name",
+        ),
+    ],
+)
+def test_paseo_release_list_rejects_malformed_published_entries(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: list[object],
+    error: type[Exception],
+    match: str,
+) -> None:
+    """A published entry with a missing flag or tag fails before selection."""
+    module = _load_updater_module()
+    updater = module.PaseoUpdater()
+
+    async def release_pages(*_args: object, **_kwargs: object) -> list[object]:
+        return payload
+
+    monkeypatch.setattr(module, "fetch_github_api_paginated", release_pages)
+
+    with pytest.raises(error, match=match):
+        run_async(updater._select_reviewed_release(object()))
 
 
 @pytest.mark.parametrize(
@@ -2688,15 +2982,24 @@ def test_paseo_every_selected_native_manifest_is_reviewed() -> None:
     assert {name for _release, name in selected} == {
         path.name for path in _PACKAGE_DIR.glob("native-manifest*.txt")
     }
-    # 0.15.0 and 0.15.1 match the 0.14.0 buildOptions layout, so they are not
-    # new layout keys. Each still needs its own reviewed release because
-    # sources.json records the release version.
+    # 0.15.0 through 0.15.2 match the 0.14.0 buildOptions layout, so they are
+    # not new layout keys. Each still needs its own reviewed release because
+    # sources.json records the release version and the updater will not
+    # select a tag outside that set.
     releases = {release for release, _name in selected}
     assert set(_load_patcher_module()._RELEASE_LAYOUTS) <= releases
     assert releases - set(_load_patcher_module()._RELEASE_LAYOUTS) == {
         "0.15.0",
         "0.15.1",
+        "0.15.2",
     }
+    module = _load_updater_module()
+    assert module.reviewed_release_versions() == releases
+    signature_validator = load_repo_module(
+        "packages/paseo/validate_signatures.py",
+        "paseo_signature_profiles_match_reviewed_releases",
+    )
+    assert set(signature_validator.EXPECTED_NONEXECUTABLE_COUNTS) == releases
 
 
 @pytest.mark.nix_eval(
@@ -2718,6 +3021,8 @@ def test_paseo_selects_only_reviewed_protobuf_abseil_inventories() -> None:
         "release015Latest": "native-manifest-0.14.0-abseil-20260817.txt",
         "release0151Current": "native-manifest-0.14.0.txt",
         "release0151Latest": "native-manifest-0.14.0-abseil-20260817.txt",
+        "release0152Current": "native-manifest-0.14.0.txt",
+        "release0152Latest": "native-manifest-0.14.0-abseil-20260817.txt",
         "unrelatedDependency": "native-manifest-abseil-20260817.txt",
         "unknownRelease": True,
         "missingRelease": True,
