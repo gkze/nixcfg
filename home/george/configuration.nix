@@ -149,9 +149,15 @@
     shellAliases =
       let
         ezaDefaultArgs = "-albghHistype -F --color=always --icons=always";
+        # Start Nix's evaluator with a 4 GiB heap: a host evaluation otherwise
+        # grows it through ~9 GC cycles, about 25% of its CPU time. Scoped to
+        # these commands because every Boehm GC program reads the variable.
+        nixGcEnv = "GC_INITIAL_HEAP_SIZE=4G";
       in
       {
         cr = "clear && reset";
+        nh = "${nixGcEnv} nh";
+        nix = "${nixGcEnv} nix";
         ezap = "eza ${ezaDefaultArgs}";
         ezat = "eza ${ezaDefaultArgs} --tree";
         jaws = "function() { aws $@ | jq -r '.' }";
