@@ -24,6 +24,12 @@ _HASH = {
     "hashType": "sha256",
     "platform": "x86_64-linux",
 }
+# Not the updater's placeholder prefix: a cross-platform sources merge drops those.
+_MATERIAL_HASH = {
+    "hash": "sha256-2LliIYKK1vl6x6wKt+lYcjQa92MAHogD6CZ2UsJlJiA=",
+    "hashType": "sha256",
+    "platform": "x86_64-linux",
+}
 _OLD_REV = "a" * 40
 _NEW_REV = "b" * 40
 _OTHER_REV = "c" * 40
@@ -593,6 +599,151 @@ def test_merge_holds_the_pin_a_reverted_platform_cannot_outrank(tmp_path: Path) 
     )
 
 
+def test_fold_holds_the_shared_pin_after_every_native_candidate(
+    tmp_path: Path,
+) -> None:
+    """42057077242: three platforms share one pin, so the hold waits for all of them.
+
+    Holding after the first pair rewrites ``flake.nix`` while the third
+    candidate still has that pin next to the other input bumps. The
+    whole-file merge then rejects the file and drops both edits.
+    """
+    root = tmp_path / "repo"
+    init_update_workspace_repo(root, tracked_files=_tracked_baseline())
+    merged = pipeline.fold_prepared_candidates(
+        *_platform_candidates(root, _unmaterialized_pin_files()),
+        repo=root,
+    )
+
+    merged.apply(root)
+    flake = (root / "flake.nix").read_text(encoding="utf-8")
+    _assert_flake_input_url(
+        flake,
+        "superset",
+        "github:superset-sh/superset/desktop-v1.30.2",
+    )
+    _assert_flake_input_url(flake, "other", "github:o/other/v2")
+    assert json.loads((root / "packages/superset/sources.json").read_text())[
+        "version"
+    ] == ("1.30.2")
+    for name in ("darwin", "arm", "x86"):
+        assert (root / f"{name}.txt").read_text(encoding="utf-8") == f"{name}\n"
+    assert "superset" not in merged.resolutions
+    assert any(
+        entry.package == "superset" and HOLD_EXCERPT in entry.error_excerpt
+        for entry in merged.quarantines
+    )
+
+
+def test_fold_holds_a_superset_only_pin_the_next_platform_would_restore(
+    tmp_path: Path,
+) -> None:
+    """A partial hold equals the baseline flake, so the next bump wins the 3-way.
+
+    When Superset is the only input that moved, restoring it early makes that
+    side equal the ancestor. The following merge takes the later candidate's
+    unmaterialized bump and the hold disappears.
+    """
+    root = tmp_path / "repo"
+    init_update_workspace_repo(root, tracked_files=_tracked_baseline())
+    pin = {
+        "flake.nix": _flake(
+            superset_url="github:superset-sh/superset/desktop-v2.0.5",
+            other_url="github:o/other/v1",
+        ),
+        "flake.lock": _lock(superset_rev=_NEW_REV),
+        "packages/superset/sources.json": _sources(
+            version="2.0.5",
+            commit=_NEW_REV,
+            hashes=[],
+        ),
+    }
+    merged = pipeline.fold_prepared_candidates(
+        *_platform_candidates(root, pin),
+        repo=root,
+    )
+
+    merged.apply(root)
+    flake = (root / "flake.nix").read_text(encoding="utf-8")
+    _assert_flake_input_url(
+        flake,
+        "superset",
+        "github:superset-sh/superset/desktop-v1.30.2",
+    )
+    _assert_flake_input_url(flake, "other", "github:o/other/v1")
+    assert json.loads((root / "packages/superset/sources.json").read_text())[
+        "version"
+    ] == ("1.30.2")
+    assert "superset" not in merged.resolutions
+
+
+def test_fold_keeps_a_bump_a_later_platform_materialized(tmp_path: Path) -> None:
+    """Empty hashes on the first pair must not hold before the hashed platform."""
+    root = tmp_path / "repo"
+    init_update_workspace_repo(root, tracked_files=_tracked_baseline())
+    hashed = {
+        **_unmaterialized_pin_files(),
+        "packages/superset/sources.json": _sources(
+            version="2.0.5",
+            commit=_NEW_REV,
+            hashes=[_MATERIAL_HASH],
+        ),
+        "packages/superset/bun.nix": "regenerated workspace graph\n",
+    }
+    darwin, arm, x86 = _platform_candidates(root, _unmaterialized_pin_files())
+    x86 = _candidate(
+        root,
+        {**hashed, "x86.txt": "x86\n"},
+        systems=("x86_64-linux",),
+        resolutions={"superset": ResolvedVersion(version="2.0.5")},
+    )
+
+    merged = pipeline.fold_prepared_candidates(darwin, arm, x86, repo=root)
+
+    merged.apply(root)
+    flake = (root / "flake.nix").read_text(encoding="utf-8")
+    _assert_flake_input_url(
+        flake,
+        "superset",
+        "github:superset-sh/superset/desktop-v2.0.5",
+    )
+    _assert_flake_input_url(flake, "other", "github:o/other/v2")
+    payload = json.loads((root / "packages/superset/sources.json").read_text())
+    assert payload["version"] == "2.0.5"
+    assert payload["hashes"] == [_MATERIAL_HASH]
+    assert (root / "packages/superset/bun.nix").read_text(
+        encoding="utf-8"
+    ) == "regenerated workspace graph\n"
+    assert (root / "x86.txt").read_text(encoding="utf-8") == "x86\n"
+    assert merged.resolutions["superset"].version == "2.0.5"
+    assert merged.quarantines == ()
+
+
+def test_fold_rejects_a_candidate_that_moved_a_different_input(
+    tmp_path: Path,
+) -> None:
+    """Waiting to hold does not accept disagreeing edits of the same flake."""
+    root = tmp_path / "repo"
+    init_update_workspace_repo(root, tracked_files=_tracked_baseline())
+    darwin, arm, _x86 = _platform_candidates(root, _unmaterialized_pin_files())
+    moved = _candidate(
+        root,
+        {
+            **_unmaterialized_pin_files(),
+            "flake.nix": _flake(
+                superset_url="github:superset-sh/superset/desktop-v2.0.5",
+                other_url="github:o/other/v3",
+            ),
+            "x86.txt": "x86\n",
+        },
+        systems=("x86_64-linux",),
+        resolutions={"superset": ResolvedVersion(version="2.0.5")},
+    )
+
+    with pytest.raises(ValueError, match="Conflicting candidate edits for flake.nix"):
+        pipeline.fold_prepared_candidates(darwin, arm, moved, repo=root)
+
+
 def test_merge_keeps_an_updater_quarantine_instead_of_adding_another(
     tmp_path: Path,
 ) -> None:
@@ -743,6 +894,33 @@ def test_merge_promotes_a_materialized_bump_with_the_same_workspace_graph(
     )
     assert merged.resolutions["superset"].version == "2.0.5"
     assert merged.quarantines == ()
+
+
+def _platform_candidates(
+    root: Path,
+    pin: dict[str, str],
+) -> tuple[Candidate, Candidate, Candidate]:
+    """Return one candidate per native system, each adding its own file."""
+    resolution = {"superset": ResolvedVersion(version="2.0.5")}
+    darwin = _candidate(
+        root,
+        {**pin, "darwin.txt": "darwin\n"},
+        systems=("aarch64-darwin",),
+        resolutions=resolution,
+    )
+    arm = _candidate(
+        root,
+        {**pin, "arm.txt": "arm\n"},
+        systems=("aarch64-linux",),
+        resolutions=resolution,
+    )
+    x86 = _candidate(
+        root,
+        {**pin, "x86.txt": "x86\n"},
+        systems=("x86_64-linux",),
+        resolutions=resolution,
+    )
+    return darwin, arm, x86
 
 
 def _assert_flake_input_url(source: str, name: str, url: str) -> None:
