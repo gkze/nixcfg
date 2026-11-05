@@ -397,6 +397,27 @@ let
     ) managedMacAppRouting;
   };
 
+  # `meta.broken` and `passthru.exportReady = false` are packages whose build
+  # fails until an export gate closes. Activation must not interpolate those
+  # outputs: a routed app is part of every Darwin root that declares it, and
+  # cascade warmup builds that shared closure. The same routing entry is
+  # activated again once the package no longer reports the gate.
+  installableApplicationPackage =
+    package:
+    !(attrByPath [ "meta" "broken" ] false package)
+    && attrByPath [ "passthru" "exportReady" ] true package;
+
+  admittedApplications =
+    applications:
+    builtins.listToAttrs (
+      builtins.filter (pair: installableApplicationPackage pair.value.package) (
+        builtins.map (name: {
+          inherit name;
+          value = applications.${name};
+        }) (builtins.attrNames applications)
+      )
+    );
+
   resolveApplications =
     {
       applications,
@@ -428,7 +449,7 @@ let
           ;
         path = targetPath;
       }
-    ) applications;
+    ) (admittedApplications applications);
 
   applicationsForScope =
     scope: resolvedApplications:
