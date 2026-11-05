@@ -146,7 +146,18 @@ pkgs.devshell.mkShell {
     ++ lib.optional pkgs.stdenv.hostPlatform.isLinux dconf2nix
     ++ pre-commit-check.enabledPackages;
 
-  devshell.startup.pre-commit.text = pre-commit-check.shellHook;
+  devshell.startup.pre-commit.text = ''
+    ${pre-commit-check.shellHook}
+    # git-hooks.nix records core.hooksPath relative to the working tree
+    # (".git/hooks"). Git resolves a relative hooksPath against each worktree's
+    # root, and `.git` is a file in a linked worktree, so hooks silently never
+    # run there. Point it at the shared hooks directory by absolute path.
+    if hooks_path="$(${lib.getExe pkgs.git} config --local --get core.hooksPath)" \
+      && [ "''${hooks_path#/}" = "$hooks_path" ]; then
+      ${lib.getExe pkgs.git} config --local core.hooksPath \
+        "$(${lib.getExe pkgs.git} rev-parse --path-format=absolute --git-common-dir)/hooks"
+    fi
+  '';
   devshell.startup.commitlint-node-modules.text = ''
     mkdir -p node_modules
     ln -sfn "${pkgs.commitlint}/lib/node_modules/@commitlint/root/node_modules/@commitlint" node_modules/@commitlint
