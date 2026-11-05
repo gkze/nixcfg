@@ -108,7 +108,13 @@ let
     # bun.nix is generated from the prepared upstream workspace, but source
     # preparation only changes root metadata. Resolve its workspace entries
     # against the locked input so evaluation never needs the prepared derivation.
-    pkgs.copyPathToStore (upstreamSrc + "/${relativePath}");
+    # `builtins.path` without a filter yields the same store path as
+    # `copyPathToStore` (an accept-all `filterSource`) but does not call a Nix
+    # lambda for every file in the workspace tree.
+    builtins.path {
+      path = upstreamSrc + "/${relativePath}";
+      name = baseNameOf relativePath;
+    };
   bunWithFakeNode = stdenvNoCC.mkDerivation {
     name = "bun-with-fake-node";
     nativeBuildInputs = [ makeWrapper ];
