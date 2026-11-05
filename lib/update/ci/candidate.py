@@ -712,12 +712,25 @@ def merge_prepared_candidates(
 ) -> Candidate:
     """Merge two same-baseline native extensions into one candidate.
 
-    Darwin pins refs and shared generated files. Linux prepare only adds
-    native hashes, so arm and x86 can extend Darwin in parallel. Overlapping
-    file edits with different contents fail closed, except per-package
-    ``sources.json`` files whose only disagreements are ``drvHash`` or
-    complementary native hashes.
+    Overlapping file edits with different contents fail closed, except
+    per-package ``sources.json`` files whose only disagreements are
+    ``drvHash`` or complementary native hashes. The Superset pin hold runs
+    on this completed pair. A fold of more than two extensions merges every
+    candidate before that hold.
     """
+    return _with_superset_hold(
+        _merge_native_extensions(left, right, repo=repo),
+        repo=repo,
+    )
+
+
+def _merge_native_extensions(
+    left: Candidate,
+    right: Candidate,
+    *,
+    repo: Path,
+) -> Candidate:
+    """Union two native extensions without applying the Superset pin hold."""
     if left.base_tree != right.base_tree:
         msg = "Merged candidates must share a baseline tree"
         raise ValueError(msg)
@@ -744,37 +757,12 @@ def merge_prepared_candidates(
         _candidate_index_files(left, repo),
         _candidate_index_files(right, repo),
     )
-    held_files, superset_held = hold_unmaterialized_superset_pin(
-        {path: FileBlob(blob.mode, blob.content) for path, blob in base.items()},
-        {
-            path: FileBlob(blob.mode, blob.content)
-            for path, blob in merged_files.items()
-        },
-    )
-    if superset_held:
-        merged_files = {
-            path: _IndexBlob(blob.mode, blob.content)
-            for path, blob in held_files.items()
-        }
     tree, patch = _materialize_merged_index(repo, base, merged_files)
     quarantines = merge_quarantine_entries((
         *left.quarantines,
         *right.quarantines,
     ))
-    if superset_held and not any(entry.package == "superset" for entry in quarantines):
-        quarantines = merge_quarantine_entries((
-            *quarantines,
-            QuarantineEntry(
-                package="superset",
-                phase=QuarantinePhase.UPDATER,
-                error_excerpt=HOLD_EXCERPT,
-                run_url=current_run_url(),
-                since=datetime.now(UTC),
-            ),
-        ))
     resolutions = {**left.resolutions, **right.resolutions}
-    if superset_held:
-        resolutions.pop("superset", None)
     return Candidate(
         base_tree=left.base_tree,
         tree=tree,
@@ -790,6 +778,51 @@ def merge_prepared_candidates(
         prepared=True,
         patch=patch,
         quarantines=quarantines,
+    )
+
+
+def _with_superset_hold(candidate: Candidate, *, repo: Path) -> Candidate:
+    """Hold an unmaterialized Superset pin on one fully folded tree.
+
+    The hold rewrites that input in ``flake.nix`` and ``flake.lock``. It has
+    to see every native candidate. Applying it to a partial fold makes the
+    rewritten flake disagree with the next candidate, which still carries the
+    same pin beside the other input bumps (Update 42057077242).
+    """
+    with IsolatedUpdateWorkspace(repo) as workspace:
+        base = _index_files(workspace.root)
+    current = _candidate_index_files(candidate, repo)
+    held_files, superset_held = hold_unmaterialized_superset_pin(
+        {path: FileBlob(blob.mode, blob.content) for path, blob in base.items()},
+        {path: FileBlob(blob.mode, blob.content) for path, blob in current.items()},
+    )
+    if not superset_held:
+        return candidate
+    merged_files = {
+        path: _IndexBlob(blob.mode, blob.content) for path, blob in held_files.items()
+    }
+    tree, patch = _materialize_merged_index(repo, base, merged_files)
+    quarantines = candidate.quarantines
+    if not any(entry.package == "superset" for entry in quarantines):
+        quarantines = merge_quarantine_entries((
+            *quarantines,
+            QuarantineEntry(
+                package="superset",
+                phase=QuarantinePhase.UPDATER,
+                error_excerpt=HOLD_EXCERPT,
+                run_url=current_run_url(),
+                since=datetime.now(UTC),
+            ),
+        ))
+    resolutions = dict(candidate.resolutions)
+    resolutions.pop("superset", None)
+    return candidate.model_copy(
+        update={
+            "tree": tree,
+            "patch": patch,
+            "quarantines": quarantines,
+            "resolutions": resolutions,
+        }
     )
 
 
@@ -991,11 +1024,17 @@ def fold_prepared_candidates(
     *rest: Candidate,
     repo: Path,
 ) -> Candidate:
-    """Fold same-baseline native extensions left-to-right."""
+    """Fold same-baseline native extensions left-to-right.
+
+    File conflicts are resolved before the Superset pin hold. Holding inside
+    each pair rewrites ``flake.nix`` while a later candidate still has that
+    pin, so the next whole-file merge rejects edits that agreed
+    (Update 42057077242).
+    """
     merged = first
     for next_candidate in rest:
-        merged = merge_prepared_candidates(merged, next_candidate, repo=repo)
-    return merged
+        merged = _merge_native_extensions(merged, next_candidate, repo=repo)
+    return _with_superset_hold(merged, repo=repo)
 
 
 def require_complete_candidate(candidate: Candidate) -> None:

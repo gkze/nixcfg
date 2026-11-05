@@ -86,9 +86,12 @@ the coverage sidecars are that assignment and no prerequisite edge crosses
 shards, so every plan name is hashed once against the same inputs as an
 unsharded run. It publishes one `prepare-aarch64-darwin` candidate.
 `prepare-arm` and `prepare-x86` still hash every target from the pin, in
-parallel with the Darwin shards. `prepare-merge` folds that Darwin candidate with the two Linux
-candidates. Each native job keeps the release metadata that `prepare-pins`
-selected.
+parallel with the Darwin shards. `prepare-merge` folds that Darwin candidate
+with the two Linux candidates, then holds an unmaterialized Superset pin on
+the folded tree. The hold is not applied between those candidates: it
+rewrites the Superset input in `flake.nix` and `flake.lock`, and an earlier
+rewrite no longer matches the candidate that still has the shared pin.
+Each native job keeps the release metadata that `prepare-pins` selected.
 
 ### Validation
 

@@ -248,9 +248,14 @@ flowchart TD
    is omitted, so flake evaluation does not abort Darwin closure planning.
    The cross-platform merge then holds the package at the baseline pin when
    the merged `sources.json` has no hashes, or when the flake input moved
-   while `sources.json` and `bun.nix` stayed on the baseline. Materialized
-   hashes are a completed regeneration, so an identical `bun.nix` still
-   promotes. Other inputs in the same flake files stay.
+   while `sources.json` and `bun.nix` stayed on the baseline. That decision
+   uses the tree after every native candidate has been folded. Restoring the
+   Superset input during an earlier pairwise merge rewrites `flake.nix`
+   before the remaining candidate, which still carries the same pin beside
+   the other input bumps, and the whole-file merge rejects the file (Update
+   42057077242). Materialized hashes are a completed regeneration, so an
+   identical `bun.nix` still promotes. Other inputs in the same flake files
+   stay.
    Materializing the bump hashes a snapshot of the locked tree, not the
    live store path, and names any workspace path the pin removed.
    (`packages/superset/workspace-path.nix`,

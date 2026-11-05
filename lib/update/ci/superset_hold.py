@@ -13,6 +13,11 @@ regenerated the workspace graph and checked it against the locked tree,
 including when that graph's bytes did not change. A flake input that moved
 while ``sources.json`` and ``bun.nix`` stayed on the baseline is restored.
 Other inputs in the same ``flake.nix`` and ``flake.lock`` stay.
+
+The caller passes the tree after every native candidate has been folded.
+The hold rewrites ``flake.nix`` and ``flake.lock``. Doing that before the
+remaining candidate is folded makes those files disagree with a pin bump
+the candidates already shared.
 """
 
 import json
