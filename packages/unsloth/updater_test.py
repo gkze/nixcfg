@@ -737,7 +737,7 @@ def test_unsloth_static_closures_and_export_truth_are_current() -> None:
 
 
 def test_unsloth_validates_the_candidate_and_public_export_before_promotion() -> None:
-    """A source-only refresh must fail until closure evidence is current."""
+    """The smoke build stays required; the package build waits for exportReady."""
     updater = _load_updater_module().UnslothUpdater()
 
     assert updater.supported_platforms == ("aarch64-darwin",)
@@ -751,6 +751,7 @@ def test_unsloth_validates_the_candidate_and_public_export_before_promotion() ->
             installable="path:.#pkgs.{system}.{name}",
             systems=("aarch64-darwin",),
             mode="build",
+            requires_export_ready=True,
         ),
     )
 

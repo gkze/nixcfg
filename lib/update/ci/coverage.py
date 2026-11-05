@@ -265,11 +265,14 @@ def held_installables_by_system(
     *,
     updaters: Mapping[str, type[object]],
     systems: Iterable[str],
+    export_gate: Callable[[str], bool | None] | None = None,
 ) -> dict[str, frozenset[str]]:
     """Return installables held at last-good for each validation system.
 
     The resolver flags match ``assert-coverage`` so a held package is the
-    same installable the inventory expected.
+    same installable the inventory expected. ``export_gate`` is that same
+    probe: a package withheld while its export gate is closed is not a
+    quarantined gap.
     """
     names = tuple(packages)
     return {
@@ -281,6 +284,7 @@ def held_installables_by_system(
                 all_declared_systems=True,
                 native_builds_only=True,
                 native_system=system,
+                export_gate=export_gate,
             )
         )
         for system in systems

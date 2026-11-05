@@ -1533,6 +1533,10 @@ def _validate_round(
         out.print(f"\nPhase 3: derivation validation{suffix}", style="dim")
         if context.monitor is not None:
             context.monitor.begin_phase("derivation validation", 3)
+        export_gate = update_derivation_validation.export_gate_probe(
+            snapshot.root,
+            timeout=config.default_subprocess_timeout,
+        )
         failures = update_derivation_validation.validate_derivations(
             kept,
             updaters=context.updaters,
@@ -1546,6 +1550,7 @@ def _validate_round(
             print_build_logs=verbose,
             max_eval_workers=config.max_nix_evaluations,
             max_build_workers=config.max_nix_builds,
+            export_gate=export_gate,
         )
         if _record_derivation_validation_failures(outcome.summary, out, failures):
             return True, False

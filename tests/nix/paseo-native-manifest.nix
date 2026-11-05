@@ -33,6 +33,8 @@ in
   releaseLatest = selected "0.14.0" latest;
   release015Current = selected "0.15.0" current;
   release015Latest = selected "0.15.0" latest;
+  release0151Current = selected "0.15.1" current;
+  release0151Latest = selected "0.15.1" latest;
   unrelatedDependency = selected "0.9.1" (
     protobuf "32.1" [
       { pname = "zlib"; }

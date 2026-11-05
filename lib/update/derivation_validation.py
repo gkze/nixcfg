@@ -1,5 +1,6 @@
 """Target-aware Nix derivation validation after updater persistence."""
 
+import json
 import os
 import re
 import shlex
@@ -60,6 +61,7 @@ class DerivationValidation:
     installable: str
     systems: tuple[str, ...] | None = None
     mode: DerivationValidationMode = "eval"
+    requires_export_ready: bool = False
 
 
 @dataclass(frozen=True)
@@ -132,6 +134,10 @@ _VALIDATION_RETRY_BACKOFF_SECONDS = 1.0
 # only the time still left.
 _FULL_BUDGET_SLACK_SECONDS = 1.0
 _VALIDATION_DIAGNOSTIC_LIMIT = 16 * 1024
+# One export-gate probe instantiates the package. It must finish well inside
+# a packages job, and a timeout keeps the installable rather than hanging
+# coverage.
+_EXPORT_GATE_PROBE_TIMEOUT_SECONDS = 20 * 60
 _SIMPLE_ATTRIBUTE_PATH = re.compile(
     r"[A-Za-z_][A-Za-z0-9_'-]*(?:\.[A-Za-z_][A-Za-z0-9_'-]*)+"
 )
@@ -747,6 +753,78 @@ def _run_validation_command(
         raise error
 
 
+def interpret_export_gate(returncode: int, stdout: str) -> bool | None:
+    """Return an export-gate boolean, or ``None`` when the probe is unusable.
+
+    ``None`` keeps the installable. A failed or non-boolean probe must not
+    drop a required build.
+    """
+    if returncode != 0:
+        return None
+    try:
+        value = json.loads(stdout)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(value, bool):
+        return value
+    return None
+
+
+def probe_export_gate(
+    installable: str,
+    *,
+    flake_root: Path,
+    run: _Runner | None = None,
+    timeout: float | None = None,
+) -> bool | None:
+    """Evaluate one ``exportReady`` installable without importing derivations."""
+    args = [
+        "nix",
+        "eval",
+        "--no-update-lock-file",
+        "--json",
+        *NO_IMPORT_FROM_DERIVATION_ARGS,
+        _normalize_local_installable(installable, flake_root=flake_root),
+    ]
+    runner = subprocess.run if run is None else run
+    try:
+        completed = runner(
+            args,
+            check=False,
+            capture_output=True,
+            cwd=flake_root,
+            text=True,
+            timeout=(
+                _EXPORT_GATE_PROBE_TIMEOUT_SECONDS if timeout is None else timeout
+            ),
+        )
+    except OSError, subprocess.TimeoutExpired:
+        return None
+    return interpret_export_gate(completed.returncode, completed.stdout)
+
+
+def export_gate_probe(
+    flake_root: Path,
+    *,
+    run: _Runner | None = None,
+    timeout: float | None = None,
+) -> Callable[[str], bool | None]:
+    """Return a cached probe for every export gate in one validation snapshot."""
+    cache: dict[str, bool | None] = {}
+
+    def probe(installable: str) -> bool | None:
+        if installable not in cache:
+            cache[installable] = probe_export_gate(
+                installable,
+                flake_root=flake_root,
+                run=run,
+                timeout=timeout,
+            )
+        return cache[installable]
+
+    return probe
+
+
 def resolve_derivation_validations(
     source_names: Iterable[str],
     *,
@@ -754,8 +832,15 @@ def resolve_derivation_validations(
     all_declared_systems: bool = False,
     native_builds_only: bool = False,
     native_system: str | None = None,
+    export_gate: Callable[[str], bool | None] | None = None,
 ) -> tuple[DerivationValidationRequest, ...]:
-    """Resolve concrete validation requests for selected updater targets."""
+    """Resolve concrete validation requests for selected updater targets.
+
+    ``requires_export_ready`` withholds the installable while its
+    ``exportReady`` attribute evaluates false. Without a probe, or when the
+    probe does not return a boolean, the installable stays. That keeps a
+    probe failure from dropping a required build.
+    """
     current_system = native_system or get_current_nix_platform()
     requests: list[DerivationValidationRequest] = []
     seen: set[tuple[str, str, DerivationValidationMode]] = set()
@@ -793,6 +878,14 @@ def resolve_derivation_validations(
                     name=source,
                     system=system,
                 )
+                # False withholds the failing export. True keeps it.
+                # None is an unusable probe and keeps it too.
+                if (
+                    validation.requires_export_ready
+                    and export_gate is not None
+                    and export_gate(f"{installable}.exportReady") is False
+                ):
+                    continue
                 key = (source, installable, validation.mode)
                 if key in seen:
                     continue
@@ -1190,16 +1283,20 @@ def validate_derivations(
     print_build_logs: bool = False,
     max_eval_workers: int = 1,
     max_build_workers: int = 1,
+    export_gate: Callable[[str], bool | None] | None = None,
 ) -> tuple[DerivationValidationFailure, ...]:
     """Validate selected declarations, or the complete registry when names are None.
 
     Validation inventory is independent of update eligibility and bulk holds.
+    An export gate passed here is the same predicate the planned inventory
+    uses, so a withheld package is absent from both the build and the report.
     """
     requests = resolve_derivation_validations(
         updaters if source_names is None else source_names,
         updaters=updaters,
         all_declared_systems=all_declared_systems,
         native_builds_only=native_builds_only,
+        export_gate=export_gate,
     )
     return validate_derivation_requests(
         requests,
@@ -1499,6 +1596,9 @@ __all__ = [
     "RootClosureManifestRoot",
     "ValidationIncompleteError",
     "composed_root_name",
+    "export_gate_probe",
+    "interpret_export_gate",
+    "probe_export_gate",
     "resolve_derivation_validations",
     "root_closure_check_attr",
     "root_closure_installable",

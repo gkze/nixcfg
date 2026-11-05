@@ -1170,10 +1170,14 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
             systems=(DARWIN_PLATFORM,),
             mode="build",
         ),
+        # The package attribute is blockedPackage until exportReady.
+        # Require that build only when exportReady evaluates true.
+        # The smoke build above stays required either way.
         DerivationValidation(
             installable="path:.#pkgs.{system}.{name}",
             systems=(DARWIN_PLATFORM,),
             mode="build",
+            requires_export_ready=True,
         ),
     )
 
