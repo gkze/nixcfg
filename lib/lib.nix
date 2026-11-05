@@ -551,9 +551,9 @@ rec {
           inputs.nix-rosetta-builder.darwinModules.default
           {
             nix-rosetta-builder.onDemand = true;
-            nix-rosetta-builder.potentiallyInsecureExtraNixosModule.nixpkgs.overlays = [
-              (import ./rosetta-builder-image.nix { inherit lib; })
-            ];
+            nix-rosetta-builder.potentiallyInsecureExtraNixosModule = import ./rosetta-builder-image.nix {
+              inherit inputs;
+            };
           }
         ]
         ++ optionals (rosettaBuilderMemory != null) [

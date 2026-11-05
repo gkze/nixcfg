@@ -38,7 +38,6 @@ let
     mkDefault = x: x;
     mkForce = x: x;
     mkImageMediaOverride = x: x;
-    overrideDerivation = drv: change: drv // change drv;
 
     genAttrs =
       names: f:
@@ -106,27 +105,8 @@ let
       module: builtins.isAttrs module && module ? nix-rosetta-builder.potentiallyInsecureExtraNixosModule
     ) defaultDarwinModules
   );
-  imageOverlay = builtins.head imageModule.nix-rosetta-builder.potentiallyInsecureExtraNixosModule.nixpkgs.overlays;
-  imageTools =
-    (imageOverlay { } {
-      vmTools = {
-        retainedHelper = "unchanged";
-        runInLinuxVM =
-          drv:
-          drv
-          // {
-            requiredSystemFeatures = [
-              "kvm"
-              "benchmark"
-            ];
-            wrappedInVM = true;
-          };
-      };
-    }).vmTools;
-  portableImage = imageTools.runInLinuxVM {
-    builder = "original";
-    args = [ "image" ];
-  };
+  # The image module's own behaviour is covered by tests/nix/rosetta-builder-image.nix.
+  imageNixosModule = imageModule.nix-rosetta-builder.potentiallyInsecureExtraNixosModule;
   directHomeModules = flake.lib.mkHomeModules {
     system = "aarch64-darwin";
     username = "alice";
@@ -169,15 +149,7 @@ then
   throw "mkDarwinHost must forward the Rosetta builder idle linger policy"
 else if directHomeModules != expectedDirectHomeModules then
   throw "mkHomeModules must compose external, base, platform and explicit feature dependencies"
-else if
-  portableImage != {
-    builder = "original";
-    args = [ "image" ];
-    requiredSystemFeatures = [ "benchmark" ];
-    wrappedInVM = true;
-  }
-  || imageTools.retainedHelper != "unchanged"
-then
-  throw "Builder image portability must retain VM execution, other features and helpers"
+else if !(imageNixosModule ? image.modules.qemu-efi) then
+  throw "mkDarwinHost must pass the repo's builder image module to nix-rosetta-builder"
 else
   true

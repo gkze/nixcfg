@@ -206,11 +206,17 @@ cannot realize a Darwin derivation during evaluation. Darwin roots must
 therefore read theme files and other evaluation inputs from flake inputs, not
 from built port outputs.
 
-Hosted ARM runners do not expose KVM. The builder-image overlay permits Nix's
-QEMU TCG fallback. It removes the image builder's KVM scheduling requirement.
-The full image, bootloader installation and guest configuration remain
-required. This does not advertise nonexistent runner hardware or disable the
-configured builder VM.
+Hosted ARM runners do not expose KVM. The builder-image module
+(`lib/rosetta-builder-image.nix`) permits Nix's QEMU TCG fallback. It removes
+the image builder's KVM scheduling requirement. The full image, bootloader
+installation and guest configuration remain required. This does not advertise
+nonexistent runner hardware or disable the configured builder VM.
+
+The same module keeps the image cheap to evaluate. The guest disables Nix
+channels, so the image omits the Nixpkgs channel copy that nixpkgs' disk-image
+module adds by default. The image configuration also reuses the plain
+`aarch64-linux` Nixpkgs set instead of importing Nixpkgs again for itself and
+its `qemu-efi` variant.
 
 ### Certification
 

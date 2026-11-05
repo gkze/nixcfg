@@ -1015,6 +1015,13 @@
                 };
                 import ./tests/nix/package-helpers.nix { src = ./.; };
 
+              "test-nix-rosetta-builder-image" =
+                { pkgs, ... }:
+                import ./tests/nix/rosetta-builder-image.nix {
+                  inherit (pkgs) lib;
+                  src = ./.;
+                };
+
               "test-nix-root-closures" =
                 _:
                 import ./tests/nix/root-closures.nix {
