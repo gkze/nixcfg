@@ -1,13 +1,18 @@
 """Exact-source updater for the intentionally gated Paseo desktop package."""
 
 import asyncio
+import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, cast
 
+from nix_manipulator import parse
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
+from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.list import NixList
+from nix_manipulator.expressions.path import NixPath
 from nix_manipulator.expressions.primitive import Primitive
 from nix_manipulator.expressions.set import AttributeSet
 
@@ -27,10 +32,16 @@ from lib.update.events import (
     UpdateEvent,
     ignore_event,
 )
-from lib.update.net import fetch_json, fetch_url, github_raw_url
+from lib.update.net import (
+    fetch_github_api_paginated,
+    fetch_json,
+    fetch_url,
+    github_raw_url,
+)
 from lib.update.nix import _build_fetch_from_github_call, _build_fetch_from_github_expr
 from lib.update.nix_expr import compact_nix_expr, identifier_attr_path, nix_str
 from lib.update.npm_semver import (
+    release_version_triplet,
     require_exact_semantic_version,
     require_npm_version_matches_spec,
 )
@@ -55,6 +66,10 @@ if TYPE_CHECKING:
     from lib.update.config import UpdateConfig
 
 _SHA512_INTEGRITY_PATTERN = re.compile(r"^sha512-[A-Za-z0-9+/]{86}==$")
+# A full last page is indistinguishable from a truncated list. Picking from
+# that window could miss a newer reviewed release, so fail closed instead.
+_RELEASE_LIST_PAGE_SIZE = 100
+_RELEASE_LIST_MAX_PAGES = 10
 
 _SHERPA_NATIVE_DEPENDENCIES = {
     "eigen": {
@@ -295,6 +310,82 @@ def _first_locked_entry(
             return package_path, json_utils.as_object_dict(entry, context=context)
     msg = f"Paseo {context} is missing from the lock manifest"
     raise RuntimeError(msg)
+
+
+def reviewed_release_versions_from_source(source: str) -> frozenset[str]:
+    """Return release versions a native-manifest source will evaluate.
+
+    The attribute keys are the evaluation gate. A version absent from this
+    set throws while planning Darwin closures, which cannot withhold one
+    package. Only a literal inventory path counts as a review.
+    """
+    parsed = parse(source)
+    if parsed.contains_error or not isinstance(parsed.expr, FunctionDefinition):
+        msg = (
+            "Paseo native manifest must be a function declaring "
+            "the reviewed release set"
+        )
+        raise RuntimeError(msg)
+    releases: object | None = None
+    for binding in parsed.expr.output.scope:
+        if isinstance(binding, Binding) and binding.name == "releases":
+            releases = binding.value
+            break
+    if releases is None:
+        msg = "Paseo native manifest is missing the reviewed release set"
+        raise RuntimeError(msg)
+    if not isinstance(releases, AttributeSet):
+        msg = "Paseo reviewed releases must be a literal attribute set"
+        raise TypeError(msg)
+    if not releases.values:
+        msg = "Paseo native manifest has no reviewed releases"
+        raise RuntimeError(msg)
+
+    versions: set[str] = set()
+    for binding in releases.values:
+        if not isinstance(binding, Binding):
+            msg = "Paseo reviewed releases must be literal version bindings"
+            raise TypeError(msg)
+        try:
+            decoded = json.loads(binding.name)
+        except json.JSONDecodeError as exc:
+            msg = (
+                "Paseo reviewed release name must be a JSON string, "
+                f"got {binding.name!r}"
+            )
+            raise RuntimeError(msg) from exc
+        if not isinstance(decoded, str):
+            msg = f"Paseo reviewed release name must be a string, got {decoded!r}"
+            raise TypeError(msg)
+        version = require_exact_semantic_version(
+            decoded,
+            context="Paseo reviewed release",
+            release_only=True,
+        )
+        inventories = binding.value
+        if not isinstance(inventories, AttributeSet):
+            msg = f"Paseo reviewed release {version} must be an inventory attribute set"
+            raise TypeError(msg)
+        if not inventories.values:
+            msg = f"Paseo reviewed release {version} has no native inventory"
+            raise RuntimeError(msg)
+        for inventory in inventories.values:
+            if not isinstance(inventory, Binding) or not isinstance(
+                inventory.value, NixPath
+            ):
+                msg = (
+                    f"Paseo reviewed release {version} must map each "
+                    "dependency tuple to a native inventory path"
+                )
+                raise TypeError(msg)
+        versions.add(version)
+    return frozenset(versions)
+
+
+def reviewed_release_versions() -> frozenset[str]:
+    """Return release versions the checked-in native manifest will evaluate."""
+    manifest = Path(__file__).with_name("native-manifest.nix")
+    return reviewed_release_versions_from_source(manifest.read_text(encoding="utf-8"))
 
 
 @register_updater
@@ -731,17 +822,74 @@ class PaseoUpdater(GitHubReleaseUpdater):
             sherpa_version=sherpa_version,
         )
 
+    async def _select_reviewed_release(
+        self,
+        session: aiohttp.ClientSession,
+    ) -> tuple[str, str]:
+        """Return the newest published release the native inventory has reviewed.
+
+        GitHub's latest tag can ship before that review. Writing it makes
+        evaluation throw, and that throw fails Darwin closure planning instead
+        of withholding this package. A newer tag stays unselected until its
+        inventory entry lands.
+        """
+        reviewed = reviewed_release_versions()
+        releases = await fetch_github_api_paginated(
+            session,
+            f"repos/{self.GITHUB_OWNER}/{self.GITHUB_REPO}/releases",
+            config=self.config,
+            per_page=_RELEASE_LIST_PAGE_SIZE,
+            max_pages=_RELEASE_LIST_MAX_PAGES,
+        )
+        if len(releases) >= _RELEASE_LIST_PAGE_SIZE * _RELEASE_LIST_MAX_PAGES:
+            msg = (
+                "Paseo release list may be truncated; refusing to select "
+                "a reviewed release from a partial list"
+            )
+            raise RuntimeError(msg)
+
+        selected: tuple[tuple[int, int, int], str, str] | None = None
+        for release in releases:
+            if not isinstance(release, dict):
+                msg = f"Unexpected Paseo release payload type: {type(release).__name__}"
+                raise TypeError(msg)
+            draft = release.get("draft")
+            prerelease = release.get("prerelease")
+            if not isinstance(draft, bool) or not isinstance(prerelease, bool):
+                msg = (
+                    "Paseo release payload must say whether it is a draft or prerelease"
+                )
+                raise TypeError(msg)
+            if draft or prerelease:
+                continue
+            tag = release.get("tag_name")
+            if not isinstance(tag, str) or not tag:
+                msg = f"Missing tag_name in Paseo release payload: {release!r}"
+                raise RuntimeError(msg)
+            try:
+                version = require_exact_semantic_version(
+                    self._normalize_release_version(tag),
+                    context="Paseo release tag",
+                    release_only=True,
+                )
+            except RuntimeError:
+                continue
+            if version not in reviewed:
+                continue
+            key = release_version_triplet(version, context="Paseo reviewed release")
+            if selected is None or key > selected[0]:
+                selected = (key, version, tag)
+        if selected is None:
+            msg = "Paseo published releases include no reviewed native inventory"
+            raise RuntimeError(msg)
+        return selected[1], selected[2]
+
     async def fetch_latest(
         self, session: aiohttp.ClientSession, *, context: UpdateContext
     ) -> VersionInfo:
-        """Resolve the latest release against the supported native foundation."""
+        """Resolve the newest reviewed release against the supported native foundation."""
         _ = context
-        release = await self._fetch_latest_release_payload(session)
-        tag = self._release_tag_from_payload(release)
-        version = _require_exact_version(
-            self._normalize_release_version(tag),
-            context="release version",
-        )
+        version, tag = await self._select_reviewed_release(session)
 
         commit = await resolve_tag_commit(
             session,

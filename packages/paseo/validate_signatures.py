@@ -31,11 +31,16 @@ EXPECTED_NONEXECUTABLE_COUNTS = {
         "2f64aeaf2727f47450f498540488b03845190b4e99487c01a26cea95ab721dec": 97,
     },
     # 0.15.0 and 0.15.1 reuse that inventory. The native closure did not change.
+    # 0.15.2 reuses it too: its lock diff is the workspace version string.
     "0.15.0": {
         "16bdd9a3bf63ee848c3853baa0d0f50b367845edb3e6415d7f29ef851b5570bb": 96,
         "2f64aeaf2727f47450f498540488b03845190b4e99487c01a26cea95ab721dec": 97,
     },
     "0.15.1": {
+        "16bdd9a3bf63ee848c3853baa0d0f50b367845edb3e6415d7f29ef851b5570bb": 96,
+        "2f64aeaf2727f47450f498540488b03845190b4e99487c01a26cea95ab721dec": 97,
+    },
+    "0.15.2": {
         "16bdd9a3bf63ee848c3853baa0d0f50b367845edb3e6415d7f29ef851b5570bb": 96,
         "2f64aeaf2727f47450f498540488b03845190b4e99487c01a26cea95ab721dec": 97,
     },

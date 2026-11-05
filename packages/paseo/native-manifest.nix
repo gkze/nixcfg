@@ -19,8 +19,12 @@ let
   # set: electron-builder.yml is unchanged, and the lock's native packages
   # keep the same versions. 0.15.0's lock additions are JavaScript. 0.15.1's
   # lock diff is the workspace version string; its other edits are the
-  # terminal manager and changelogs. Update 41598175853 rejected 0.15.0, and
-  # Update 41930603250 rejected 0.15.1, because this selector had no entry.
+  # terminal manager and changelogs. 0.15.2's lock diff is the workspace
+  # version string too. The updater selects the newest published release
+  # that is a key here, so a later tag cannot reach evaluation until its
+  # entry lands. Update 41598175853 rejected 0.15.0, Update 41930603250
+  # rejected 0.15.1, and Update 42013312135 rejected 0.15.2, because this
+  # selector had no entry for the tag the updater had already chosen.
   releases = {
     "0.9.1" = {
       "32.1/20260107.1" = ./native-manifest.txt;
@@ -35,6 +39,10 @@ let
       "32.1/20260817.0" = ./native-manifest-0.14.0-abseil-20260817.txt;
     };
     "0.15.1" = {
+      "32.1/20260107.1" = ./native-manifest-0.14.0.txt;
+      "32.1/20260817.0" = ./native-manifest-0.14.0-abseil-20260817.txt;
+    };
+    "0.15.2" = {
       "32.1/20260107.1" = ./native-manifest-0.14.0.txt;
       "32.1/20260817.0" = ./native-manifest-0.14.0-abseil-20260817.txt;
     };

@@ -53,3 +53,4 @@ canary-slots: 0
 2026-11-04T05:56:00Z one Update run after ccd9f59b (baseten-switch creates NSApplication on the main thread; Update 41733265858 fixture SIGTRAP)
 2026-11-04T06:54:46Z one Update run after bf8247a3 (Zeron 0.2.136 channel fetch seam; Update 41783362395 prepare-darwin-4)
 2026-11-04T22:55:00Z one Update run after 25cc3f35 (baseten-switch main-actor fixture reads; reflect-open updater 2.14.1; Update 41824237606 cascade SIGTRAP and CodemodError)
+2026-11-05T12:50:00Z one Update run after the Paseo reviewed-release hold (Update 42013312135 eval rejected 0.15.2; select the newest reviewed release)
