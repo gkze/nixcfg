@@ -147,8 +147,7 @@ and exits 0, so sibling-stop does not fire. A Nix daemon disconnect while
 evaluating one derivation, with no store-damage markers, is that package's
 failure: Update 41796475737 died that way inside `zon2nix-with-ca-bundle`
 while the same daemon kept serving the rest of the shard. A runner store
-fault (a disconnect with no derivation, a dead daemon socket, `Illegal byte
-sequence`, SIGBUS, write-EIO, or a vanished store path) does not quarantine.
+fault (a disconnect with no derivation, a dead daemon socket, `Illegal byte sequence`, SIGBUS, write-EIO, or a vanished store path) does not quarantine.
 On a Darwin prepare shard it exits 0 with `runner_fault=true`, uploads the
 attempt as `-runner-fault`, and `prepare-darwin-retry-N` reruns the shard
 once before sibling-stop. Authentication, cancellation, and plan failures

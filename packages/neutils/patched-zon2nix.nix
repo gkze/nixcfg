@@ -40,11 +40,13 @@ let
   # package.nix sets `src = lib.cleanSource ./.` to the unpatched pin.
   # The patched tree replaces it. `zig_0_16` is Nixpkgs' Zig 0.16.0, the
   # compiler the pinned flake selects, without evaluating zig-overlay.
-  unwrapped = (pkgs.callPackage (root.inputs.zon2nix + "/package.nix") {
-    zig = pkgs.zig_0_16;
-  }).overrideAttrs (_old: {
-    inherit src;
-  });
+  unwrapped =
+    (pkgs.callPackage (root.inputs.zon2nix + "/package.nix") {
+      zig = pkgs.zig_0_16;
+    }).overrideAttrs
+      (_old: {
+        inherit src;
+      });
   certFile = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
 in
 pkgs.runCommand "zon2nix-with-ca-bundle"
