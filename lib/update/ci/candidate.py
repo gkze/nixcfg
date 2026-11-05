@@ -46,6 +46,11 @@ from lib.update.ci.shard_plan import (
     plan_darwin_closure_shards,
     write_github_actions_output,
 )
+from lib.update.ci.superset_hold import (
+    HOLD_EXCERPT,
+    FileBlob,
+    hold_unmaterialized_superset_pin,
+)
 from lib.update.ci.warmup import (
     CRANE_DEP_CHUNK,
     MERMAN_MEMBER_CRATES,
@@ -139,6 +144,7 @@ from lib.update.quarantine import (
     OpenQuarantineIssue,
     QuarantineEntry,
     QuarantineListTruncatedError,
+    QuarantinePhase,
     QuarantineRotError,
     append_job_summary,
     current_run_url,
@@ -738,7 +744,37 @@ def merge_prepared_candidates(
         _candidate_index_files(left, repo),
         _candidate_index_files(right, repo),
     )
+    held_files, superset_held = hold_unmaterialized_superset_pin(
+        {path: FileBlob(blob.mode, blob.content) for path, blob in base.items()},
+        {
+            path: FileBlob(blob.mode, blob.content)
+            for path, blob in merged_files.items()
+        },
+    )
+    if superset_held:
+        merged_files = {
+            path: _IndexBlob(blob.mode, blob.content)
+            for path, blob in held_files.items()
+        }
     tree, patch = _materialize_merged_index(repo, base, merged_files)
+    quarantines = merge_quarantine_entries((
+        *left.quarantines,
+        *right.quarantines,
+    ))
+    if superset_held and not any(entry.package == "superset" for entry in quarantines):
+        quarantines = merge_quarantine_entries((
+            *quarantines,
+            QuarantineEntry(
+                package="superset",
+                phase=QuarantinePhase.UPDATER,
+                error_excerpt=HOLD_EXCERPT,
+                run_url=current_run_url(),
+                since=datetime.now(UTC),
+            ),
+        ))
+    resolutions = {**left.resolutions, **right.resolutions}
+    if superset_held:
+        resolutions.pop("superset", None)
     return Candidate(
         base_tree=left.base_tree,
         tree=tree,
@@ -750,13 +786,10 @@ def merge_prepared_candidates(
             for system in supported_systems()
             if system in set(left.systems) | set(right.systems)
         ),
-        resolutions={**left.resolutions, **right.resolutions},
+        resolutions=resolutions,
         prepared=True,
         patch=patch,
-        quarantines=merge_quarantine_entries((
-            *left.quarantines,
-            *right.quarantines,
-        )),
+        quarantines=quarantines,
     )
 
 

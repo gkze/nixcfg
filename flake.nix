@@ -1046,6 +1046,11 @@
 
               "test-nix-superset-patched-dependencies" = _: import ./tests/nix/superset-patched-dependencies { };
 
+              "test-nix-superset-workspace-path" =
+                { pkgs, ... }:
+                assert import ./tests/nix/superset-workspace-path.nix { inherit (pkgs) lib; };
+                pkgs.runCommand "superset-workspace-path-ok" { } "mkdir $out";
+
               "test-nix-binary-darwin-apps-platforms" = _: import ./tests/nix/binary-darwin-apps-platforms { };
 
               "test-nix-build-rust-crate-unique-drvs" =

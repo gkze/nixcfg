@@ -108,6 +108,123 @@ def test_run_translates_called_process_error(monkeypatch: pytest.MonkeyPatch) ->
         module._run(["nix", "run", "demo"])
 
 
+def test_run_ignores_blank_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Do not append an empty diagnostic tail."""
+    module = _load_module()
+
+    def _raise_failure(*_args: object, **_kwargs: object) -> None:
+        raise subprocess.CalledProcessError(7, ["nix", "hash", "path"], stderr="  \n")
+
+    monkeypatch.setattr(module.subprocess, "run", _raise_failure)
+
+    with pytest.raises(
+        module.UpdateBunLockError,
+        match=r"^command failed with exit code 7: nix hash path$",
+    ):
+        module._run(["nix", "hash", "path"])
+
+
+def test_run_includes_stderr_tail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the nix diagnostic that the updater previously discarded."""
+    module = _load_module()
+
+    def _raise_failure(*_args: object, **_kwargs: object) -> None:
+        raise subprocess.CalledProcessError(
+            1,
+            ["nix", "hash", "path"],
+            stderr="noise\nerror: path '/src/apps/admin' does not exist",
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", _raise_failure)
+
+    with pytest.raises(
+        module.UpdateBunLockError,
+        match=r"does not exist",
+    ):
+        module._run(["nix", "hash", "path"])
+
+
+def test_run_truncates_long_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bound a noisy nix log so the failure stays a quarantine excerpt."""
+    module = _load_module()
+    stderr = "HEAD-DROPPED\n" + ("x" * module._STDERR_TAIL)
+
+    def _raise_failure(*_args: object, **_kwargs: object) -> None:
+        raise subprocess.CalledProcessError(1, ["nix", "hash", "path"], stderr=stderr)
+
+    monkeypatch.setattr(module.subprocess, "run", _raise_failure)
+
+    with pytest.raises(module.UpdateBunLockError) as excinfo:
+        module._run(["nix", "hash", "path"])
+
+    message = str(excinfo.value)
+    tail = message.splitlines()[-1]
+    assert "HEAD-DROPPED" not in message
+    assert tail == "x" * module._STDERR_TAIL
+
+
+def test_validate_workspace_parity_names_a_missing_pinned_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Name a workspace the pinned tree removed before calling nix hash."""
+    module = _load_module()
+    prepared_root = tmp_path / "prepared"
+    upstream_root = tmp_path / "upstream"
+    relative = Path("apps/admin")
+    (prepared_root / relative).mkdir(parents=True)
+    upstream_root.mkdir()
+
+    def _unexpected_hash(*_args: object, **_kwargs: object) -> str:
+        msg = "nix hash must not run when a workspace path is missing"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(
+        module,
+        "_workspace_paths_from_bun_nix",
+        lambda _bun_nix: (prepared_root / relative,),
+    )
+    monkeypatch.setattr(module, "_run", _unexpected_hash)
+
+    with pytest.raises(
+        module.UpdateBunLockError,
+        match=r"not in the pinned Superset tree: apps/admin",
+    ):
+        module._validate_workspace_parity(
+            bun_nix=prepared_root / "bun.nix",
+            prepared_root=prepared_root,
+            upstream_root=upstream_root,
+        )
+
+
+def test_validate_workspace_parity_names_a_missing_prepared_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Name a generated workspace the prepared tree does not contain."""
+    module = _load_module()
+    prepared_root = tmp_path / "prepared"
+    upstream_root = tmp_path / "upstream"
+    relative = Path("apps/admin")
+    prepared_root.mkdir()
+    (upstream_root / relative).mkdir(parents=True)
+    monkeypatch.setattr(
+        module,
+        "_workspace_paths_from_bun_nix",
+        lambda _bun_nix: (prepared_root / relative,),
+    )
+
+    with pytest.raises(
+        module.UpdateBunLockError,
+        match=r"not in the prepared Superset tree: apps/admin",
+    ):
+        module._validate_workspace_parity(
+            bun_nix=prepared_root / "bun.nix",
+            prepared_root=prepared_root,
+            upstream_root=upstream_root,
+        )
+
+
 def test_workspace_paths_from_bun_nix_evaluates_generated_local_paths(
     tmp_path: Path,
 ) -> None:
@@ -338,7 +455,10 @@ def test_validate_workspace_parity_rejects_incomplete_hash_output(
     """Require one NAR hash for each prepared and locked workspace path."""
     module = _load_module()
     prepared_root = tmp_path / "prepared"
+    upstream_root = tmp_path / "upstream"
     relative = Path("apps/desktop")
+    (prepared_root / relative).mkdir(parents=True)
+    (upstream_root / relative).mkdir(parents=True)
     monkeypatch.setattr(
         module,
         "_workspace_paths_from_bun_nix",
@@ -353,7 +473,7 @@ def test_validate_workspace_parity_rejects_incomplete_hash_output(
         module._validate_workspace_parity(
             bun_nix=prepared_root / "bun.nix",
             prepared_root=prepared_root,
-            upstream_root=tmp_path / "upstream",
+            upstream_root=upstream_root,
         )
 
 
@@ -380,14 +500,15 @@ def test_main_happy_path_runs_prepare_and_copies_outputs(
         def __exit__(self, *_args: object) -> bool:
             return False
 
-    copied_trees: list[tuple[Path, Path, bool, bool]] = []
+    copied_trees: list[tuple[Path, Path, bool]] = []
     copied_files: list[tuple[Path, Path]] = []
     run_calls: list[tuple[list[str], Path | None]] = []
     parity_calls: list[tuple[Path, Path, Path]] = []
     writable_roots: list[Path] = []
 
-    def _copytree(src: Path, dst: Path, *, dirs_exist_ok: bool, symlinks: bool) -> None:
-        copied_trees.append((src, dst, dirs_exist_ok, symlinks))
+    def _copytree(src: Path, dst: Path, *, symlinks: bool) -> None:
+        copied_trees.append((src, dst, symlinks))
+        dst.mkdir(parents=True, exist_ok=True)
         (dst / "bun.lock").write_text("generated lock\n", encoding="utf-8")
         (dst / "bun.nix").write_text("generated nix\n", encoding="utf-8")
 
@@ -415,8 +536,13 @@ def test_main_happy_path_runs_prepare_and_copies_outputs(
 
     assert module.main() == 0
 
-    assert copied_trees == [(module.UPSTREAM_SRC, temp_root, True, True)]
-    assert writable_roots == [temp_root]
+    prepared_root = temp_root / "prepared"
+    upstream_snapshot = temp_root / "upstream"
+    assert copied_trees == [
+        (module.UPSTREAM_SRC, upstream_snapshot, True),
+        (upstream_snapshot, prepared_root, True),
+    ]
+    assert writable_roots == [prepared_root]
     assert run_calls == [
         (
             [
@@ -429,9 +555,9 @@ def test_main_happy_path_runs_prepare_and_copies_outputs(
                 "bun-lock",
                 "prepare",
                 "--workspace-root",
-                str(temp_root),
+                str(prepared_root),
                 "--lock-file",
-                str(temp_root / "bun.lock"),
+                str(prepared_root / "bun.lock"),
                 "--bun-executable",
                 module.BUN,
             ],
@@ -448,17 +574,17 @@ def test_main_happy_path_runs_prepare_and_copies_outputs(
                 "--copy-prefix",
                 "./",
                 "--output-file",
-                str(temp_root / "bun.nix"),
+                str(prepared_root / "bun.nix"),
             ],
-            temp_root,
+            prepared_root,
         ),
     ]
     assert copied_files == [
-        (temp_root / "bun.lock", output_dir / "bun.lock"),
-        (temp_root / "bun.nix", output_dir / "bun.nix"),
+        (prepared_root / "bun.lock", output_dir / "bun.lock"),
+        (prepared_root / "bun.nix", output_dir / "bun.nix"),
     ]
     assert parity_calls == [
-        (temp_root / "bun.nix", temp_root, module.UPSTREAM_SRC),
+        (prepared_root / "bun.nix", prepared_root, upstream_snapshot),
     ]
 
 
@@ -526,13 +652,12 @@ def test_script_main_guard_exits_with_main_status(
         def __exit__(self, *_args: object) -> bool:
             return False
 
-    def _copytree(
-        _src: Path, dst: Path, *, dirs_exist_ok: bool, symlinks: bool
-    ) -> None:
-        assert dirs_exist_ok is True
+    def _copytree(_src: Path, dst: Path, *, symlinks: bool) -> None:
         assert symlinks is True
+        dst.mkdir(parents=True, exist_ok=True)
         (dst / "bun.lock").write_text("generated lock\n", encoding="utf-8")
         (dst / "bun.nix").write_text("generated nix\n", encoding="utf-8")
+        (dst / "apps" / "desktop").mkdir(parents=True)
 
     def _copy2(src: Path, dst: Path) -> None:
         dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
@@ -543,10 +668,15 @@ def test_script_main_guard_exits_with_main_status(
     monkeypatch.setattr("shutil.copy2", _copy2)
 
     def _subprocess_run(
-        command: list[str], **_kwargs: object
+        command: list[str], **kwargs: object
     ) -> subprocess.CompletedProcess[str]:
         if command[:2] == ["nix", "eval"]:
-            stdout = json.dumps([str(temp_root / "apps/desktop")])
+            env = kwargs.get("env")
+            if not isinstance(env, dict):
+                msg = "nix eval must receive the generated bun.nix path"
+                raise AssertionError(msg)
+            bun_nix = Path(str(env["NIXCFG_SUPERSET_BUN_NIX"]))
+            stdout = json.dumps([str(bun_nix.parent / "apps" / "desktop")])
         elif command[:3] == ["nix", "hash", "path"]:
             stdout = "sha256-workspace\nsha256-workspace\n"
         else:

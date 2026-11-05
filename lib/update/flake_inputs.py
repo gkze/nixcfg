@@ -164,6 +164,44 @@ def has_input_ref(source: str, input_name: str) -> bool:
     )
 
 
+def input_declaration_text(source: str, input_name: str) -> str | None:
+    """Return the raw attrset text declaring ``input_name``, if it has one."""
+    encoded = source.encode()
+    attrset = _input_attrset(encoded, input_name)
+    if attrset is None:
+        return None
+    return encoded[attrset.start_byte : attrset.end_byte].decode()
+
+
+def restore_input_declaration(current: str, baseline: str, input_name: str) -> str:
+    """Replace ``input_name``'s attrset in ``current`` with the baseline attrset.
+
+    Sibling inputs, comments outside the attrset, and the rest of the file stay
+    byte for byte. Used to put one ref-backed input back on its last-good pin
+    without reverting every other input in ``flake.nix``.
+    """
+    current_bytes = current.encode()
+    baseline_bytes = baseline.encode()
+    current_attrset = _input_attrset(current_bytes, input_name)
+    baseline_attrset = _input_attrset(baseline_bytes, input_name)
+    if current_attrset is None or baseline_attrset is None:
+        msg = f"Could not find flake input attrset for {input_name!r}"
+        raise ValueError(msg)
+    replacement = baseline_bytes[
+        baseline_attrset.start_byte : baseline_attrset.end_byte
+    ]
+    if (
+        current_bytes[current_attrset.start_byte : current_attrset.end_byte]
+        == replacement
+    ):
+        return current
+    return (
+        current_bytes[: current_attrset.start_byte]
+        + replacement
+        + current_bytes[current_attrset.end_byte :]
+    ).decode()
+
+
 def set_input_ref(source: str, input_name: str, ref: str) -> str:
     """Set (or add) the ``ref`` of an attrset-declared flake input.
 
@@ -180,6 +218,8 @@ def set_input_ref(source: str, input_name: str, ref: str) -> str:
 
 __all__ = [
     "has_input_ref",
+    "input_declaration_text",
+    "restore_input_declaration",
     "root_attrset",
     "root_input_bindings",
     "set_input_ref",

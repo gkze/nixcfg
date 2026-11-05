@@ -5,7 +5,13 @@ from nix_manipulator.expressions.set import AttributeSet
 
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
-from lib.update.flake_inputs import has_input_ref, root_input_bindings, set_input_ref
+from lib.update.flake_inputs import (
+    has_input_ref,
+    input_declaration_text,
+    restore_input_declaration,
+    root_input_bindings,
+    set_input_ref,
+)
 
 _FLAKE = """{
   description = "demo";
@@ -135,6 +141,36 @@ def test_set_input_ref_rejects_inputs_without_an_attrset() -> None:
     for name in ("nixpkgs", "missing"):
         with pytest.raises(RuntimeError, match="Could not find flake input attrset"):
             set_input_ref(_FLAKE, name, "v2")
+
+
+def test_restore_input_declaration_puts_one_input_back() -> None:
+    """A sibling input bump survives restoring one attrset to the baseline."""
+    baseline = _FLAKE
+    current = baseline.replace(
+        'url = "github:owner/plain/v1";',
+        'url = "github:owner/plain/v2";',
+    ).replace(
+        'ref   =   "refs/tags/release-3.5.9-beta1";',
+        'ref   =   "refs/tags/release-9";',
+    )
+    restored = restore_input_declaration(current, baseline, "github-desktop")
+
+    assert 'ref   =   "refs/tags/release-3.5.9-beta1";' in restored
+    assert 'url = "github:owner/plain/v2";' in restored
+    assert input_declaration_text(restored, "plain") == input_declaration_text(
+        current, "plain"
+    )
+    assert restore_input_declaration(baseline, baseline, "github-desktop") == baseline
+
+
+def test_restore_input_declaration_requires_both_attrsets() -> None:
+    """A missing declaration cannot be restored by guessing."""
+    bare = "{ inputs = { }; }\n"
+    with pytest.raises(ValueError, match="Could not find flake input attrset"):
+        restore_input_declaration(_FLAKE, _FLAKE, "missing")
+    with pytest.raises(ValueError, match="Could not find flake input attrset"):
+        restore_input_declaration(_FLAKE, bare, "plain")
+    assert input_declaration_text(bare, "plain") is None
 
 
 def test_duplicate_input_declarations_are_ambiguous() -> None:
