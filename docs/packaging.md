@@ -125,6 +125,13 @@ pattern genuinely cannot express the need.
 
 ### Application activation
 
+`resolveApplications` keeps an entry only when its package is installable.
+`meta.broken` and `passthru.exportReady = false` mark a package whose build
+fails until its export gates close. The activation script does not reference
+that output, so Darwin roots that route the app do not carry it into cascade
+warmup. The same routing entry is activated again when the package stops
+reporting the gate.
+
 `lib/mac-apps.nix` builds the activation body. `concurrentApplicationsScript`
 takes every declared scope and runs them as background jobs in the one
 nix-darwin activation shell, then waits for all of them before activation

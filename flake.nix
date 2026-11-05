@@ -942,6 +942,8 @@
 
               "test-nix-mac-app-cli" = _: import ./tests/nix/mac-apps/cli.nix { };
 
+              "test-nix-mac-app-export-gate" = _: import ./tests/nix/mac-apps/export-gate.nix { };
+
               "test-nix-merge-layers" =
                 _:
                 import ./tests/nix/merge-layers.nix {
