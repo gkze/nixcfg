@@ -96,25 +96,13 @@ let
       match = builtins.match "https?://([^/]+).*" url;
     in
     if match != null then builtins.elemAt match 0 else null;
-  copyBunWorkspacePathToStore =
-    path:
-    let
-      generatedRoot = "${toString ./.}/";
-      pathString = toString path;
-      relativePath = lib.removePrefix generatedRoot pathString;
-    in
-    assert lib.assertMsg (lib.hasPrefix generatedRoot pathString)
-      "Superset bun.nix referenced a path outside its generated workspace: ${pathString}";
-    # bun.nix is generated from the prepared upstream workspace, but source
-    # preparation only changes root metadata. Resolve its workspace entries
-    # against the locked input so evaluation never needs the prepared derivation.
-    # `builtins.path` without a filter yields the same store path as
-    # `copyPathToStore` (an accept-all `filterSource`) but does not call a Nix
-    # lambda for every file in the workspace tree.
-    builtins.path {
-      path = upstreamSrc + "/${relativePath}";
-      name = baseNameOf relativePath;
-    };
+  # bun.nix is generated from the prepared upstream workspace, but source
+  # preparation only changes root metadata. Resolve its workspace entries
+  # against the locked input so evaluation never needs the prepared derivation.
+  copyBunWorkspacePathToStore = import ./workspace-path.nix { inherit lib; } {
+    generatedRoot = "${toString ./.}/";
+    upstreamSrc = upstreamSrc;
+  };
   bunWithFakeNode = stdenvNoCC.mkDerivation {
     name = "bun-with-fake-node";
     nativeBuildInputs = [ makeWrapper ];

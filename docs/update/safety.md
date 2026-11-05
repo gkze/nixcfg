@@ -240,6 +240,23 @@ flowchart TD
    truncated release list fails closed rather than guessing.
    (`packages/paseo/updater.py`, `packages/paseo/updater_test.py`)
 
+## Superset workspace graph (27)
+
+1. **A Superset input bump cannot land ahead of its generated workspace
+   graph.** `copyBunWorkspacePathToStore` copies a `bun.nix` workspace only
+   when that path exists in the locked input. A workspace upstream removed
+   is omitted, so flake evaluation does not abort Darwin closure planning.
+   The cross-platform merge then holds the package at the baseline pin when
+   the merged `sources.json` has no hashes, or when the flake input moved
+   while `sources.json` and `bun.nix` stayed on the baseline. Materialized
+   hashes are a completed regeneration, so an identical `bun.nix` still
+   promotes. Other inputs in the same flake files stay.
+   Materializing the bump hashes a snapshot of the locked tree, not the
+   live store path, and names any workspace path the pin removed.
+   (`packages/superset/workspace-path.nix`,
+   `lib/update/ci/superset_hold.py`,
+   `packages/superset/update_bun_lock.py`)
+
 ## Related
 
 - [runtime.md](runtime.md): the durable-execution runtime that keeps these

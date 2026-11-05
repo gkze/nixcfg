@@ -34,6 +34,21 @@ class UpdateBunLockError(RuntimeError):
     """User-facing update helper error."""
 
 
+_STDERR_TAIL = 1500
+
+
+def _command_failure(exc: subprocess.CalledProcessError, command: list[str]) -> str:
+    """Render a subprocess failure, keeping the nix diagnostic at the tail."""
+    message = f"command failed with exit code {exc.returncode}: {' '.join(command)}"
+    detail = exc.stderr
+    if not isinstance(detail, str) or not detail.strip():
+        return message
+    tail = detail.strip()
+    if len(tail) > _STDERR_TAIL:
+        tail = tail[-_STDERR_TAIL:]
+    return f"{message}\n{tail}"
+
+
 def _ensure_repo_root(repo_root: Path) -> None:
     """Validate that the helper is running from the nixcfg repository root."""
     if (
@@ -74,8 +89,7 @@ def _run(
         msg = f"missing required executable: {command[0]}"
         raise UpdateBunLockError(msg) from exc
     except subprocess.CalledProcessError as exc:
-        msg = f"command failed with exit code {exc.returncode}: {' '.join(command)}"
-        raise UpdateBunLockError(msg) from exc
+        raise UpdateBunLockError(_command_failure(exc, command)) from exc
     return (result.stdout or "") if capture_output else ""
 
 
@@ -134,6 +148,11 @@ def _validate_workspace_parity(
             raise UpdateBunLockError(msg) from exc
         relative_paths.append(relative_path)
 
+    _require_workspace_paths(
+        relative_paths,
+        prepared_root=prepared_root,
+        upstream_root=upstream_root,
+    )
     prepared_paths = [prepared_root / path for path in relative_paths]
     upstream_paths = [upstream_root / path for path in relative_paths]
     hash_paths = [*prepared_paths, *upstream_paths]
@@ -157,6 +176,39 @@ def _validate_workspace_parity(
         raise UpdateBunLockError(msg)
 
 
+def _require_workspace_paths(
+    relative_paths: list[Path],
+    *,
+    prepared_root: Path,
+    upstream_root: Path,
+) -> None:
+    """Fail before hashing when bun.nix names a workspace the pin removed.
+
+    ``nix hash path`` only reports that some argument is missing, and its
+    stderr used to be discarded. Name the workspace so the updater holds the
+    last pin whose paths exist instead of publishing an unevaluable tree.
+    """
+    missing_prepared = _missing_workspaces(prepared_root, relative_paths)
+    missing_upstream = _missing_workspaces(upstream_root, relative_paths)
+    if missing_prepared:
+        rendered = ", ".join(missing_prepared)
+        msg = f"bun.nix workspace path is not in the prepared Superset tree: {rendered}"
+        raise UpdateBunLockError(msg)
+    if missing_upstream:
+        rendered = ", ".join(missing_upstream)
+        msg = f"bun.nix workspace path is not in the pinned Superset tree: {rendered}"
+        raise UpdateBunLockError(msg)
+
+
+def _missing_workspaces(root: Path, relative_paths: list[Path]) -> list[str]:
+    """Return workspace paths that are not present under ``root``."""
+    return [
+        relative.as_posix()
+        for relative in relative_paths
+        if not (root / relative).exists()
+    ]
+
+
 def _local_flake_installable(repo_root: Path, attr: str) -> str:
     """Return a local installable through Git's clean source view.
 
@@ -174,11 +226,18 @@ def main() -> int:
 
         with tempfile.TemporaryDirectory(prefix="superset-bun-lock.") as tmpdir_str:
             tmpdir = Path(tmpdir_str)
-            shutil.copytree(UPSTREAM_SRC, tmpdir, dirs_exist_ok=True, symlinks=True)
-            _make_user_writable(tmpdir)
+            # Hash a snapshot rather than the live store path. Hosted runners
+            # auto-GC during this command, and the locked source has no GC root
+            # once evaluation of the update script has finished (Update
+            # 42032332040). The snapshot is outside the store.
+            upstream_snapshot = tmpdir / "upstream"
+            prepared_root = tmpdir / "prepared"
+            shutil.copytree(UPSTREAM_SRC, upstream_snapshot, symlinks=True)
+            shutil.copytree(upstream_snapshot, prepared_root, symlinks=True)
+            _make_user_writable(prepared_root)
 
-            bun_lock = tmpdir / "bun.lock"
-            bun_nix = tmpdir / "bun.nix"
+            bun_lock = prepared_root / "bun.lock"
+            bun_nix = prepared_root / "bun.nix"
 
             _run([
                 "nix",
@@ -190,7 +249,7 @@ def main() -> int:
                 "bun-lock",
                 "prepare",
                 "--workspace-root",
-                str(tmpdir),
+                str(prepared_root),
                 "--lock-file",
                 str(bun_lock),
                 "--bun-executable",
@@ -209,12 +268,12 @@ def main() -> int:
                     "--output-file",
                     str(bun_nix),
                 ],
-                cwd=tmpdir,
+                cwd=prepared_root,
             )
             _validate_workspace_parity(
                 bun_nix=bun_nix,
-                prepared_root=tmpdir,
-                upstream_root=UPSTREAM_SRC,
+                prepared_root=prepared_root,
+                upstream_root=upstream_snapshot,
             )
 
             output_dir = repo_root / "packages" / "superset"
