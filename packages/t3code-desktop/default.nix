@@ -169,6 +169,13 @@ let
         find node_modules/.bun -path '*/node_modules/.bin' -type d -prune -exec rm -rf {} +
       fi
 
+      # Fail here, where prepare-darwin builds this derivation, when Bun did
+      # not link a production workspace dependency at the root. electron-builder
+      # cannot see that dependency later in the desktop build.
+      ${lib.getExe pythonForRuntimeManifest} ${./render_runtime_package_json.py} \
+        "$PWD" \
+        --check-hoisted-production-deps
+
       runHook postBuild
     '';
 

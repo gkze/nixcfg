@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any, cast
 
@@ -150,6 +151,7 @@ def _workspace_metadata(
 
 
 _WORKSPACE_MEMBER_SECTIONS = ("dependencies", "devDependencies", "optionalDependencies")
+_PRODUCTION_DEPENDENCY_SECTIONS = ("dependencies", "optionalDependencies")
 
 
 def _workspace_dependency_names(dependencies: JsonStringMap) -> set[str]:
@@ -191,6 +193,90 @@ def _runtime_workspace_dirs(
     return sorted(workspace_packages[name] for name in selected)
 
 
+def _hoist_workspace_production_dependencies(
+    source_root: Path,
+    workspace_packages: dict[str, str],
+    dependencies: JsonStringMap,
+) -> JsonStringMap:
+    """Return transitive ``workspace:`` production deps Bun must link at the root.
+
+    Bun's isolated linker links only direct dependencies of the root manifest
+    at ``node_modules/<name>``. electron-builder's traversal collector
+    realpaths a workspace package to its source directory, skips
+    ``node_modules/.bun``, and then searches parent ``node_modules``
+    directories. A production ``workspace:`` dependency that exists only on a
+    workspace member is installed under ``.bun`` and the collector reports it
+    missing. Nightly ``0.1.8-nightly.20261106.4247`` failed this way:
+    ``@t3tools/client-runtime`` depends on
+    ``@t3tools/secret-provider-definitions``, which was not a root dependency.
+    """
+    hoisted: JsonStringMap = {}
+    seen: set[str] = set()
+    pending = [
+        name for name, spec in dependencies.items() if spec.startswith("workspace:")
+    ]
+    while pending:
+        package_name = pending.pop()
+        if package_name in seen:
+            continue
+        seen.add(package_name)
+        rel_dir = workspace_packages[package_name]
+        package_json = _load_json(source_root / rel_dir / "package.json")
+        context = f"{rel_dir}/package.json"
+        for section in _PRODUCTION_DEPENDENCY_SECTIONS:
+            for name, spec in _string_map(
+                package_json, section, context=context
+            ).items():
+                if not spec.startswith("workspace:"):
+                    continue
+                current = dependencies.get(name, hoisted.get(name))
+                if current is None:
+                    hoisted[name] = spec
+                elif current != spec:
+                    msg = (
+                        f"Workspace dependency {name!r} is {current!r} at the "
+                        f"runtime root and {spec!r} in {rel_dir}"
+                    )
+                    raise RuntimeError(msg)
+                pending.append(name)
+    return hoisted
+
+
+def missing_hoisted_production_dependencies(root: Path) -> list[str]:
+    """Return production deps electron-builder cannot resolve from ``root``.
+
+    Dependencies of a package outside Bun's store must be linked at
+    ``node_modules/<name>``, because that is the only place the collector
+    searches after realpath leaves ``node_modules/.bun``. A package already
+    inside the store can see its own nested dependencies, so a missing root
+    link there is not a packaging failure. Missing optional dependencies are
+    skipped, matching the collector.
+    """
+    missing: set[str] = set()
+    seen: set[Path] = set()
+    pending: list[tuple[Path, str]] = [(root, "package.json")]
+    while pending:
+        package_dir, context = pending.pop()
+        resolved = package_dir.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        package_json = _load_json(resolved / "package.json")
+        inside_bun_store = ".bun" in resolved.parts
+        for section in _PRODUCTION_DEPENDENCY_SECTIONS:
+            optional = section == "optionalDependencies"
+            declared = _string_map(package_json, section, context=context)
+            for name in declared:
+                linked = root / "node_modules" / name
+                if (linked / "package.json").is_file():
+                    pending.append((linked, f"node_modules/{name}/package.json"))
+                    continue
+                if optional or inside_bun_store:
+                    continue
+                missing.add(name)
+    return sorted(missing)
+
+
 def _runtime_workspace_external_dependencies(
     source_root: Path,
     workspace_dirs: list[str],
@@ -201,7 +287,7 @@ def _runtime_workspace_external_dependencies(
     workspace_names = set(workspace_packages)
     for rel_dir in workspace_dirs:
         package_json = _load_json(source_root / rel_dir / "package.json")
-        for section in ("dependencies", "optionalDependencies"):
+        for section in _PRODUCTION_DEPENDENCY_SECTIONS:
             package_dependencies = resolve_catalog_dependencies(
                 {
                     name: spec
@@ -326,6 +412,15 @@ def build_runtime_manifest(
         workspace_packages,
         runtime_dependencies,
     )
+    # The server bundle does not run electron-builder, and its node_modules
+    # derivation strips workspace links. Hoisting those links into the server
+    # manifest would rewrite its lock with no consumer.
+    if include_desktop_runtime:
+        runtime_dependencies |= _hoist_workspace_production_dependencies(
+            source_root,
+            workspace_packages,
+            runtime_dependencies,
+        )
     runtime_dependencies |= _runtime_workspace_external_dependencies(
         source_root,
         runtime_workspace_dirs,
@@ -378,7 +473,6 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        required=True,
         help="Path to write the rendered package.json.",
     )
     parser.add_argument(
@@ -394,12 +488,32 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Omit desktop runtime dependencies for the standalone server CLI.",
     )
+    parser.add_argument(
+        "--check-hoisted-production-deps",
+        action="store_true",
+        help=(
+            "Check that electron-builder can resolve production dependencies "
+            "from this installed runtime root, and do not write a manifest."
+        ),
+    )
     return parser.parse_args()
 
 
 def main() -> None:
-    """Render the runtime manifest JSON for the packaged desktop app."""
+    """Render the runtime manifest, or check hoisted production links."""
     args = _parse_args()
+    if args.check_hoisted_production_deps:
+        missing = missing_hoisted_production_dependencies(args.source_root.resolve())
+        if missing:
+            sys.stderr.write(
+                "electron-builder cannot see production dependencies at "
+                f"node_modules: {', '.join(missing)}\n"
+            )
+            raise SystemExit(1)
+        return
+    if args.output is None:
+        msg = "--output is required to render the runtime manifest"
+        raise SystemExit(msg)
     payload = build_runtime_manifest(
         args.source_root.resolve(),
         electron_builder_version=args.electron_builder_version,
