@@ -11,12 +11,14 @@ let
 in
 {
   base = {
-    # Select George (george-81ff29) during OAuth. Cloud George v1 retired 2026-11-04.
-    executor-v2-george = executorRemote "https://mcp.executor.sh/mcp";
-    # Executor 2's local background server. Clients sign in through the
-    # browser with the dashboard `executor` paired, so no token is stored here.
-    # Executor 1's daemon on port 4788 was retired 2026-11-05.
-    executor-local = executorRemote "http://127.0.0.1:4312/mcp";
+    # Canonical Executor v2 entries, named executor-<location>-<workspace>.
+    # Local is this machine's background server; clients sign in through the
+    # browser, so no token is stored here.
+    executor-local-george = executorRemote "http://127.0.0.1:4312/mcp";
+    # Hosted v2 serves every organization at one address. Choose the
+    # organization when signing in: george (george-81ff29) or town.
+    executor-cloud-george = executorRemote "https://mcp.executor.sh/mcp";
+    executor-cloud-town = executorRemote "https://mcp.executor.sh/mcp";
   };
   work = { };
   zed = { };
