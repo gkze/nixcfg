@@ -55,3 +55,4 @@ canary-slots: 0
 2026-11-04T22:55:00Z one Update run after 25cc3f35 (baseten-switch main-actor fixture reads; reflect-open updater 2.14.1; Update 41824237606 cascade SIGTRAP and CodemodError)
 2026-11-05T12:50:00Z one Update run after the Paseo reviewed-release hold (Update 42013312135 eval rejected 0.15.2; select the newest reviewed release)
 2026-11-06T02:06:42Z one Update run after 3c8dbdf0 (baseten-switch main-thread menu image reads; Update 42071786632 workqueue SIGTRAP)
+2026-11-06T08:34:46Z one Update run after 812ff3e7 (t3code-desktop hoists workspace production deps; Update 42148267276 electron-builder secret-provider-definitions)
