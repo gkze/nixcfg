@@ -58,7 +58,7 @@ let
     stateDirectory = "/Applications/.nixcfg-mac-apps";
     stateName = "darwin-system";
     targetDirectory = "/Applications";
-    writable = false;
+    writable = true;
   };
   userMacAppScope = {
     entries = userMacAppEntries;

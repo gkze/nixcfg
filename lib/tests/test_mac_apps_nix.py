@@ -2950,6 +2950,31 @@ def test_mac_apps_helper_stays_runnable_as_a_standalone_store_copy(
 
 
 @pytest.mark.parametrize("writable", [True, False])
+def test_copy_permissions_preserve_source_and_limit_write_access(
+    tmp_path: Path,
+    writable: bool,
+) -> None:
+    """Writable copies allow their owner to update without granting public write."""
+    source = _fake_app_bundle(tmp_path / "source")
+    source_file = source / "Contents" / "Info.plist"
+    source_file.chmod(0o444)
+    destination = tmp_path / "Applications" / source.name
+    destination.mkdir(parents=True)
+
+    original_umask = os.umask(0)
+    try:
+        mac_apps_helper._rsync_copy(
+            source, destination, rsync_path=_rsync_path(), writable=writable
+        )
+    finally:
+        os.umask(original_umask)
+
+    copied_mode = stat.S_IMODE((destination / "Contents" / "Info.plist").stat().st_mode)
+    assert copied_mode == (0o644 if writable else 0o444)
+    assert stat.S_IMODE(source_file.stat().st_mode) == 0o444
+
+
+@pytest.mark.parametrize("writable", [True, False])
 def test_copy_preserves_custom_icon_and_prunes_stale_contents(
     tmp_path: Path,
     writable: bool,

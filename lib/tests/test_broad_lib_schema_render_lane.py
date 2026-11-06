@@ -864,7 +864,7 @@ def test_mac_apps_helper_additional_paths(  # noqa: PLR0915
             "--archive",
             "--delete",
             "--filter=P /Icon\r",
-            "--chmod=+w",
+            "--chmod=u+w",
             "--no-group",
             "--no-owner",
             f"{src}/",

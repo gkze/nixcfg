@@ -623,7 +623,7 @@ def _rsync_flags(*, writable: bool) -> list[str]:
         # Finder stores a bundle's custom icon in Icon\r and marks the directory
         # separately. Deleting only the resource leaves a generic folder icon.
         "--filter=P /Icon\r",
-        "--chmod=+w" if writable else "--chmod=-w",
+        "--chmod=u+w" if writable else "--chmod=-w",
         "--no-group",
         "--no-owner",
     ]

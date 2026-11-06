@@ -152,7 +152,12 @@ were actually promoted. Promotion renames stay sequential on purpose: the
 durable journal, not the copy, defines the crash-recovery order.
 
 The user scope runs as the primary user, so `~/Applications` keeps user
-ownership. `nixcfg.macApps.activationScope` decides who runs it:
+ownership. Copies in both scopes are owner-writable: `/Applications` retains
+root ownership, so modifying those bundles still requires a privileged updater.
+Writable copies do not grant write access to other users. Nix store sources and
+symlink installs retain their existing permissions.
+
+`nixcfg.macApps.activationScope` decides who runs it:
 
 - `"home-manager"` (default) keeps the dedicated Home Manager activation step.
 - `"nix-darwin"` means system activation already ran the same entries
