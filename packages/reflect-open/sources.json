@@ -1,23 +1,23 @@
 {
-  "commit": "3f4cb3a4ea806eb0786d8aa3748d9d5b311e2264",
+  "commit": "b30b3884f880f2ba46655516ad5fe59548b73ec2",
   "hashes": [
     {
-      "hash": "sha256-CGkmn4aWTBsIEvLXPGRZl6D9O1NmJw330jVFm/9oljY=",
+      "hash": "sha256-Uz0+H1dkwy2Nk2HoZttEsrmNqRACB8b1jY/sBvyx5+0=",
       "hashType": "cargoHash"
     },
     {
-      "hash": "sha256-J4WmweKtYhcZJEDpaBvW2JtvG/pmtWVuaVxMcHujJ8M=",
+      "hash": "sha256-/D16xdennk8R9MiP7J4Ti5YYRTxhYdP9B2vp1Fo1O1o=",
       "hashType": "npmDepsHash"
     },
     {
-      "hash": "sha256-WwR4Vtcn/j9ODLzCFhIr3b/zxteaO3ZtaeXTsLkgl9w=",
+      "hash": "sha256-Ar9s7Ef+KPMKIkIE+SQXXC2HUMYOhOMVoly6V86E2mo=",
       "hashType": "sha256",
-      "url": "https://registry.npmjs.org/pnpm/-/pnpm-11.28.6.tgz"
+      "url": "https://registry.npmjs.org/pnpm/-/pnpm-11.28.8.tgz"
     },
     {
-      "hash": "sha256-f+5u6ohx1bWMjEzJUWb8j6qAVj6D6+g3qmiHM6FOyaA=",
+      "hash": "sha256-uI/cvZi3U6LWOqsfl+8Hoy2jiJFMDEVZu2IG1Uy+Jog=",
       "hashType": "srcHash"
     }
   ],
-  "version": "0.16.0"
+  "version": "0.17.0"
 }
