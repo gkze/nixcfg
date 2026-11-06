@@ -17,6 +17,9 @@
 }).overrideAttrs
   (old: {
     # These tools support the native PTY and shell completion tests.
+    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [
+      python3
+    ];
     nativeCheckInputs = (old.nativeCheckInputs or [ ]) ++ [
       python3
       bashInteractive
@@ -26,6 +29,16 @@
       ./darwin-provenance.patch
       ./darwin-native-test-tools.patch
     ];
+    # Darwin can deliver child exit in the same turn as the last PTY write.
+    # The list waiter must read that write before exit means the marker is
+    # missing. fetch_latest rejects a harness layout this rewrite does not own.
+    postPatch =
+      (old.postPatch or "")
+      + ''
+        PYTHONPATH=${
+          import ../../lib/codemods-pythonpath.nix { inherit lib; }
+        } ${lib.getExe python3} ${./patch_pty_wait.py} "$PWD"
+      '';
     # The Darwin sandbox strips set-id bits from upstream mode fixtures.
     # Keep full CLI tests and the sandbox-safe native metadata/ACL checks here.
     # The remaining TestPicker cases need an ordinary APFS host and no automated

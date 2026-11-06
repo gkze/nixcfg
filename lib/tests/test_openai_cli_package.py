@@ -54,6 +54,30 @@ def test_openai_cli_check_support_covers_native_darwin_tests() -> None:
     )
 
 
+def test_openai_cli_drains_the_pty_waiter_before_exit_is_a_miss() -> None:
+    """Darwin exit and the final PTY write share one turn; the drain owns that."""
+    attrs = _override_attrs()
+    assert_nix_ast_equal(
+        expect_binding(attrs.values, "nativeBuildInputs").value,
+        """
+        (old.nativeBuildInputs or [ ]) ++ [
+          python3
+        ]
+        """,
+    )
+    assert_nix_ast_equal(
+        expect_binding(attrs.values, "postPatch").value,
+        """
+        (old.postPatch or "")
+        + ''
+          PYTHONPATH=${
+            import ../../lib/codemods-pythonpath.nix { inherit lib; }
+          } ${lib.getExe python3} ${./patch_pty_wait.py} "$PWD"
+        ''
+        """,
+    )
+
+
 def test_openai_cli_runs_the_full_autocomplete_suite_off_darwin() -> None:
     """Only Darwin narrows the autocomplete suite to the sandbox-safe checks."""
     assert_nix_ast_equal(

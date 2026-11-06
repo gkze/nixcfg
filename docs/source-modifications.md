@@ -88,8 +88,9 @@ When an updater-owned package anchors a build-time rewrite on upstream source,
 have the updater check that the rewrite still matches the release it resolves.
 Do this in `fetch_latest`, against the pinned commit. The Linux `prepare-pins`
 stage then rejects only that target, before a native builder spends a build
-reaching the patch phase. Examples: `packages/paseo/updater.py` and
-`packages/zeron/updater.py`. Paseo resolves the newest published release
+reaching the patch phase. Examples: `packages/paseo/updater.py`,
+`packages/zeron/updater.py`, and `packages/openai-cli/updater.py`.
+Paseo resolves the newest published release
 named by `packages/paseo/native-manifest.nix`, not GitHub's latest tag. An
 unreviewed tag stays out of the candidate, so the reviewed-inventory
 evaluation cannot throw during closure planning.
