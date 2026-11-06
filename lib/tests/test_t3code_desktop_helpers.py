@@ -357,7 +357,7 @@ def test_render_runtime_package_json_merges_root_catalog_into_object_workspaces(
 def test_render_runtime_package_json_preserves_runtime_workspace_dependencies(
     tmp_path: Path,
 ) -> None:
-    """Runtime workspace deps need an explicit, minimal workspaces stanza."""
+    """Root links have to include transitive workspace production dependencies."""
     module = _runtime_manifest_module()
 
     source_root = _runtime_source(
@@ -404,6 +404,8 @@ def test_render_runtime_package_json_preserves_runtime_workspace_dependencies(
         "effect": "4.0.0",
         "@t3tools/ssh": "workspace:*",
         "@t3tools/tailscale": "workspace:*",
+        "@t3tools/shared": "workspace:*",
+        "@t3tools/contracts": "workspace:*",
     }
     assert payload["workspaces"] == {
         "packages": [
@@ -514,6 +516,202 @@ def test_render_runtime_package_json_promotes_workspace_runtime_dependencies(
             "effect": "4.0.0-beta.78",
         },
     }
+
+
+def _secret_provider_source(tmp_path: Path) -> Path:
+    return _runtime_source(
+        tmp_path,
+        root_package={
+            "workspaces": {
+                "packages": ["packages/*"],
+                "catalog": {"effect": "4.1.2"},
+            },
+            "overrides": {},
+        },
+        server_package={
+            "version": "0.1.8",
+            "dependencies": {"@t3tools/client-runtime": "workspace:*"},
+        },
+        desktop_package={
+            "dependencies": {
+                "@t3tools/client-runtime": "workspace:*",
+                "electron": "44.10.1",
+            }
+        },
+        package_jsons={
+            "packages/client-runtime": {
+                "name": "@t3tools/client-runtime",
+                "dependencies": {
+                    "@t3tools/secret-provider-definitions": "workspace:*",
+                    "effect": "catalog:",
+                },
+                "devDependencies": {"@t3tools/fixtures": "workspace:*"},
+            },
+            "packages/secret-provider-definitions": {
+                "name": "@t3tools/secret-provider-definitions",
+                "dependencies": {"@t3tools/secret-provider-core": "workspace:*"},
+                "optionalDependencies": {
+                    "@t3tools/secret-provider-onepassword": "workspace:*"
+                },
+            },
+            "packages/secret-provider-core": {
+                "name": "@t3tools/secret-provider-core",
+                "dependencies": {
+                    "@t3tools/client-runtime": "workspace:*",
+                    "effect": "catalog:",
+                },
+            },
+            "packages/secret-provider-onepassword": {
+                "name": "@t3tools/secret-provider-onepassword",
+            },
+            "packages/fixtures": {"name": "@t3tools/fixtures"},
+        },
+    )
+
+
+def test_render_runtime_package_json_hoists_transitive_workspace_production_deps(
+    tmp_path: Path,
+) -> None:
+    """electron-builder only sees workspace production deps linked from the root.
+
+    The server manifest keeps those members available to Bun without promoting
+    them to root dependencies, because the server bundle does not run the
+    collector and strips workspace links.
+    """
+    module = _runtime_manifest_module()
+    source_root = _secret_provider_source(tmp_path)
+
+    payload = module.build_runtime_manifest(source_root)
+
+    assert payload["dependencies"] == {
+        "@t3tools/client-runtime": "workspace:*",
+        "@t3tools/secret-provider-definitions": "workspace:*",
+        "@t3tools/secret-provider-core": "workspace:*",
+        "@t3tools/secret-provider-onepassword": "workspace:*",
+        "effect": "4.1.2",
+    }
+    assert payload["workspaces"]["packages"] == [
+        "packages/client-runtime",
+        "packages/fixtures",
+        "packages/secret-provider-core",
+        "packages/secret-provider-definitions",
+        "packages/secret-provider-onepassword",
+    ]
+
+    server_payload = module.build_runtime_manifest(
+        source_root,
+        include_desktop_runtime=False,
+    )
+    assert "@t3tools/secret-provider-definitions" not in server_payload["dependencies"]
+    assert server_payload["dependencies"]["@t3tools/client-runtime"] == "workspace:*"
+    assert (
+        "packages/secret-provider-definitions"
+        in (server_payload["workspaces"]["packages"])
+    )
+
+
+def test_render_runtime_package_json_rejects_conflicting_workspace_specs(
+    tmp_path: Path,
+) -> None:
+    """Two workspace specs for one production package cannot both be installed."""
+    module = _runtime_manifest_module()
+    source_root = _runtime_source(
+        tmp_path,
+        root_package={
+            "workspaces": {"packages": ["packages/*"], "catalog": {}},
+            "overrides": {},
+        },
+        server_package={"version": "0.1.8", "dependencies": {}},
+        desktop_package={
+            "dependencies": {
+                "@t3tools/client-runtime": "workspace:*",
+                "@t3tools/shared": "workspace:*",
+            }
+        },
+        package_jsons={
+            "packages/client-runtime": {
+                "name": "@t3tools/client-runtime",
+                "dependencies": {"@t3tools/shared": "workspace:^1.2.3"},
+            },
+            "packages/shared": {"name": "@t3tools/shared"},
+        },
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"Workspace dependency '@t3tools/shared' is 'workspace:\*' at the "
+        r"runtime root and 'workspace:\^1\.2\.3' in packages/client-runtime",
+    ):
+        module.build_runtime_manifest(source_root)
+
+
+def test_missing_hoisted_production_dependencies_requires_root_links(
+    tmp_path: Path,
+) -> None:
+    """A workspace member outside Bun's store must find its deps at the root."""
+    module = _runtime_manifest_module()
+    root = tmp_path / "runtime"
+    member = root / "packages" / "client-runtime"
+    _write_json(
+        member / "package.json",
+        {
+            "name": "@t3tools/client-runtime",
+            "dependencies": {
+                "@t3tools/secret-provider-definitions": "workspace:*",
+            },
+        },
+    )
+    link = root / "node_modules" / "@t3tools" / "client-runtime"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(Path("../../packages/client-runtime"))
+    _write_json(
+        root / "package.json",
+        {"dependencies": {"@t3tools/client-runtime": "workspace:*"}},
+    )
+
+    assert module.missing_hoisted_production_dependencies(root) == [
+        "@t3tools/secret-provider-definitions"
+    ]
+
+    dependency = root / "packages" / "secret-provider-definitions"
+    _write_json(
+        dependency / "package.json",
+        {
+            "name": "@t3tools/secret-provider-definitions",
+            "dependencies": {"@t3tools/client-runtime": "workspace:*"},
+        },
+    )
+    dependency_link = root / "node_modules" / "@t3tools" / "secret-provider-definitions"
+    dependency_link.symlink_to(Path("../../packages/secret-provider-definitions"))
+
+    assert module.missing_hoisted_production_dependencies(root) == []
+
+
+def test_missing_hoisted_production_dependencies_ignores_bun_store_and_optional(
+    tmp_path: Path,
+) -> None:
+    """Nested Bun-store deps and absent optional deps are not root-link failures."""
+    module = _runtime_manifest_module()
+    root = tmp_path / "runtime"
+    store = root / "node_modules" / ".bun" / "effect@4.1.2" / "node_modules" / "effect"
+    _write_json(
+        store / "package.json", {"name": "effect", "dependencies": {"left-pad": "1"}}
+    )
+    effect = root / "node_modules" / "effect"
+    effect.parent.mkdir(parents=True, exist_ok=True)
+    effect.symlink_to(Path(".bun/effect@4.1.2/node_modules/effect"))
+    _write_json(
+        root / "package.json",
+        {
+            "dependencies": {"effect": "4.1.2"},
+            "optionalDependencies": {"missing-optional": "workspace:*"},
+        },
+    )
+
+    assert module.missing_hoisted_production_dependencies(root) == []
+
+    _write_json(root / "package.json", {"dependencies": {"not-installed": "1.0.0"}})
+    assert module.missing_hoisted_production_dependencies(root) == ["not-installed"]
 
 
 def test_render_runtime_package_json_can_omit_desktop_runtime_dependencies(
@@ -727,6 +925,60 @@ def test_render_runtime_package_json_main_writes_expected_runtime_manifest(
         "dependencies": {"effect": "4.0.0", "open": "^10.1.0"},
         "overrides": {"effect": "4.0.0"},
     }
+
+
+def test_render_runtime_package_json_check_cli_reports_missing_root_links(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The node_modules build uses the CLI to reject an unlinkable production dep."""
+    module = _runtime_manifest_module()
+    root = tmp_path / "runtime"
+    _write_json(root / "package.json", {"dependencies": {}})
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "render_runtime_package_json.py",
+            str(root),
+            "--check-hoisted-production-deps",
+        ],
+    )
+
+    assert module.main() is None
+    assert capsys.readouterr().err == ""
+
+    _write_json(
+        root / "package.json",
+        {"dependencies": {"@t3tools/secret-provider-definitions": "workspace:*"}},
+    )
+    with pytest.raises(SystemExit) as caught:
+        module.main()
+    assert caught.value.code == 1
+    assert (
+        capsys.readouterr().err
+        == "electron-builder cannot see production dependencies at "
+        "node_modules: @t3tools/secret-provider-definitions\n"
+    )
+
+
+def test_render_runtime_package_json_requires_output_to_render(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rendering without a destination is a usage error, not an empty write."""
+    module = _runtime_manifest_module()
+    source_root = _runtime_source(
+        tmp_path,
+        root_package={"workspaces": {"catalog": {}}, "overrides": {}},
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        ["render_runtime_package_json.py", str(source_root)],
+    )
+
+    with pytest.raises(SystemExit, match="--output is required"):
+        module.main()
 
 
 def test_patch_info_plist_sets_bundle_metadata(tmp_path: Path) -> None:

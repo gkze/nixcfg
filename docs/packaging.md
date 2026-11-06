@@ -245,6 +245,15 @@ as stable:
 artwork and `verify_bundle_identity.py`, which fails the build when the bundle
 metadata drifts.
 
+The desktop runtime manifest also hoists transitive `workspace:` production
+dependencies onto the root package. Bun's isolated linker only creates
+`node_modules/<name>` links for direct root dependencies. electron-builder's
+traversal collector realpaths a workspace package out of `node_modules/.bun`
+and does not search that store, so a member linked only there fails packaging
+with `Production dependency <name> not found`. The desktop `node_modules`
+derivation checks the installed root links before it is hashed. The server
+runtime does not run that collector and keeps its own manifest.
+
 ## Related
 
 - [source-modifications.md](source-modifications.md): policy for upstream edits
