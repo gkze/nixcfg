@@ -1,0 +1,147 @@
+diff --git a/mac/BasetenSwitch/Sources/BasetenSwitch/BasetenSwitchApp.swift b/mac/BasetenSwitch/Sources/BasetenSwitch/BasetenSwitchApp.swift
+index 40ce440..cad53f5 100644
+--- a/mac/BasetenSwitch/Sources/BasetenSwitch/BasetenSwitchApp.swift
++++ b/mac/BasetenSwitch/Sources/BasetenSwitch/BasetenSwitchApp.swift
+@@ -52,17 +52,20 @@ struct BasetenSwitchApp: App {
+     /// highlight states. The packaged app loads it from Resources; the
+     /// source-tree candidate keeps bare Swift builds useful in development.
+     static let menubarIcon: NSImage = {
+-        guard let url = menubarIconResourceURL(),
+-              let img = NSImage(contentsOf: url) else {
+-            return NSImage(systemSymbolName: "circle.lefthalf.filled",
+-                           accessibilityDescription: "Baseten Switch") ?? NSImage()
+-        }
+-        img.isTemplate = true
+         // Match the previous 22pt PNG canvas, whose logo occupied 27 of
+         // its 36 pixels. The SVG has no equivalent outer padding, so its
+         // image size is the old logo's effective 16.5pt footprint.
+-        img.size = NSSize(width: 16.5, height: 16.5)
+-        return img
++        let size = NSSize(width: 16.5, height: 16.5)
++        if let url = menubarIconResourceURL(),
++           let img = mainThreadTemplateImage(contentsOf: url, size: size) {
++            return img
++        }
++        guard let fallback = NSImage(
++            systemSymbolName: "circle.lefthalf.filled",
++            accessibilityDescription: "Baseten Switch") else {
++            return NSImage()
++        }
++        return mainThreadRasterizedImage(fallback)
+     }()
+ 
+     static func menubarIconResourceURL() -> URL? {
+@@ -160,6 +163,51 @@ struct BasetenSwitchApp: App {
+     }
+ }
+ 
++/// Load and rasterize a template image on the main thread.
++///
++/// `NSImage(contentsOf:)` returns before AppKit reads the file. That read
++/// then runs on a GCD workqueue (`_pthread_wqthread`) and SIGTRAPs at the
++/// same shared-cache instruction as `Data(contentsOf:)` (page offset
++/// 0x077c). Update 42071786632 hit it after the status-item menu rebuild,
++/// once XCTest had already started the next RuntimeCoordination test.
++/// Reading the bytes here and drawing them before return keeps both on
++/// the main thread.
++func mainThreadTemplateImage(contentsOf url: URL, size: NSSize? = nil) -> NSImage? {
++    onMainThread {
++        guard let data = try? Data(contentsOf: url),
++              let source = NSImage(data: data) else { return nil }
++        source.isTemplate = true
++        if let size {
++            source.size = size
++        }
++        return mainThreadRasterizedImage(source)
++    }
++}
++
++/// Draw `source` before returning so a drawing handler or a still-lazy
++/// representation cannot run later on a workqueue.
++func mainThreadRasterizedImage(_ source: NSImage) -> NSImage {
++    onMainThread {
++        let canvas = source.size.width > 0 && source.size.height > 0
++            ? source.size
++            : NSSize(width: 16, height: 16)
++        let image = NSImage(size: canvas)
++        image.lockFocus()
++        source.draw(in: NSRect(origin: .zero, size: canvas))
++        image.unlockFocus()
++        image.isTemplate = source.isTemplate
++        image.size = canvas
++        return image
++    }
++}
++
++func onMainThread<T>(_ body: () -> T) -> T {
++    if Thread.isMainThread {
++        return body()
++    }
++    return DispatchQueue.main.sync(execute: body)
++}
++
+ /// Owns the app-level objects for the AppKit shell. State and the
+ /// status-item controller are created here (not in the App struct) so
+ /// their lifecycle is tied to the running application, not SwiftUI
+diff --git a/mac/BasetenSwitch/Sources/BasetenSwitch/ClientBrandMarks.swift b/mac/BasetenSwitch/Sources/BasetenSwitch/ClientBrandMarks.swift
+index 93675fe..bc6f985 100644
+--- a/mac/BasetenSwitch/Sources/BasetenSwitch/ClientBrandMarks.swift
++++ b/mac/BasetenSwitch/Sources/BasetenSwitch/ClientBrandMarks.swift
+@@ -22,12 +22,8 @@ func clientBrandMarkKind(_ clientName: String) -> ClientBrandMarkKind {
+ 
+ enum ClientBrandAssets {
+     static let openAIBlossom: NSImage? = {
+-        guard let url = openAIBlossomResourceURL(),
+-              let image = NSImage(contentsOf: url) else {
+-            return nil
+-        }
+-        image.isTemplate = true
+-        return image
++        guard let url = openAIBlossomResourceURL() else { return nil }
++        return mainThreadTemplateImage(contentsOf: url)
+     }()
+ 
+     static func openAIBlossomResourceURL() -> URL? {
+@@ -79,7 +75,8 @@ enum ClientBrandAssets {
+ 
+         image?.isTemplate = true
+         image?.size = size
+-        return image
++        guard let image else { return nil }
++        return mainThreadRasterizedImage(image)
+     }
+ }
+ 
+diff --git a/mac/BasetenSwitch/Sources/BasetenSwitch/StatusItemController.swift b/mac/BasetenSwitch/Sources/BasetenSwitch/StatusItemController.swift
+index e0bd00b..a4754d3 100644
+--- a/mac/BasetenSwitch/Sources/BasetenSwitch/StatusItemController.swift
++++ b/mac/BasetenSwitch/Sources/BasetenSwitch/StatusItemController.swift
+@@ -83,6 +83,19 @@ final class StatusItemController: NSObject, NSMenuDelegate {
+         rebuildMenu()
+     }
+ 
++    // An async XCTest can drop this controller off the main thread.
++    // AppKit then finishes image and status-item file IO on a workqueue
++    // and SIGTRAPs in the same instruction as Data(contentsOf:)
++    // (Update 42071786632). Remove the item on the main thread first.
++    deinit {
++        let item = statusItem
++        onMainThread {
++            item.menu = nil
++            item.button?.image = nil
++            NSStatusBar.system.removeStatusItem(item)
++        }
++    }
++
+     func menuNeedsUpdate(_ menu: NSMenu) {
+         guard menuNeedsRebuild, !menuIsOpen else { return }
+         rebuildMenu()
+@@ -443,7 +456,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
+             accessibilityDescription: nil) else { return nil }
+         image.isTemplate = true
+         image.size = NSSize(width: 16, height: 16)
+-        return image
++        return mainThreadRasterizedImage(image)
+     }
+ 
+     private var startAtLoginTitle: String {

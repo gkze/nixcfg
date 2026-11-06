@@ -185,7 +185,13 @@ was calling `NSApplication.shared` on the XCTest worker, and that worker's
 next `Data(contentsOf:)` then SIGTRAPped in the shared cache (signal 5,
 "System trap"; Updates 41616086680 and 41733265858). setUp now creates the
 application on the main thread, and the fixture test still uses
-`Data(contentsOf:)`. Those limits do not place the current release on hold.
+`Data(contentsOf:)`. Menu images from `NSImage(contentsOf:)` and drawing
+handlers were still finishing on a GCD workqueue. Update 42071786632
+SIGTRAPped at that same page offset on `_pthread_wqthread` after the
+status-item menu rebuild, once
+`testUnsupportedStatusFallsBackWithoutRepeatedProbe` had started. Those
+reads and the status-item removal now run on the main thread. Those limits
+do not place the current release on hold.
 
 Hosted Darwin validation builds native `root-closures` in continuation
 shards. Run 36672202468 showed why one job cannot do that work. After a
