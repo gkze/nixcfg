@@ -64,6 +64,13 @@ let
       # skips those system frames. Run the fixture reads and SwiftUI tests
       # on the main actor and keep Data(contentsOf:).
       ./traffic-main-actor-tests.patch
+      # The status-item menu rebuild then left NSImage(contentsOf:) and its
+      # drawing handlers for a GCD workqueue. Update 42071786632 SIGTRAPped
+      # at the same page offset 0x077c on Thread 5 (_pthread_wqthread) after
+      # testUnsupportedStatusFallsBackWithoutRepeatedProbe started. Read and
+      # rasterize those images on the main thread, and remove the status
+      # item there too.
+      ./status-item-main-thread-images.patch
     ];
 
     # Match upstream's release build: one universal Go CLI plus one universal,
@@ -140,7 +147,8 @@ let
       # only. On Update 41616086680 attempt 2 the helper SIGTRAPped on
       # teardown while XCTest kept running, and SwiftPM failed the build.
       # `--disable-swift-testing` stops that helper. The fixture SIGTRAP is
-      # the main-actor test patch above, not this flag.
+      # the main-actor test patch above, and the workqueue SIGTRAP is the
+      # status-item image patch above, not this flag.
       (
         cd "$repo_root/mac/BasetenSwitch"
         env \

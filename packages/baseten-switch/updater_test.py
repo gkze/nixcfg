@@ -246,7 +246,8 @@ def test_package_applies_the_reviewed_nix_integration_patch() -> None:
         expect_binding(arguments.values, "patches").value,
         "[ ./nix-managed.patch ./raw-telemetry-test-clock.patch"
         " ./status-item-appkit-test-setup.patch"
-        " ./traffic-main-actor-tests.patch ]",
+        " ./traffic-main-actor-tests.patch"
+        " ./status-item-main-thread-images.patch ]",
     )
 
 
@@ -265,6 +266,20 @@ def test_status_item_tests_initialize_appkit_before_asking_for_an_item() -> None
         assert "+                _ = NSApplication.shared" in set_up
         assert "--skip" not in set_up
     assert "+import AppKit\n" in patch
+
+
+def test_status_item_images_are_read_and_drawn_on_the_main_thread() -> None:
+    """Menu image file reads must not resume on a GCD workqueue."""
+    patch = (
+        REPO_ROOT / "packages/baseten-switch/status-item-main-thread-images.patch"
+    ).read_text(encoding="utf-8")
+    assert "func onMainThread<T>(_ body: () -> T) -> T {" in patch
+    assert "+    return DispatchQueue.main.sync(execute: body)" in patch
+    assert "+        guard let data = try? Data(contentsOf: url)," in patch
+    assert patch.count("\n+        return mainThreadRasterizedImage(image)\n") == 2
+    assert "+        onMainThread {" in patch
+    assert "+            NSStatusBar.system.removeStatusItem(item)" in patch
+    assert "--skip" not in patch
 
 
 def test_traffic_fixture_reads_run_on_the_main_actor() -> None:
