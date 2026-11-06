@@ -197,18 +197,26 @@ in
     "com.meta.endo".endo_appearance_mode = "system";
   };
 
-  # Migration: the removed codexBundledCli activation created ~/.local/bin/codex
-  # and ~/.local/bin/codex-code-mode-host as symlinks straight into the ChatGPT
-  # bundle. Home Manager treats those foreign links as collisions with the cli
-  # shims now declared for the same names, so drop the legacy links first.
-  # Delete this block once no machine carries them.
-  home.activation.nixcfgDropLegacyBundledCodexLinks = lib.hm.dag.entryBefore [ "checkLinkTargets" ] ''
-    legacy_bin_dir=${lib.escapeShellArg "${config.home.homeDirectory}/.local/bin"}
-    for legacy_name in codex codex-code-mode-host; do
-      legacy_link="$legacy_bin_dir/$legacy_name"
-      case "$(readlink "$legacy_link" 2>/dev/null || true)" in
+  # The ChatGPT app installs its own codex CLI and links it into ~/.local/bin,
+  # both from the bundle (Contents/Resources/codex-cli/bin) and from the
+  # standalone release it downloads under ~/.codex/packages/standalone. Home
+  # Manager accepts an existing symlink only when it points into a
+  # -home-manager-files store path, so those app-owned links collide with the
+  # cli shims declared for the same names and abort activation. Drop only links
+  # into an app-managed CLI install, which the shims replace; anything else at
+  # those paths still fails loudly. The app recreates its links whenever it
+  # installs or updates the CLI, so this reconciliation stays.
+  home.activation.nixcfgDropAppManagedCodexLinks = lib.hm.dag.entryBefore [ "checkLinkTargets" ] ''
+    codex_bin_dir=${lib.escapeShellArg "${config.home.homeDirectory}/.local/bin"}
+    app_cli_packages=${lib.escapeShellArg "${config.home.homeDirectory}/.codex/packages/standalone"}
+    for codex_cli in codex codex-code-mode-host; do
+      codex_link="$codex_bin_dir/$codex_cli"
+      case "$(readlink "$codex_link" 2>/dev/null || true)" in
         */Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/*)
-          run rm -f "$legacy_link"
+          run rm -f "$codex_link"
+          ;;
+        "$app_cli_packages"/*/bin/*)
+          run rm -f "$codex_link"
           ;;
       esac
     done

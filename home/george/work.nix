@@ -13,7 +13,11 @@ let
   };
   routing = {
     agentlog = systemApp pkgs.agentlog;
-    aside = systemApp pkgs.aside;
+    aside = {
+      package = pkgs.aside;
+      preventDowngrade = true;
+      scope = "user";
+    };
     baseten-switch = systemApp pkgs.baseten-switch;
     bb = systemApp pkgs.bb;
     buzz = systemApp pkgs.buzz;
@@ -24,7 +28,6 @@ let
     coast-local = systemApp pkgs.coast-local;
     devin = systemApp pkgs.devin;
     energy = systemApp pkgs.energy;
-    executor = systemApp pkgs.executor;
     factory = systemApp pkgs.factory;
     freelens.package = pkgs.freelens;
     gemini = {
@@ -90,7 +93,6 @@ in
       extraPackages = [
         pkgs.baseten
         pkgs.baseten-switch.cliPackage
-        pkgs.executor.cliPackage
         pkgs.pants-preview
         pkgs.writer-computer.cliPackage
       ];
