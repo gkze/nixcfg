@@ -130,6 +130,24 @@
         source = "${pkgs.gitbutler}/bin/but";
         executable = true;
       };
+
+      # The OpenCode fork (@gkze/opencode) and upstream (@opencode/cli) are both
+      # bun global installs that declare an `opencode` bin, and bun links it to
+      # whichever package updated last. ~/.local/bin precedes ~/.bun/bin on PATH,
+      # so this keeps `opencode` on the fork across updates; upstream stays
+      # reachable as `opencode2`.
+      ".local/bin/opencode" = {
+        executable = true;
+        text = ''
+          #!/bin/sh
+          fork="$HOME/.bun/install/global/node_modules/@gkze/opencode/bin/opencode.exe"
+          if [ ! -x "$fork" ]; then
+            echo "opencode: the @gkze/opencode fork is missing from the bun global install; run: bun install -g" >&2
+            exit 127
+          fi
+          exec "$fork" "$@"
+        '';
+      };
     };
     sessionPath = [
       "$HOME/.local/bin"
@@ -314,6 +332,13 @@
         {
           enable = true;
           profile = "Default (twilight)";
+          # Off until the Twilight profile is restored. The 2026-11-06 orphan
+          # purge quarantined ~/Library/Application Support/zen to
+          # ~/.local/share/orphan-quarantine/keep/zen-profile/zen, so activation
+          # fails with "Profile 'Default (twilight)' not found" and aborts the
+          # whole darwin switch. zentool still runs by hand; only the activation
+          # hook is disabled, and the app/theme/assets stay declarative.
+          syncOnActivation = false;
           remoteDebugging = {
             bidi.enable = false;
             marionette.enable = false;
