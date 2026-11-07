@@ -8,7 +8,7 @@ let
     upstreamSrc:
     copy {
       generatedRoot = "${toString generated}/";
-      upstreamSrc = upstreamSrc;
+      inherit upstreamSrc;
     };
   kept = copyFrom ./superset-workspace-path/upstream-present (generated + "/apps/keep");
   dropped = copyFrom ./superset-workspace-path/upstream-missing (generated + "/apps/keep");

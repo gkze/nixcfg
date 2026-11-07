@@ -101,7 +101,7 @@ let
   # against the locked input so evaluation never needs the prepared derivation.
   copyBunWorkspacePathToStore = import ./workspace-path.nix { inherit lib; } {
     generatedRoot = "${toString ./.}/";
-    upstreamSrc = upstreamSrc;
+    inherit upstreamSrc;
   };
   bunWithFakeNode = stdenvNoCC.mkDerivation {
     name = "bun-with-fake-node";
