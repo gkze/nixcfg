@@ -84,9 +84,6 @@ stdenv.mkDerivation {
   patches = [
     ./patches/nix-managed-updates.patch
     ./patches/nix-managed-connect-credential-cache.patch
-    # Hoisted transitive dependencies can be omitted by electron-builder's
-    # collector. Make the SQLite loader and logger closure explicit roots.
-    ./patches/nix-managed-runtime-closure.patch
     ./patches/pnpm-10-hoisted-runtime-manifest.patch
   ];
 
@@ -122,6 +119,13 @@ stdenv.mkDerivation {
   '';
 
   postPatch = ''
+    # Hoisted transitive dependencies can be omitted by electron-builder's
+    # collector. Root the SQLite loader and logger closure explicitly. The
+    # lock must already resolve these versions; neighbor dependency order is
+    # not part of the contract.
+    ${lib.getExe python3} ${./ensure_runtime_closure.py} \
+      --source .
+
     cp \
       ${./nix-managed-connect-credential-encryption.ts} \
       apps/desktop/src/nix-managed-connect-credential-encryption.ts
@@ -157,12 +161,14 @@ stdenv.mkDerivation {
     pushd apps/desktop
 
     # better-sqlite3 12.10.0 predates Electron >= 44's tagged external-pointer
-    # V8 API. Apply the upstream 12.11.1 source fixes in place so
-    # electron-rebuild can compile the module against these headers. Resolve
-    # through node because the hoisted layout nests conflicting versions away
-    # from the workspace root when dependents disagree.
+    # V8 API. 12.11.1 already contains that fix. Apply the patch to the
+    # pre-fix source and accept an already-fixed tree; any other shape fails
+    # closed. Resolve through node because the hoisted layout nests
+    # conflicting versions away from the workspace root when dependents disagree.
     bs3dir=$(node -p "require('path').dirname(require.resolve('better-sqlite3/package.json', { paths: [process.cwd()] }))")
-    patch -d "$bs3dir" -p1 < ${./patches/better-sqlite3-electron-44-v8-abi.patch}
+    ${lib.getExe python3} ${./apply_better_sqlite3_abi_patch.py} \
+      --module "$bs3dir" \
+      --patch ${./patches/better-sqlite3-electron-44-v8-abi.patch}
 
     pnpm exec electron-rebuild \
       -f \

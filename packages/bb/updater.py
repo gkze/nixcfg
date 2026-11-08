@@ -1,11 +1,13 @@
 """Updater for the source-built bb desktop app."""
 
+from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, cast
 
+from lib.import_utils import load_module_from_path
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import EventSink, ignore_event
-from lib.update.net import fetch_json, github_raw_url
+from lib.update.net import fetch_json, fetch_url, github_raw_url
 from lib.update.nix import (
     _build_package_path_attr_expr,
 )
@@ -21,6 +23,11 @@ from lib.update.updaters.metadata import require_metadata_str
 
 if TYPE_CHECKING:
     import aiohttp
+
+_RUNTIME_CLOSURE = load_module_from_path(
+    Path(__file__).with_name("ensure_runtime_closure.py"),
+    "nixcfg_bb_ensure_runtime_closure",
+)
 
 
 @register_updater
@@ -129,6 +136,32 @@ class BbUpdater(GitHubReleaseUpdater):
             )
             raise RuntimeError(msg)
         electron_version = self._electron_version(desktop_manifest)
+        lock_payload = await fetch_url(
+            session,
+            github_raw_url(
+                self.GITHUB_OWNER,
+                self.GITHUB_REPO,
+                commit,
+                "pnpm-lock.yaml",
+            ),
+            config=self.config,
+        )
+        try:
+            lock_text = lock_payload.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            msg = f"bb {version} pnpm lock is not valid UTF-8"
+            raise RuntimeError(msg) from exc
+        try:
+            _RUNTIME_CLOSURE.assert_runtime_closure_applicable(
+                desktop_manifest,
+                lock_text,
+            )
+        except _RUNTIME_CLOSURE.RuntimeClosureError as exc:
+            msg = (
+                f"bb {version} cannot keep the SQLite loader and logger closure "
+                f"as explicit desktop roots: {exc}"
+            )
+            raise RuntimeError(msg) from exc
         return VersionInfo(
             version=version,
             metadata={

@@ -12,15 +12,18 @@ import pytest
 from nix_manipulator.expressions.assertion import Assertion
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
+from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance
+from lib.tests._darwin_signing import indented_string_interpolations
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     expect_binding,
     parse_nix_expr,
 )
+from lib.tests._shell_ast import command_texts, indented_string_body, parse_shell
 from lib.tests._updater_helpers import (
     collect_events,
     install_fixed_hash_stream,
@@ -38,6 +41,29 @@ from lib.update.paths import REPO_ROOT
 from lib.update.updaters import UpdateContext, VersionInfo
 
 _PACKAGE_DIR = REPO_ROOT / "packages/bb"
+_RUNTIME_CLOSURE_LOCK = """\
+lockfileVersion: '9.0'
+
+importers:
+
+  apps/desktop:
+    dependencies:
+    devDependencies:
+      electron:
+        specifier: 41.7.0
+        version: 41.7.0
+
+packages:
+
+  bindings@1.5.0:
+    resolution: {integrity: sha512-loader}
+
+  file-uri-to-path@1.0.0:
+    resolution: {integrity: sha512-loader}
+
+  wrappy@1.0.2:
+    resolution: {integrity: sha512-logger}
+"""
 _COMMIT = "45145e51af36b4bd1346a9d2e73d7612d250ba4f"
 _SRC_HASH = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
 _NPM_DEPS_HASH = "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="
@@ -312,11 +338,45 @@ def test_bb_package_patches_the_main_process_away_from_safe_storage() -> None:
         [
           ./patches/nix-managed-updates.patch
           ./patches/nix-managed-connect-credential-cache.patch
-          ./patches/nix-managed-runtime-closure.patch
           ./patches/pnpm-10-hoisted-runtime-manifest.patch
         ]
         """,
     )
+
+
+def _phase(arguments: AttributeSet, name: str) -> IndentedString:
+    return expect_instance(expect_binding(arguments.values, name).value, IndentedString)
+
+
+def _interpolation_text(phase: IndentedString) -> list[str]:
+    return [
+        expression.rebuild() for expression in indented_string_interpolations(phase)
+    ]
+
+
+def test_bb_build_roots_the_runtime_closure_and_accepts_the_upstream_sqlite_fix() -> (
+    None
+):
+    """The derivation must run both source repairs, not a neighbor-context diff."""
+    package = expect_instance(
+        parse_nix_expr((_PACKAGE_DIR / "default.nix").read_text(encoding="utf-8")),
+        FunctionDefinition,
+    )
+    platform_assertion = expect_instance(package.output, Assertion)
+    derivation = expect_instance(platform_assertion.body, FunctionCall)
+    arguments = expect_instance(derivation.argument, AttributeSet)
+    post_patch = _phase(arguments, "postPatch")
+    build_phase = _phase(arguments, "buildPhase")
+
+    assert "./ensure_runtime_closure.py" in _interpolation_text(post_patch)
+    build_paths = _interpolation_text(build_phase)
+    assert "./apply_better_sqlite3_abi_patch.py" in build_paths
+    assert "./patches/better-sqlite3-electron-44-v8-abi.patch" in build_paths
+
+    post_shell = parse_shell(indented_string_body(post_patch.rebuild()))
+    build_shell = parse_shell(indented_string_body(build_phase.rebuild()))
+    assert any("--source ." in command for command in command_texts(post_shell))
+    assert any("--module" in command for command in command_texts(build_shell))
 
 
 def test_bb_normalizes_pnpm_patch_hashes_before_dependency_fetch_and_build() -> None:
@@ -480,11 +540,19 @@ def test_bb_update_pins_release_source_and_pnpm_closure(
         if url.endswith("apps/desktop/package.json"):
             return {
                 "version": "0.38.0",
+                "dependencies": {},
                 "devDependencies": {"electron": _ELECTRON_VERSION},
             }
         return {"version": "0.38.0"}
 
+    lock_urls: list[str] = []
+
+    async def _fetch_url(_session: object, url: str, **_kwargs: object) -> bytes:
+        lock_urls.append(url)
+        return _RUNTIME_CLOSURE_LOCK.encode()
+
     monkeypatch.setattr(module, "fetch_json", _fetch_json, raising=False)
+    monkeypatch.setattr(module, "fetch_url", _fetch_url, raising=False)
     monkeypatch.setattr(
         "lib.update.nix.get_current_nix_platform",
         lambda: "aarch64-darwin",
@@ -508,6 +576,9 @@ def test_bb_update_pins_release_source_and_pnpm_closure(
     assert manifest_urls == [
         github_raw_url("get-bb", "bb", _COMMIT, "apps/desktop/package.json"),
         github_raw_url("get-bb", "bb", _COMMIT, "packages/bb-app/package.json"),
+    ]
+    assert lock_urls == [
+        github_raw_url("get-bb", "bb", _COMMIT, "pnpm-lock.yaml"),
     ]
     assert len(calls) == 2
     assert_nix_ast_equal(
@@ -675,6 +746,80 @@ def test_bb_requires_electron_version_when_building_source_result() -> None:
         module.BbUpdater().build_result(
             VersionInfo(version="0.38.0", metadata={"commit": _COMMIT}),
             [HashEntry.create("srcHash", _SRC_HASH)],
+        )
+
+
+def test_bb_rejects_release_that_cannot_root_the_runtime_closure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pins preparation must reject a lock that no longer resolves the roots."""
+    module = _load_module()
+    monkeypatch.setattr(
+        "lib.update.updaters.github_release.fetch_github_api",
+        _github_release_api(),
+    )
+
+    async def _fetch_json(
+        _session: object,
+        url: str,
+        **_kwargs: object,
+    ) -> object:
+        if url.endswith("apps/desktop/package.json"):
+            return {
+                "version": "0.38.0",
+                "dependencies": {},
+                "devDependencies": {"electron": _ELECTRON_VERSION},
+            }
+        return {"version": "0.38.0"}
+
+    async def _fetch_url(_session: object, _url: str, **_kwargs: object) -> bytes:
+        return b"lockfileVersion: '9.0'\n"
+
+    monkeypatch.setattr(module, "fetch_json", _fetch_json, raising=False)
+    monkeypatch.setattr(module, "fetch_url", _fetch_url, raising=False)
+
+    with pytest.raises(RuntimeError, match="explicit desktop roots"):
+        run_async(
+            module.BbUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
+
+
+def test_bb_rejects_a_pnpm_lock_that_is_not_utf8(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A binary lock is an upstream-shape failure, not a decode surprise later."""
+    module = _load_module()
+    monkeypatch.setattr(
+        "lib.update.updaters.github_release.fetch_github_api",
+        _github_release_api(),
+    )
+
+    async def _fetch_json(
+        _session: object,
+        url: str,
+        **_kwargs: object,
+    ) -> object:
+        if url.endswith("apps/desktop/package.json"):
+            return {
+                "version": "0.38.0",
+                "dependencies": {},
+                "devDependencies": {"electron": _ELECTRON_VERSION},
+            }
+        return {"version": "0.38.0"}
+
+    async def _fetch_url(_session: object, _url: str, **_kwargs: object) -> bytes:
+        return b"\xff"
+
+    monkeypatch.setattr(module, "fetch_json", _fetch_json, raising=False)
+    monkeypatch.setattr(module, "fetch_url", _fetch_url, raising=False)
+
+    with pytest.raises(RuntimeError, match="UTF-8"):
+        run_async(
+            module.BbUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
         )
 
 
