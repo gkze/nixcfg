@@ -6,6 +6,7 @@ from pathlib import Path
 from textwrap import dedent
 
 import pytest
+import yaml
 
 from lib.tests._updater_helpers import load_repo_module
 
@@ -181,26 +182,13 @@ def _write_tree(root: Path, *, manifest: str, lock: str) -> None:
     (root / "pnpm-lock.yaml").write_text(lock, encoding="utf-8")
 
 
-def _dependency_names(lock_text: str) -> list[str]:
-    names: list[str] = []
-    in_dependencies = False
-    for line in lock_text.splitlines():
-        if line == "    dependencies:":
-            in_dependencies = True
-            continue
-        if (
-            in_dependencies
-            and line.startswith("    ")
-            and not line.startswith("      ")
-        ):
-            break
-        if (
-            in_dependencies
-            and line.startswith("      ")
-            and not line.startswith("        ")
-        ):
-            names.append(line.removeprefix("      ").removesuffix(":"))
-    return names
+def _desktop_dependencies(lock_text: str) -> dict[str, dict[str, str]]:
+    loaded = yaml.safe_load(lock_text)
+    dependencies = loaded["importers"]["apps/desktop"]["dependencies"]
+    if not isinstance(dependencies, dict):
+        msg = "desktop dependencies did not parse as a mapping"
+        raise AssertionError(msg)
+    return dependencies
 
 
 @pytest.mark.parametrize("version", ["0.48.1", "0.49.0"])
@@ -227,23 +215,22 @@ def test_runtime_closure_roots_apply_to_pinned_and_candidate_releases(
     assert rooted["dependencies"]["file-uri-to-path"] == "1.0.0"
     assert rooted["dependencies"]["wrappy"] == "1.0.2"
     lock_text = (tmp_path / "pnpm-lock.yaml").read_text(encoding="utf-8")
-    assert _dependency_names(lock_text) == [
-        "'@bb/connect-client'",
-        "'@bb/host-daemon-contract'",
-        "'@bb/process-utils'",
-        "bb-app",
-        "bindings",
-        "electron-updater",
-        "file-uri-to-path",
-        "semver",
-        "wrappy",
-        "ws",
-        "zod",
-    ]
-    for line in release["lock_dependencies"].splitlines():
-        preserved = line.strip()
-        if preserved.startswith(("specifier:", "version:")):
-            assert preserved in lock_text
+    original = yaml.safe_load(lock)
+    rewritten = yaml.safe_load(lock_text)
+    original_dependencies = original["importers"]["apps/desktop"]["dependencies"]
+    expected = dict(original_dependencies)
+    for name, version_pin in (
+        ("bindings", "1.5.0"),
+        ("file-uri-to-path", "1.0.0"),
+        ("wrappy", "1.0.2"),
+    ):
+        expected[name] = {"specifier": version_pin, "version": version_pin}
+    expected = {key: expected[key] for key in sorted(expected)}
+    desktop = _desktop_dependencies(lock_text)
+    assert desktop == expected
+    assert list(desktop) == list(expected)
+    original["importers"]["apps/desktop"]["dependencies"] = desktop
+    assert rewritten == original
     before = lock_text
     module.ensure_runtime_closure(tmp_path)
     assert (tmp_path / "pnpm-lock.yaml").read_text(encoding="utf-8") == before
@@ -506,6 +493,26 @@ def test_sqlite_abi_patch_applies_to_12_10_and_accepts_12_11(
     assert module.apply_electron_44_abi_patch(already, patch) == "already-present"
     assert {path: (already / path).read_bytes() for path in fixed} == before
     assert module.main(["--module", str(already), "--patch", str(patch)]) == 0
+
+
+def test_sqlite_abi_patch_rejects_a_partially_fixed_module(tmp_path: Path) -> None:
+    """One already-fixed file does not prove the Electron 44 fix is present."""
+    module = _abi()
+    patch = Path("packages/bb/patches/better-sqlite3-electron-44-v8-abi.patch")
+    patch_text = patch.read_text(encoding="utf-8")
+    files = _files_from_patch(patch_text, side="old")
+    files["src/util/helpers.cpp"] = _files_from_patch(patch_text, side="new")[
+        "src/util/helpers.cpp"
+    ]
+    source = tmp_path / "partial"
+    _write_module(source, files)
+    before = {path: (source / path).read_bytes() for path in files}
+
+    with pytest.raises(module.BetterSqliteAbiError, match="neither"):
+        module.apply_electron_44_abi_patch(source, patch)
+
+    assert {path: (source / path).read_bytes() for path in files} == before
+    assert not list(source.rglob("*.rej"))
 
 
 def test_sqlite_abi_patch_rejects_an_unrelated_module(tmp_path: Path) -> None:

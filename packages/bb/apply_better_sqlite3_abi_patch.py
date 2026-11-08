@@ -3,9 +3,13 @@
 better-sqlite3 12.10.0 calls ``v8::External::New`` without the tagged slot
 Electron 44 requires. The checked-in patch is that fix. 12.11.1 already
 contains the same macros, so applying it again is a reversed patch and the
-build stops. A later source that matches neither shape is still an error:
-skipping the patch there would compile the pre-fix module or ignore an
-unreviewed ABI.
+build stops. A later source that matches neither the complete preimage nor
+the complete fix is still an error: skipping the patch there would compile
+the pre-fix module or ignore an unreviewed ABI.
+
+``patch --batch`` may discard ``--reverse`` when only some files already
+match the fix. ``--force`` keeps the requested direction, so a mixed tree
+fails closed instead of being treated as already fixed.
 """
 
 import argparse
@@ -31,7 +35,7 @@ def _patch_command(
         "-d",
         str(module),
         "-p1",
-        "--batch",
+        "--force",
         "-i",
         str(patch),
         "--reverse" if reverse else "--forward",
