@@ -1,7 +1,6 @@
 """Tests for bb's runtime-closure roots and the Electron 44 SQLite ABI patch."""
 
 import json
-import shutil
 import subprocess
 from pathlib import Path
 from textwrap import dedent
@@ -528,7 +527,10 @@ def test_sqlite_abi_patch_rejects_an_unrelated_module(tmp_path: Path) -> None:
     assert not list(source.rglob("*.rej"))
 
 
-def test_sqlite_abi_patch_rejects_missing_inputs(tmp_path: Path) -> None:
+def test_sqlite_abi_patch_rejects_missing_inputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Missing module, patch, or patch(1) fails before any source edit."""
     module = _abi()
     patch = tmp_path / "missing.patch"
@@ -542,19 +544,16 @@ def test_sqlite_abi_patch_rejects_missing_inputs(tmp_path: Path) -> None:
         module.apply_electron_44_abi_patch(module_dir, patch)
 
     patch.write_text("diff --git a/a b/a\n", encoding="utf-8")
-    original_which = shutil.which
 
-    def _hide_patch(name: str) -> str | None:
-        if name == "patch":
-            return None
-        return original_which(name)
+    def _hide_patch(cmd: str, *_args: object, **_kwargs: object) -> None:
+        if cmd != "patch":
+            msg = f"unexpected which({cmd})"
+            raise AssertionError(msg)
 
-    shutil.which = _hide_patch  # type: ignore[method-assign]
-    try:
-        with pytest.raises(module.BetterSqliteAbiError, match="not on PATH"):
-            module.apply_electron_44_abi_patch(module_dir, patch)
-    finally:
-        shutil.which = original_which  # type: ignore[method-assign]
+    monkeypatch.setattr(module.shutil, "which", _hide_patch)
+
+    with pytest.raises(module.BetterSqliteAbiError, match="not on PATH"):
+        module.apply_electron_44_abi_patch(module_dir, patch)
 
 
 def test_sqlite_abi_patch_reports_a_dry_run_that_does_not_apply(
