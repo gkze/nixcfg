@@ -1,6 +1,6 @@
-# Regenerable tool output on argus lives on the Build volume: an APFS sparse
-# bundle (~/Build.sparsebundle) that the user LaunchAgent
-# com.gkze.build-volume attaches at login, kept out of Spotlight by the host's
+# Regenerable tool output on every George host lives on the Build volume: an
+# APFS sparse bundle (~/Build.sparsebundle) that build-volume-attach.nix creates
+# and attaches, kept out of Spotlight by spotlight.nix's
 # `darwinDefaults.spotlight.unindexedVolumes`. Caches and build intermediates
 # go there, plus bun's whole install root (see build-volume-env.nix). Other
 # installed tools (mise installs, uv tools and Pythons, npm globals, cargo and

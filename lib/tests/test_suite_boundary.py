@@ -166,6 +166,7 @@ def test_configuration_references_flag_configuration_data(snippet: str) -> None:
         'REPO_ROOT / "lib" / "mac-apps.nix"',
         'REPO_ROOT / "home/george/bin/git-ignore"',
         'REPO_ROOT / "darwin/george/build-volume-bun-migration.sh"',
+        'REPO_ROOT / "darwin/george/build-volume-attach.sh"',
         '"darwin/arm64/Factory-0.154.0-arm64.dmg"',
         '"darwinDefaults"',
     ],

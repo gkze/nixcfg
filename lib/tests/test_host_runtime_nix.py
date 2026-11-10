@@ -423,6 +423,101 @@ def test_bun_migration_guard_fails_when_directory_inspection_fails(
     assert (home / ".bun/global-cli").read_text(encoding="utf-8") == "source"
 
 
+_BUILD_VOLUME_ATTACH_STUBS = r"""
+/usr/bin/hdiutil() {
+  printf 'hdiutil' >> "$CALL_LOG"
+  for argument in "$@"; do
+    printf ' <%s>' "$argument" >> "$CALL_LOG"
+  done
+  printf '\n' >> "$CALL_LOG"
+  if [ "$1" = "$FAIL_VERB" ]; then
+    return 23
+  fi
+}
+/usr/sbin/diskutil() { :; }
+/usr/bin/plutil() { printf '%s' "$CURRENT_MOUNT_POINT"; }
+"""
+
+
+def _run_build_volume_attach(
+    tmp_path: Path,
+    *,
+    bundle_exists: bool,
+    current_mount_point: str = "/Volumes/Build",
+    fail_verb: str = "",
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    """Source the real attach fragment against stubbed disk-image commands."""
+    bundle = tmp_path / "Build Volume.sparsebundle"
+    if bundle_exists:
+        bundle.mkdir()
+    call_log = tmp_path / "calls"
+    script = (REPO_ROOT / "darwin/george/build-volume-attach.sh").read_text(
+        encoding="utf-8"
+    )
+    result = _run_owned_shell(
+        _BUILD_VOLUME_ATTACH_STUBS + "\n" + script,
+        env=os.environ
+        | {
+            "CALL_LOG": str(call_log),
+            "CURRENT_MOUNT_POINT": current_mount_point,
+            "FAIL_VERB": fail_verb,
+            "buildVolumeBundle": str(bundle),
+            "buildVolumeMaxSize": "200g",
+            "buildVolumeMountPoint": "/Volumes/Build",
+            "buildVolumeName": "Build",
+        },
+        check=False,
+    )
+    calls = (
+        call_log.read_text(encoding="utf-8").splitlines() if call_log.exists() else []
+    )
+    return result, calls
+
+
+@pytest.mark.parametrize("bundle_exists", [False, True])
+def test_build_volume_attach_creates_missing_bundle_then_attaches(
+    tmp_path: Path, bundle_exists: bool
+) -> None:
+    """A new host gets its bundle created once; an existing bundle is reused."""
+    result, calls = _run_build_volume_attach(tmp_path, bundle_exists=bundle_exists)
+
+    bundle = tmp_path / "Build Volume.sparsebundle"
+    create = (
+        "hdiutil <create> <-quiet> <-type> <SPARSEBUNDLE> <-fs> <APFS> "
+        f"<-volname> <Build> <-size> <200g> <{bundle}>"
+    )
+    attach = f"hdiutil <attach> <-quiet> <{bundle}>"
+    assert result.returncode == 0
+    assert calls == ([attach] if bundle_exists else [create, attach])
+
+
+def test_build_volume_attach_rejects_a_shadowed_mount_point(tmp_path: Path) -> None:
+    """A volume mounted anywhere but the expected path must fail activation."""
+    result, _ = _run_build_volume_attach(
+        tmp_path, bundle_exists=True, current_mount_point="/"
+    )
+
+    assert result.returncode == 1
+    assert "/Volumes/Build is not its mount point" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("bundle_exists", "fail_verb", "expected_calls"),
+    [(False, "create", 1), (True, "attach", 1)],
+)
+def test_build_volume_attach_stops_on_hdiutil_failure(
+    tmp_path: Path, bundle_exists: bool, fail_verb: str, expected_calls: int
+) -> None:
+    """A failed create never reaches attach, and a failed attach is not success."""
+    result, calls = _run_build_volume_attach(
+        tmp_path, bundle_exists=bundle_exists, fail_verb=fail_verb
+    )
+
+    assert result.returncode == 23
+    assert len(calls) == expected_calls
+    assert calls[0].startswith(f"hdiutil <{fail_verb}>")
+
+
 @pytest.mark.nix_eval(
     reason="Render the actual login setter; Bash must verify its own fail-fast behavior"
 )
@@ -529,7 +624,7 @@ def test_spotlight_exclusions_require_exact_mounts_and_preserve_quoting(
 
 
 @pytest.mark.nix_eval(
-    reason="Render the actual Argus preActivation fragment for native shell state tests"
+    reason="Render the actual host preActivation fragment for native shell state tests"
 )
 @pytest.mark.parametrize(
     ("root_status", "data_status", "expected_paths"),
@@ -548,7 +643,7 @@ def test_spotlight_exclusions_require_exact_mounts_and_preserve_quoting(
         ),
     ],
 )
-def test_argus_restores_only_required_spotlight_stores(
+def test_host_restores_only_required_spotlight_stores(
     tmp_path: Path,
     root_status: str,
     data_status: str,
@@ -591,9 +686,9 @@ def test_argus_restores_only_required_spotlight_stores(
 
 
 @pytest.mark.nix_eval(
-    reason="Render the actual Argus fragment to verify fatal restoration semantics"
+    reason="Render the actual host fragment to verify fatal restoration semantics"
 )
-def test_argus_spotlight_restore_failure_stops_activation(tmp_path: Path) -> None:
+def test_host_spotlight_restore_failure_stops_activation(tmp_path: Path) -> None:
     """A failed required-store restore must not reach the Homebrew consumer."""
     restoration = expect_instance(_spotlight_fixture()["restoration"], str)
     call_log = tmp_path / "calls"

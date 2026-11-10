@@ -108,14 +108,17 @@ platform-specific drift.
 Each host file composes profiles from `darwin/george/profiles.nix` with
 `profiles.mkHost` and lists only its own differences:
 
-- `darwin/argus.nix`: `georgeBase` and `townWorkstation`, plus the Spotlight
-  indexing switch, the build-volume launchd job, and local-only build slots
-  (the rocinante build machine and substituter are disabled while it is
-  offline)
+- `darwin/argus.nix`: `georgeBase` and `townWorkstation` (the rocinante build
+  machine and substituter are disabled while it is offline; the file notes
+  how to restore them)
 - `darwin/rocinante.nix`: `georgeBase`, plus the personal Dock
 - `darwin/zeus.nix`: `georgeBase` and `townWorkstation`, plus the computer name
 
-`georgeBase` holds the settings that all of George's machines share.
+`georgeBase` holds the settings that all of George's machines share,
+including the Build volume: the host creates `~/Build.sparsebundle` on first
+activation, attaches it at activation and at login, keeps it out of Spotlight
+while the system stores stay indexed, and points tool caches and bun at it. It
+also trusts george so per-invocation `--builders` work.
 `townWorkstation` adds the work profile, the Town Dock, and the Town tools.
 Later profiles override scalar arguments and append to the module lists.
 

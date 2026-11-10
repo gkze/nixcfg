@@ -28,10 +28,23 @@ rec {
     brewAppsModule = ./brew-apps.nix;
     extraHomeModules = [
       "${slib.modulesPath}/home/darwin-closure-priority.nix"
+      ./build-volume.nix
     ];
     extraSystemModules = [
       ./caches.nix
       ./locale-launchd.nix
+      # Regenerable tool output on the Build volume, which stays out of
+      # Spotlight while the system stores stay indexed for App Store tooling.
+      ./build-volume-attach.nix
+      ./build-volume-launchd.nix
+      ./spotlight.nix
+      {
+        # `builders` is a restricted setting: the daemon ignores a
+        # client-supplied one unless the connecting user is trusted. Listing
+        # george here is what makes per-invocation builders work, e.g.
+        # `nh darwin switch . -- --builders 'ssh-ng://...'`.
+        nix.settings.trusted-users = [ "george" ];
+      }
       {
         # Home Manager initializes completion after adding plugin directories to fpath.
         darwinDefaults.zsh.deferCompletionInitToHomeManager = true;

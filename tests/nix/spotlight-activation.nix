@@ -30,10 +30,10 @@ let
     primaryUser = "test";
   };
   volumeNameType = module.options.darwinDefaults.spotlight.unindexedVolumes.type.elemType;
-  argus = import ../../darwin/argus/spotlight.nix { };
+  hostSpotlight = import ../../darwin/george/spotlight.nix { };
 in
 {
   checks = map volumeNameType.check namesToCheck;
   exclusions = module.config.system.activationScripts.postActivation.text;
-  restoration = argus.system.activationScripts.preActivation.text;
+  restoration = hostSpotlight.system.activationScripts.preActivation.text;
 }
