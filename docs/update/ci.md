@@ -88,9 +88,12 @@ unsharded run. It publishes one `prepare-aarch64-darwin` candidate.
 `prepare-arm` and `prepare-x86` still hash every target from the pin, in
 parallel with the Darwin shards. `prepare-merge` folds that Darwin candidate
 with the two Linux candidates, then holds an unmaterialized Superset pin on
-the folded tree. The hold is not applied between those candidates: it
+the folded tree. The Superset hold is not applied between those candidates: it
 rewrites the Superset input in `flake.nix` and `flake.lock`, and an earlier
 rewrite no longer matches the candidate that still has the shared pin.
+Quarantine holds work the other way: before each pairwise merge, both folds
+restore every candidate's quarantine hold in every candidate (see
+[Package quarantine](#package-quarantine)).
 Each native job keeps the release metadata that `prepare-pins` selected.
 
 ### Validation
@@ -164,6 +167,18 @@ Plan, validate, coverage, and certify all see that one tree, with the failed
 package held at its last-good pin. The other packages proceed. A run that
 only quarantined packages is a successful publish. The PR body states the
 count and each package's phase.
+
+A package quarantined on one platform is held on every platform. Each
+candidate records its hold: the files of its failed and withheld packages,
+both flake files after a whole-file revert, and the lock-only inputs it rolled
+back. `prepare-darwin-merge` and `prepare-merge` restore the union of those
+holds in every candidate, rolling the inputs back with the same lock policy
+and renderer, before the 3-way merge. Without the hold, a restored file equals
+the baseline ancestor, so another platform's bump of the same package would
+win with only that platform's hashes. A rolled-back input sits beside the
+pin's other bumps, so `flake.lock` conflicted instead (Update 42578831763:
+opencode quarantined on Darwin and arm, updated on x86). Edits a hold does not
+explain still fail closed.
 
 A checkPhase or build failure discovered only during validation cannot rewrite
 that sealed tree in the same run. The validation job still fails, the publish

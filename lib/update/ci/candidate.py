@@ -20,6 +20,7 @@ import typer
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from lib.diagnostics import redact_urls
+from lib.nix.models.flake_lock import FlakeLock
 from lib.nix.models.sources import HashCollection, HashEntryMergeKey, SourceEntry
 from lib.system_policy import supported_systems
 from lib.update import cli as update_cli
@@ -129,6 +130,7 @@ from lib.update.ci.warmup import (
 from lib.update.cli_options import RepairAgent, UpdateOptions
 from lib.update.derivation_validation import root_closure_check_attr
 from lib.update.io import atomic_write_text
+from lib.update.lock_policy import LockRollback, render_lock, rollback_input_locks
 from lib.update.nix import get_current_nix_platform
 from lib.update.paths import get_repo_root
 from lib.update.persistence import IsolatedUpdateWorkspace, planned_update_paths
@@ -143,6 +145,7 @@ from lib.update.quarantine import (
     IssueSyncAction,
     OpenQuarantineIssue,
     QuarantineEntry,
+    QuarantineHold,
     QuarantineListTruncatedError,
     QuarantinePhase,
     QuarantineRotError,
@@ -666,6 +669,46 @@ def _merged_package_sources(path: str, first: bytes, second: bytes) -> bytes | N
     ).encode()
 
 
+def _held_index_files(
+    files: dict[str, _IndexBlob],
+    base: dict[str, _IndexBlob],
+    hold: QuarantineHold,
+) -> dict[str, _IndexBlob]:
+    """Return *files* with every quarantined path and lock input at the baseline.
+
+    Without this, the baseline ancestor hides a quarantine revert. The
+    platform that failed a package restored its files, which then equal the
+    ancestor, so the 3-way merge takes another platform's bump of that
+    package with only that platform's hashes. ``flake.lock`` also carries
+    the pin job's other input bumps, so a rolled-back input made both sides
+    differ from the ancestor and the merge raised instead (Update
+    42578831763: opencode quarantined on Darwin and arm, updated on x86).
+
+    Lock inputs are rolled back with the same graph policy and renderer the
+    prepare used, so a held lock matches the quarantining platform's bytes.
+    Anything the hold does not explain still reaches the 3-way merge.
+    """
+    held = dict(files)
+    for path in hold.paths:
+        blob = base.get(path)
+        if blob is None:
+            held.pop(path, None)
+        else:
+            held[path] = blob
+    lock = held.get("flake.lock")
+    base_lock = base.get("flake.lock")
+    if not hold.inputs or lock is None or base_lock is None or lock == base_lock:
+        return held
+    rollback = rollback_input_locks(
+        FlakeLock.model_validate_json(base_lock.content),
+        FlakeLock.model_validate_json(lock.content),
+        frozenset(hold.inputs),
+    )
+    if isinstance(rollback, LockRollback):
+        held["flake.lock"] = _IndexBlob(lock.mode, render_lock(rollback.lock).encode())
+    return held
+
+
 def _merged_index_files(
     base: dict[str, _IndexBlob],
     left: dict[str, _IndexBlob],
@@ -712,7 +755,9 @@ def merge_prepared_candidates(
 ) -> Candidate:
     """Merge two same-baseline native extensions into one candidate.
 
-    Overlapping file edits with different contents fail closed, except
+    Both candidates' quarantine holds are applied to both sides first, so a
+    package quarantined on either platform stays at its last-good pin.
+    Overlapping file edits with different contents then fail closed, except
     per-package ``sources.json`` files whose only disagreements are
     ``drvHash`` or complementary native hashes. The Superset pin hold runs
     on this completed pair. A fold of more than two extensions merges every
@@ -750,12 +795,13 @@ def _merge_native_extensions(
         if existing is not None and existing != value:
             msg = f"Conflicting resolution for {name}"
             raise ValueError(msg)
+    hold = left.quarantine_hold.union(right.quarantine_hold)
     with IsolatedUpdateWorkspace(repo) as workspace:
         base = _index_files(workspace.root)
     merged_files = _merged_index_files(
         base,
-        _candidate_index_files(left, repo),
-        _candidate_index_files(right, repo),
+        _held_index_files(_candidate_index_files(left, repo), base, hold),
+        _held_index_files(_candidate_index_files(right, repo), base, hold),
     )
     tree, patch = _materialize_merged_index(repo, base, merged_files)
     quarantines = merge_quarantine_entries((
@@ -778,6 +824,7 @@ def _merge_native_extensions(
         prepared=True,
         patch=patch,
         quarantines=quarantines,
+        quarantine_hold=hold,
     )
 
 
@@ -926,6 +973,10 @@ def merge_same_platform_partials(
     bytes, shards 1-4 kept the pin's blank. Against the baseline the blank
     looked like the only edit and won, so the fold lost the Darwin hash.
     ``None`` means the shards extended the baseline itself.
+
+    Every shard's quarantine hold applies to every shard. Two shards that
+    rolled back different lock inputs would otherwise both edit
+    ``flake.lock`` against the seed and conflict.
     """
     if len(candidates) != len(coverages):
         msg = "Each prepare shard needs its coverage sidecar"
@@ -943,6 +994,9 @@ def merge_same_platform_partials(
     if seed is not None and (not seed.prepared or seed.base_tree != first.base_tree):
         msg = "Prepare shards must extend one prepared seed on their baseline"
         raise ValueError(msg)
+    hold = QuarantineHold()
+    for candidate in candidates:
+        hold = hold.union(candidate.quarantine_hold)
     with IsolatedUpdateWorkspace(repo) as workspace:
         base = _index_files(workspace.root)
     ancestor = base if seed is None else _candidate_index_files(seed, repo)
@@ -951,7 +1005,7 @@ def merge_same_platform_partials(
         merged_files = _merged_index_files(
             ancestor,
             merged_files,
-            _candidate_index_files(candidate, repo),
+            _held_index_files(_candidate_index_files(candidate, repo), base, hold),
         )
     tree, patch = _materialize_merged_index(repo, base, merged_files)
     return Candidate(
@@ -975,6 +1029,7 @@ def merge_same_platform_partials(
         quarantines=merge_quarantine_entries(
             tuple(entry for candidate in candidates for entry in candidate.quarantines)
         ),
+        quarantine_hold=hold,
     )
 
 
@@ -1026,6 +1081,8 @@ def fold_prepared_candidates(
 ) -> Candidate:
     """Fold same-baseline native extensions left-to-right.
 
+    Each pairwise merge carries the union of quarantine holds forward, so a
+    hold recorded by the first candidate still applies to the last.
     File conflicts are resolved before the Superset pin hold. Holding inside
     each pair rewrites ``flake.nix`` while a later candidate still has that
     pin, so the next whole-file merge rejects edits that agreed

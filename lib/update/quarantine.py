@@ -21,7 +21,7 @@ import os
 import re
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -113,6 +113,45 @@ class QuarantineEntry(BaseModel):
             msg = "quarantine since must be timezone-aware"
             raise ValueError(msg)
         return value.astimezone(UTC)
+
+
+class QuarantineHold(BaseModel):
+    """Baseline state one preparation restored for its quarantined packages.
+
+    ``paths`` are the repository-relative files of failed and withheld
+    packages, plus ``flake.nix`` and ``flake.lock`` when the flake files were
+    reverted whole. ``inputs`` are lock-only flake inputs whose root edge and
+    node were rolled back to the baseline lock.
+
+    A package quarantined on one platform cannot promote on another: its
+    hashes would be missing for the platform that failed. Folding native
+    candidates applies the union of every hold to every candidate before the
+    3-way merge. The quarantine entry alone names the package, not the files
+    and lock inputs the prepare restored.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    paths: tuple[str, ...] = ()
+    inputs: tuple[str, ...] = ()
+
+    @field_validator("paths")
+    @classmethod
+    def repository_relative(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        """Reject a path that could name a file outside the repository index."""
+        for raw in value:
+            path = PurePosixPath(raw)
+            if path.is_absolute() or ".." in path.parts or str(path) != raw:
+                msg = f"quarantine hold path must be repository-relative: {raw!r}"
+                raise ValueError(msg)
+        return value
+
+    def union(self, other: QuarantineHold) -> QuarantineHold:
+        """Return both holds as one sorted, duplicate-free hold."""
+        return QuarantineHold(
+            paths=tuple(sorted({*self.paths, *other.paths})),
+            inputs=tuple(sorted({*self.inputs, *other.inputs})),
+        )
 
 
 class OpenQuarantineIssue(BaseModel):
