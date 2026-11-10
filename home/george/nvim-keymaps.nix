@@ -928,7 +928,7 @@ rec {
           }
           {
             key = "q";
-            label = " Quit Neovim";
+            label = "󰅙 Quit Neovim";
             action = "qall";
             desc = "Quit Neovim";
           }
