@@ -201,7 +201,7 @@ flowchart TD
    metadata-only `--validate` cannot be combined with repair. (`repair`,
    `ci.jobs.start_repair`, `lib/tests/test_update_repair.py`)
 
-## CI package quarantine (24–25)
+## CI package quarantine (24–26)
 
 1. **A package failure reverts before the candidate is sealed.** CI
    preparation reverts a failed package and its coupled companions to the
@@ -217,6 +217,18 @@ flowchart TD
    (`cli._quarantine_ci_preparation`, `quarantine.failure_is_infra`,
    `failures.is_package_scoped_daemon_crash`)
 
+1. **A quarantine on one platform holds the package on all of them.** The
+   prepare records its hold on the candidate: the files it restored for
+   failed and withheld packages, both flake files after a whole-file revert,
+   and the lock-only inputs it rolled back. Scratch writes restored only as
+   cleanup are not held. Both native folds restore the union of holds in
+   every candidate before the 3-way merge, so another platform's bump of a
+   quarantined package cannot win against a restore that equals the
+   baseline. Disagreements no hold explains, such as two revisions of one
+   unheld input, still fail closed.
+   (`quarantine.QuarantineHold`, `cli._withhold_failed_clusters`,
+   `ci.candidate._held_index_files`, `lib/tests/test_quarantine_fold.py`)
+
 1. **Quarantine stays visible until the package updates cleanly.** The
    publish job opens or updates one issue per package and closes it only
    when validation reports show that package was attempted and did not
@@ -228,7 +240,7 @@ flowchart TD
    (`quarantine.plan_issue_sync`, `coverage.require_package_inventory`,
    `ci.jobs.sync_quarantines`)
 
-## Reviewed native inventory (26)
+## Reviewed native inventory (27)
 
 1. **Paseo promotion cannot outrun its reviewed native inventory.**
    `PaseoUpdater.fetch_latest` selects the newest published release whose
@@ -240,7 +252,7 @@ flowchart TD
    truncated release list fails closed rather than guessing.
    (`packages/paseo/updater.py`, `packages/paseo/updater_test.py`)
 
-## Superset workspace graph (27)
+## Superset workspace graph (28)
 
 1. **A Superset input bump cannot land ahead of its generated workspace
    graph.** `copyBunWorkspacePathToStore` copies a `bun.nix` workspace only

@@ -60,6 +60,7 @@ jobs:
                   "lib/tests/test_sibling_failfast.py",
                   "lib/tests/test_update_ci.py",
                   "lib/tests/test_update_quarantine.py",
+                  "lib/tests/test_quarantine_fold.py",
                   "lib/tests/test_overlay_lane_updaters.py",
                   "lib/tests/test_reason_package.py",
                   "packages/baseten-switch/updater_test.py",

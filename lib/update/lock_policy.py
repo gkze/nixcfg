@@ -13,6 +13,7 @@ an explicit :class:`RollbackUnavailable` reason instead of a silent no-op, so
 the caller can fall back to the whole-file revert and report why.
 """
 
+import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -110,10 +111,22 @@ def rollback_input_locks(
     return LockRollback(lock=lock, inputs=tuple(rolled))
 
 
+def render_lock(lock: FlakeLock) -> str:
+    """Return ``lock`` as Nix writes it: sorted, two-space-indented JSON.
+
+    A prepare that rolls back an input and a fold that applies the same hold
+    to another platform's lock must produce identical bytes, so both render
+    here.
+    """
+    payload = lock.model_dump(mode="json", by_alias=True, exclude_unset=True)
+    return json.dumps(payload, indent=2, sort_keys=True) + "\n"
+
+
 __all__ = [
     "LockRollback",
     "RollbackUnavailable",
     "prune_unreachable_lock_nodes",
     "reachable_lock_nodes",
+    "render_lock",
     "rollback_input_locks",
 ]

@@ -35,6 +35,7 @@ from lib.update.derivation_validation import (
 from lib.update.events import UpdateEvent
 from lib.update.lock_policy import RollbackUnavailable
 from lib.update.persistence import UpdateValidationSnapshot
+from lib.update.quarantine import QuarantineHold
 from lib.update.refs import FlakeInputRef
 from lib.update.run_monitor import RunMonitor
 from lib.update.run_store import DATABASE_FILE, RunStore
@@ -1220,3 +1221,147 @@ def test_failed_input_rollback_reports_why_it_is_unavailable(
     )
     assert result == RollbackUnavailable(reason)
     assert (path.read_bytes() if path.exists() else None) == before
+
+
+class _HoldWorkspace:
+    """Workspace double that records restores against the current directory."""
+
+    def __init__(self, baseline_lock: bytes | None = None) -> None:
+        self.restored: list[Path] = []
+        self._baseline_lock = baseline_lock
+
+    @property
+    def root(self) -> Path:
+        """Resolve workspace-relative paths against the test's directory."""
+        return Path.cwd()
+
+    def baseline_content(self, _path: object) -> bytes | None:
+        return self._baseline_lock
+
+    def restore_baseline(self, paths: object) -> tuple[Path, ...]:
+        self.restored.extend(Path(str(path)) for path in cast("list[object]", paths))
+        return tuple(self.restored)
+
+
+def _withhold_for_hold(
+    monkeypatch: pytest.MonkeyPatch,
+    workspace: _HoldWorkspace,
+    plan: object,
+    outcome: _RunOutcome,
+    updaters: dict[str, type[object]],
+) -> None:
+    monkeypatch.setattr("lib.update.persistence.planned_update_paths", _planned_paths)
+    monkeypatch.setattr("lib.update.flake.invalidate_flake_lock", lambda: None)
+    _withhold_failed_clusters(
+        cast("Any", workspace),
+        cast("Any", plan),
+        outcome,
+        updaters,
+        OutputOptions(),
+        None,
+    )
+
+
+def test_withhold_records_the_quarantined_files_but_not_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The hold names failed and withheld packages' files, not unowned scratch.
+
+    A scratch write is restored on this platform only. Holding it would make
+    the fold revert another platform's legitimate edit of that path.
+    """
+    monkeypatch.chdir(tmp_path)
+
+    class _Bad(Updater):
+        pass
+
+    class _Child(Updater):
+        companion_of = "bad"
+
+    class _Good(Updater):
+        pass
+
+    outcome = _RunOutcome()
+    outcome.summary.accumulate({"good": "updated", "bad": "error", "child": "updated"})
+    outcome.written_paths = (
+        _source_path("good"),
+        _source_path("child"),
+        tmp_path / "scratch.txt",
+    )
+    workspace = _HoldWorkspace()
+    _withhold_for_hold(
+        monkeypatch,
+        workspace,
+        make_run_plan(source_names=("good", "bad", "child")),
+        outcome,
+        {"good": _Good, "bad": _Bad, "child": _Child},
+    )
+
+    assert outcome.quarantine_hold == QuarantineHold(
+        paths=("packages/bad/sources.json", "packages/child/sources.json")
+    )
+    assert Path("scratch.txt") in workspace.restored
+
+
+def test_withhold_records_a_rolled_back_lock_input(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A per-input rollback is held as that input; the flake files stay unheld."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "flake.lock").write_text(_lock_json(tool_rev="c" * 40))
+
+    class _Nightly(Updater):
+        input_name = "tool"
+
+    outcome = _RunOutcome()
+    outcome.summary.accumulate({"nightly": "error"})
+    monkeypatch.setattr(
+        "lib.update.cli._failed_targets_touched_flake", lambda *_: ("nightly",)
+    )
+    _withhold_for_hold(
+        monkeypatch,
+        _HoldWorkspace(_lock_json().encode()),
+        make_run_plan(source_names=("nightly",)),
+        outcome,
+        {"nightly": _Nightly},
+    )
+
+    assert outcome.quarantine_hold == QuarantineHold(
+        paths=("packages/nightly/sources.json",), inputs=("tool",)
+    )
+    assert (tmp_path / "flake.lock").read_text("utf-8") == _lock_json()
+
+
+def test_withhold_holds_both_flake_files_after_a_whole_file_revert(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A ref input cannot roll back alone, so the hold names both flake files."""
+    monkeypatch.chdir(tmp_path)
+
+    class _ToolSource(Updater):
+        input_name = "tool"
+
+    outcome = _RunOutcome()
+    outcome.summary.accumulate({"tool-src": "error"})
+    monkeypatch.setattr(
+        "lib.update.cli._failed_targets_touched_flake", lambda *_: ("tool-src",)
+    )
+    workspace = _HoldWorkspace(_lock_json().encode())
+    _withhold_for_hold(
+        monkeypatch,
+        workspace,
+        make_run_plan(
+            source_names=("tool-src",),
+            ref_inputs=(FlakeInputRef("tool", "o", "tool", "v1", "github"),),
+        ),
+        outcome,
+        {"tool-src": _ToolSource},
+    )
+
+    assert outcome.quarantine_hold == QuarantineHold(
+        paths=("flake.lock", "flake.nix", "packages/tool-src/sources.json")
+    )
+    assert {Path("flake.nix"), Path("flake.lock")} <= set(workspace.restored)

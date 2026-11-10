@@ -3300,6 +3300,7 @@ def test_pr_quality_certify_covers_prepare_updater_contracts() -> None:
                 pytest_files = values[3:]
                 break
     assert "lib/tests/test_update_quarantine.py" in pytest_files
+    assert "lib/tests/test_quarantine_fold.py" in pytest_files
     assert "lib/tests/test_overlay_lane_updaters.py" in pytest_files
     assert "lib/tests/test_reason_package.py" in pytest_files
     assert "packages/linear-cli/updater_test.py" in pytest_files

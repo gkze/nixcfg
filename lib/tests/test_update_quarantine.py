@@ -49,6 +49,7 @@ from lib.update.quarantine import (
     IssueSyncAction,
     OpenQuarantineIssue,
     QuarantineEntry,
+    QuarantineHold,
     QuarantineListTruncatedError,
     QuarantinePhase,
     QuarantineRotError,
@@ -147,12 +148,14 @@ class _Capture:
         allowed_paths: tuple[Path, ...],
         succeeded: bool,
         quarantines: tuple[QuarantineEntry, ...] = (),
+        quarantine_hold: QuarantineHold | None = None,
     ) -> None:
         self.calls.append({
             "sources": sources,
             "allowed_paths": allowed_paths,
             "succeeded": succeeded,
             "quarantines": quarantines,
+            "quarantine_hold": quarantine_hold,
         })
 
 
@@ -744,6 +747,7 @@ def test_prepare_quarantines_package_failures_and_keeps_infra_fatal(
     ) -> None:
         withheld.append("called")
         outcome.dropped["companion"] = "coupled to demo"
+        outcome.quarantine_hold = QuarantineHold(paths=("packages/demo/sources.json",))
 
     monkeypatch.setattr(update_cli, "_withhold_failed_clusters", withhold)
     monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
@@ -775,6 +779,9 @@ def test_prepare_quarantines_package_failures_and_keeps_infra_fatal(
     assert {entry.package for entry in isolated.quarantines} == {"demo", "companion"}
     assert prep.calls[0]["succeeded"] is True
     assert prep.calls[0]["quarantines"] == isolated.quarantines
+    assert prep.calls[0]["quarantine_hold"] == QuarantineHold(
+        paths=("packages/demo/sources.json",)
+    )
     assert prep.calls[0]["sources"] == ("demo",)
 
     withheld.clear()
@@ -1140,3 +1147,21 @@ def test_jobs_surface_stage_and_publication_count(
     listed = jobs._quarantine_publication_note()
     assert "Quarantined packages held at last-good pins: 2" in listed
     assert "- demo (updater)" in listed
+
+
+def test_quarantine_hold_union_is_sorted_and_duplicate_free() -> None:
+    left = QuarantineHold(paths=("packages/b/sources.json", "a.json"), inputs=("tool",))
+    right = QuarantineHold(paths=("a.json", "flake.lock"), inputs=("other", "tool"))
+    assert left.union(right) == QuarantineHold(
+        paths=("a.json", "flake.lock", "packages/b/sources.json"),
+        inputs=("other", "tool"),
+    )
+
+
+@pytest.mark.parametrize(
+    "raw", ["", "/etc/passwd", "../outside", "packages/../flake.nix", "./a", "a//b"]
+)
+def test_quarantine_hold_rejects_paths_outside_the_index(raw: str) -> None:
+    """A hold restores paths to the baseline, so it may only name index paths."""
+    with pytest.raises(ValidationError, match="repository-relative"):
+        QuarantineHold(paths=(raw,))

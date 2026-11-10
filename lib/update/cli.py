@@ -62,6 +62,7 @@ from lib.update.paths import get_repo_root
 from lib.update.prepare_shard import partition_prepare_targets
 from lib.update.quarantine import (
     QuarantineEntry,
+    QuarantineHold,
     append_job_summary,
     current_run_url,
     entries_for_package_failures,
@@ -610,6 +611,7 @@ class _RunOutcome:
     patch: bytes = b""
     error_messages: dict[str, str] = field(default_factory=dict)
     quarantines: tuple[QuarantineEntry, ...] = ()
+    quarantine_hold: QuarantineHold = field(default_factory=QuarantineHold)
 
 
 def _record_workspace_failure(
@@ -1350,10 +1352,8 @@ def _rollback_failed_input_locks(
         baseline, current, frozenset(candidates)
     )
     if isinstance(result, update_lock_policy.LockRollback):
-        payload = result.lock.model_dump(mode="json", by_alias=True, exclude_unset=True)
-        # Nix writes flake.lock as sorted, two-space-indented JSON.
         lock_path.write_text(
-            json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            update_lock_policy.render_lock(result.lock), encoding="utf-8"
         )
     return result
 
@@ -1453,15 +1453,21 @@ def _withhold_failed_clusters(
         if path not in owned
     }
     revert_sources = [name for name in (*dropped, *failed) if name in source_names]
+    held: set[Path] = set()
     if revert_sources:
-        restore.update(
+        held.update(
             _workspace_relative_paths(
                 workspace.root,
                 update_persistence.planned_update_paths(revert_sources, updaters),
             )
         )
     if touched and global_flake_revert:
-        restore.update(_FLAKE_FILES)
+        held.update(_FLAKE_FILES)
+    restore.update(held)
+    outcome.quarantine_hold = QuarantineHold(
+        paths=tuple(sorted(path.as_posix() for path in held)),
+        inputs=tuple(sorted(rolled_back_inputs)),
+    )
     if restore:
         workspace.restore_baseline(sorted(restore))
         update_flake.invalidate_flake_lock()
@@ -1711,6 +1717,7 @@ async def _gate_candidate(
             allowed_paths=tuple(dict.fromkeys((*allowed_paths, *_FLAKE_FILES))),
             succeeded=quarantines is not None,
             quarantines=() if quarantines is None else quarantines,
+            quarantine_hold=outcome.quarantine_hold,
         )
         return
     if outcome.plan_error is not None or (opts.strict and outcome.had_errors):
