@@ -664,10 +664,10 @@ in
             # TypeScript/JavaScript servers are gated by whether the project
             # provides its own TypeScript (node_modules or a yarn SDK):
             #   - project TS present -> ts_ls drives the project's own tsserver
-            #   - otherwise          -> tsgo (TypeScript 7 "Corsa", the Go port)
-            # typescript-tools.nvim was removed: it cannot drive tsgo (it bridges
-            # the legacy tsserver protocol only) and an explicit tsserver_path
-            # would override project-local TypeScript.
+            #   - otherwise          -> tsc, the TypeScript 7 native server
+            # typescript-tools.nvim was removed: it cannot drive the native
+            # server (it bridges the legacy tsserver protocol only) and an
+            # explicit tsserver_path would override project-local TypeScript.
             ts_ls = {
               enable = true;
               extraOptions.root_dir.__raw = ''
@@ -681,24 +681,21 @@ in
                     local root = vim.fs.root(bufnr, { "tsconfig.json", "jsconfig.json", "package.json", ".git" })
                     on_dir(root or vim.fs.dirname(fname))
                   end
-                  -- No project TypeScript: leave this buffer to tsgo.
+                  -- No project TypeScript: leave this buffer to tsc.
                 end
               '';
             };
-            tsgo = {
+            # nvim-lspconfig 2.12 renamed `tsgo` to `tsc` and deprecated the old
+            # name (`vim.deprecate` fires from `tsgo`'s on_init). Its `tsc`
+            # config also launches `tsc --lsp --stdio` itself and resolves the
+            # project-local binary, so only the attach gate is ours to define.
+            tsc = {
               enable = true;
-              # nixvim's server package map still points at the removed
-              # `typescript-go` alias; nixpkgs renamed it to `typescript`
-              # (TS7 "Corsa"). Its binary is now `tsc` (same Go binary), so
-              # lspconfig's default `tsgo` cmd would not resolve.
-              # LSP mode is `--lsp --stdio`: bare `--stdio` is rejected as an
-              # unknown compiler option (TS5023) and the server exits 1.
+              # Pin the package rather than trusting nixvim's server package
+              # map, which pointed at the removed `typescript-go` alias for
+              # `tsgo`. nixpkgs ships the native compiler as `typescript`, and
+              # its only binary is `tsc`.
               package = pkgs.typescript;
-              extraOptions.cmd = [
-                (lib.getExe' pkgs.typescript "tsc")
-                "--lsp"
-                "--stdio"
-              ];
               extraOptions.root_dir.__raw = ''
                 function(bufnr, on_dir)
                   local fname = vim.api.nvim_buf_get_name(bufnr)
@@ -710,7 +707,7 @@ in
                     local root = vim.fs.root(bufnr, { "tsconfig.json", "jsconfig.json", "package.json", ".git" })
                     on_dir(root or vim.fs.dirname(fname))
                   end
-                  -- Project specifies its own TypeScript: tsgo stays out of the way.
+                  -- Project specifies its own TypeScript: tsc stays out of the way.
                 end
               '';
             };
