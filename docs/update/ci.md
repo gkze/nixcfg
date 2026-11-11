@@ -464,8 +464,22 @@ Store garbage collection cannot explain those failures, and the in-job
 store-fault retries above cannot repair them.
 
 After the updater exits, Darwin preparation queries the kernel log for this VM
-since boot. Preparation fails closed if that query cannot answer. One device
-error makes the runner's store untrusted:
+since boot (`kern.boottime`, capped at 7 hours; the cap alone when the boot
+time is unreadable). Preparation fails closed if `log` is missing or the query
+exits non-zero.
+
+A query that runs past its 300-second budget is not a fault verdict. Update
+42975052923 prepare-darwin-0 ran for 1h35m on a storage-starved VM and
+timed out there, while the other shards answered in seconds. The stage keeps
+the updater's outcome and emits a `Hosted block device check timed out`
+warning. Its store is still unverified, so it writes `device-unverified.log`,
+kills the Cachix daemon without draining it, pushes no prefetch receipts, and
+`flush-cachix` publishes nothing. Paths the daemon uploaded before the check
+stay published, the same exposure a detected device fault has. Only
+preparation degrades this way. A warmup slot exists to publish its paths, so
+a timed-out check there still fails the slot.
+
+One device error makes the runner's store untrusted:
 
 - The job pushes no prefetch receipts. It kills the Cachix daemon without
   draining it, and `flush-cachix` publishes nothing.
