@@ -8,6 +8,10 @@
       inventoryJson
   ),
   sourceOverrides ? { },
+  # Supplied by the caller: a literal lib.fakeHash in a .nix source becomes the
+  # anchor `determinate-nixd fix hashes` attaches every Update fake-hash probe
+  # mismatch to, which reads as a hash-attribution failure.
+  fakeHash,
   fakeHashMode ? false,
   targetSystem ? "aarch64-darwin",
   runtimeVersion ? null,
@@ -45,8 +49,8 @@ let
     stdenv.hostPlatform.system = targetSystem;
     lib = {
       inherit (builtins) concatStringsSep filter;
+      inherit fakeHash;
       escapeShellArg = value: value;
-      fakeHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
       genAttrs =
         names: valueFor:
         builtins.listToAttrs (
