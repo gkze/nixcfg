@@ -13,7 +13,13 @@ let
     fetchSubmodules = false;
     hash = slib.sourceHash "tsgolint" "srcHash";
   };
-  tsgolint = prev.tsgolint.overrideAttrs (_oldAttrs: {
+  # tsgolint 7.0.2006's go.mod requires go >= 1.26.10, newer than nixpkgs'
+  # default Go 1.26.9, and the build pins GOTOOLCHAIN=local. Select the newer
+  # Go 1.27 builder rather than inheriting nixpkgs' default.
+  tsgolintBase = prev.tsgolint.override {
+    buildGoModule = prev.buildGoModule.override { go = prev.go_1_27; };
+  };
+  tsgolint = tsgolintBase.overrideAttrs (_oldAttrs: {
     inherit version src;
     patches = [ ];
     prePatch = "";
