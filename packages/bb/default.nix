@@ -109,6 +109,11 @@ stdenv.mkDerivation {
     npm_config_build_from_source = "true";
     npm_config_manage_package_manager_versions = "false";
     npm_config_node_linker = "hoisted";
+    # pnpm 10 races hoisted-copy renames against patchedDependencies' chdir
+    # and against each other (pnpm/pnpm#13627, pnpm/pnpm#12880), failing
+    # `pnpm install` with ERR_PNPM_ENOENT. Building one dependency at a time
+    # serializes both. Drop this once pnpm is >= 11.25.
+    npm_config_child_concurrency = "1";
   };
 
   prePatch = ''

@@ -26,6 +26,13 @@ _ELECTRON_44_REMOVED_MACHOS = (
 _BLE_SCANNER_ADDED_MACHOS = ("Contents/Resources/bin/cable_ble_scanner",)
 _BLE_SCANNER_FIRST_VERSION = (2, 28, 2)
 
+# 2.31.0 is the first audited release whose Electron framework ships
+# Chromium's app_shim_loader helper (2.28.2 does not).
+_APP_SHIM_LOADER_ADDED_MACHOS = (
+    "Contents/Frameworks/Electron Framework.framework/Versions/A/Helpers/app_shim_loader",
+)
+_APP_SHIM_LOADER_FIRST_VERSION = (2, 31, 0)
+
 
 def _expected_machos(app_version: str) -> tuple[str, ...]:
     """Pin the audited Mach-O inventory for the release generation at hand."""
@@ -37,6 +44,10 @@ def _expected_machos(app_version: str) -> tuple[str, ...]:
         )
     if version_parts >= _BLE_SCANNER_FIRST_VERSION:
         labels = tuple(sorted((*labels, *_BLE_SCANNER_ADDED_MACHOS), key=os.fsencode))
+    if version_parts >= _APP_SHIM_LOADER_FIRST_VERSION:
+        labels = tuple(
+            sorted((*labels, *_APP_SHIM_LOADER_ADDED_MACHOS), key=os.fsencode)
+        )
     return labels
 
 
@@ -114,6 +125,10 @@ EXPECTED_ENTITLEMENTS = {
     (
         "Contents/Frameworks/Antigravity Helper.app/Contents/MacOS/Antigravity Helper"
     ): _HELPER_ENTITLEMENTS,
+    (
+        "Contents/Frameworks/Electron Framework.framework/Versions/A/Helpers/"
+        "app_shim_loader"
+    ): _JIT_ENTITLEMENTS,
     (
         "Contents/Frameworks/Electron Framework.framework/Versions/A/Helpers/"
         "chrome_crashpad_handler"
