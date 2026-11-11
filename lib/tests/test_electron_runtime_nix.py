@@ -86,7 +86,7 @@ def _harness_expression(
     target_system: str | None = None,
     runtime_version: str | None = None,
 ) -> FunctionCall:
-    arguments = {}
+    arguments: dict[str, object] = {"fakeHash": FAKE_HASH}
     if inventory is not None:
         arguments["inventoryJson"] = json.dumps(inventory, sort_keys=True)
     if source_overrides is not None:

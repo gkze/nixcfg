@@ -452,6 +452,23 @@ Actions reruns can reuse completed upstream artifacts. A failed preparation
 cannot advance to another platform. A missing or mismatched validation report
 cannot authorize publication.
 
+Two post-job error annotations come from third-party actions. Neither one
+decides a job's result. Read the failed step instead.
+
+- The Determinate Nix action runs `determinate-nixd fix hashes`. That command
+  takes every hash mismatch the daemon saw during the job, including every
+  updater fake-hash probe. It attaches them to any literal
+  `sha256-AAAA…` it finds in a `.nix` source, which produces "There are
+  multiple replacements for the expression". Updater attribution does not read
+  that list. Each probe is its own build, and its prepared derivation path
+  must match the mismatch (see
+  [probe preparation](runtime.md#probe-preparation-and-reuse)). Keep the fake
+  hash out of `.nix` sources. Nix code uses `lib.fakeHash`, and test harnesses
+  take the value from `lib.update.constants.FAKE_HASH`.
+- cachix-action logs "Cachix Daemon not started. Skipping push" after
+  `flush-cachix` has stopped the daemon and cleared `CACHIX_DAEMON_DIR`. The
+  flush output above it records what was pushed.
+
 ### Hosted block-device faults
 
 The virtual disk of a hosted macOS VM can fail beneath the guest. The kernel
