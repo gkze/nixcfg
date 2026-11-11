@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 import urllib.error
+from collections.abc import Iterator
 from email.message import Message
 from io import StringIO
 from pathlib import Path
@@ -5206,12 +5207,17 @@ def test_hosted_device_faults_query_the_kernel_log_since_boot(
 
 
 @pytest.mark.parametrize(
-    ("log_present", "outcome", "message"),
+    ("log_present", "outcome", "message", "timed_out"),
     [
-        (False, None, "log is missing"),
-        (True, OSError("exec failed"), "OSError: exec failed"),
-        (True, subprocess.TimeoutExpired(["log"], 300), "TimeoutExpired"),
-        (True, subprocess.CompletedProcess(["log"], 64, "", "bad predicate\n"), "64"),
+        (False, None, "log is missing", False),
+        (True, OSError("exec failed"), "OSError: exec failed", False),
+        (True, subprocess.TimeoutExpired(["log"], 300), "TimeoutExpired", True),
+        (
+            True,
+            subprocess.CompletedProcess(["log"], 64, "", "bad predicate\n"),
+            "64",
+            False,
+        ),
     ],
 )
 def test_hosted_device_faults_fail_closed_when_the_log_cannot_answer(
@@ -5220,8 +5226,12 @@ def test_hosted_device_faults_fail_closed_when_the_log_cannot_answer(
     log_present: bool,
     outcome: object,
     message: str,
+    timed_out: bool,
 ) -> None:
-    """An unanswered query cannot prove the store sound, so it never returns []."""
+    """An unanswered query cannot prove the store sound, so it never returns [].
+
+    Only a timeout is the narrower error the native stage degrades on.
+    """
     log_bin = tmp_path / "log"
     monkeypatch.setattr(
         jobs.shutil,
@@ -5235,8 +5245,138 @@ def test_hosted_device_faults_fail_closed_when_the_log_cannot_answer(
         return outcome
 
     monkeypatch.setattr(jobs.subprocess, "run", run)
-    with pytest.raises(jobs.HostedDeviceStateError, match=message):
+    with pytest.raises(jobs.HostedDeviceStateError, match=message) as raised:
         jobs.hosted_device_faults()
+    assert isinstance(raised.value, jobs.HostedDeviceQueryTimeoutError) is timed_out
+
+
+_BOOT = 1_794_380_400  # 2026-11-11 07:00:00 UTC
+
+
+@pytest.fixture
+def utc_clock(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Pin local time to UTC so ``--start`` renders one exact string."""
+    monkeypatch.setenv("TZ", "UTC")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+def _sysctl_boottime(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, outcome: object
+) -> None:
+    sysctl = tmp_path / "sysctl"
+    monkeypatch.setattr(
+        jobs.shutil,
+        "which",
+        lambda name: str(sysctl) if outcome is not None and name == "sysctl" else None,
+    )
+
+    def run(args, **kwargs):
+        assert args == [str(sysctl), "-n", "kern.boottime"]
+        assert kwargs["timeout"] == jobs._BOOT_QUERY_SECONDS
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(jobs.subprocess, "run", run)
+
+
+def test_kernel_log_window_starts_at_boot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, utc_clock: None
+) -> None:
+    """A VM booted 2h ago is queried from boot, not from 7h ago."""
+    stdout = f"{{ sec = {_BOOT}, usec = 412000 }} Wed Nov 11 07:00:00 2026\n"
+    _sysctl_boottime(
+        monkeypatch,
+        tmp_path,
+        subprocess.CompletedProcess([], 0, stdout=stdout, stderr=""),
+    )
+    monkeypatch.setattr(jobs.time, "time", lambda: _BOOT + 2 * 3600)
+    assert jobs._kernel_log_window() == ["--start", "2026-11-11 07:00:00"]
+
+
+@pytest.mark.parametrize(
+    ("outcome", "now"),
+    [
+        pytest.param(None, _BOOT + 60, id="sysctl-missing"),
+        pytest.param(OSError("exec failed"), _BOOT + 60, id="sysctl-oserror"),
+        pytest.param(
+            subprocess.TimeoutExpired(["sysctl"], 10), _BOOT + 60, id="sysctl-timeout"
+        ),
+        pytest.param(
+            subprocess.CompletedProcess(
+                [], 1, stdout=f"{{ sec = {_BOOT} }}", stderr=""
+            ),
+            _BOOT + 60,
+            id="sysctl-nonzero",
+        ),
+        pytest.param(
+            subprocess.CompletedProcess([], 0, stdout="kern.boottime: ?", stderr=""),
+            _BOOT + 60,
+            id="unparseable",
+        ),
+        pytest.param(
+            subprocess.CompletedProcess(
+                [], 0, stdout=f"{{ sec = {_BOOT} }}", stderr=""
+            ),
+            _BOOT + 8 * 3600,
+            id="boot-before-cap",
+        ),
+        pytest.param(
+            subprocess.CompletedProcess(
+                [], 0, stdout=f"{{ sec = {_BOOT} }}", stderr=""
+            ),
+            _BOOT - 60,
+            id="boot-in-future",
+        ),
+    ],
+)
+def test_kernel_log_window_falls_back_to_the_job_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: object, now: int
+) -> None:
+    """A doubtful boot time must never start the query after a fault."""
+    _sysctl_boottime(monkeypatch, tmp_path, outcome)
+    monkeypatch.setattr(jobs.time, "time", lambda: now)
+    assert jobs._kernel_log_window() == ["--last", jobs._KERNEL_LOG_WINDOW]
+
+
+def test_hosted_device_faults_query_from_boot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, utc_clock: None
+) -> None:
+    log_bin = tmp_path / "log"
+    sysctl = tmp_path / "sysctl"
+    monkeypatch.setattr(
+        jobs.shutil,
+        "which",
+        lambda name: {"log": str(log_bin), "sysctl": str(sysctl)}.get(name),
+    )
+    monkeypatch.setattr(jobs.time, "time", lambda: _BOOT + 3600)
+    shown: list[list[str]] = []
+
+    def run(args, **_kwargs):
+        if args[0] == str(sysctl):
+            return subprocess.CompletedProcess(
+                args, 0, stdout=f"{{ sec = {_BOOT}, usec = 0 }}\n", stderr=""
+            )
+        shown.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(jobs.subprocess, "run", run)
+    assert jobs.hosted_device_faults() == []
+    assert shown == [
+        [
+            str(log_bin),
+            "show",
+            "--start",
+            "2026-11-11 07:00:00",
+            "--style",
+            "compact",
+            "--predicate",
+            jobs._DEVICE_FAULT_PREDICATE,
+        ]
+    ]
 
 
 def _faulted_hosted_prepare(
@@ -5302,6 +5442,107 @@ def test_faulted_prepare_fails_when_no_step_output_can_hand_off(
     assert (artifacts / "device-fault.log").is_file()
 
 
+def _query_times_out() -> list[str]:
+    msg = "Kernel log query failed: TimeoutExpired: log show timed out after 300s"
+    raise jobs.HostedDeviceQueryTimeoutError(msg)
+
+
+@pytest.mark.parametrize("exit_code", ["0", "17"])
+def test_device_query_timeout_keeps_the_outcome_and_publishes_nothing(
+    native_job,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    exit_code: str,
+) -> None:
+    """42975052923 prepare-darwin-0: a green shard failed only on a slow query."""
+    output = native_job[0]["RUNNER_TEMP"] + "/github-output"
+    env, artifacts = _faulted_hosted_prepare(
+        native_job, monkeypatch, [], TEST_EXIT=exit_code
+    )
+    monkeypatch.setattr(jobs, "hosted_device_faults", _query_times_out)
+    Path(env["RUNNER_TEMP"]).mkdir()
+    daemon_dir = _cachix_daemon_dir(Path(env["RUNNER_TEMP"]))
+    (daemon_dir / "daemon.pid").write_text("4242\n")
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    monkeypatch.setenv("GITHUB_OUTPUT", output)
+    killed: list[tuple[int, int]] = []
+    monkeypatch.setattr(jobs.os, "kill", lambda pid, sig: killed.append((pid, sig)))
+    assert jobs.native("prepare") == int(exit_code)
+    assert not Path(env["TEST_CACHE_LOG"]).exists()
+    assert killed == [(4242, signal.SIGKILL)]
+    assert not Path(output).exists()
+    assert not (artifacts / "device-fault.log").exists()
+    assert "TimeoutExpired" in (artifacts / "device-unverified.log").read_text()
+    assert (
+        "::warning title=Hosted block device check timed out::"
+        in capsys.readouterr().out
+    )
+    stderr_log = (artifacts / "stderr.log").read_text()
+    assert "Hosted block device unverified" in stderr_log
+    assert "prefetched store paths" not in stderr_log
+
+
+def test_device_query_timeout_still_hands_off_a_runner_store_fault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A slow query does not hide a dead daemon that needs a fresh VM."""
+    artifacts = tmp_path / "update-artifacts"
+    artifacts.mkdir()
+    (artifacts / "result.json").write_text(
+        json.dumps({"success": False, "runnerStoreFault": True}), encoding="utf-8"
+    )
+    output = tmp_path / "github-output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.delenv("CACHIX_DAEMON_DIR", raising=False)
+    monkeypatch.setattr(jobs, "is_hosted_darwin_runner", lambda: True)
+    monkeypatch.setattr(jobs, "hosted_device_faults", _query_times_out)
+    receipts = artifacts / "prefetch-receipts.jsonl"
+    with (artifacts / "stderr.log").open("w") as log:
+        assert jobs._finish_native_stage("prepare", artifacts, receipts, log, 1) == 0
+    assert output.read_text() == "runner_fault=true\n"
+    assert (artifacts / "device-unverified.log").is_file()
+    assert (artifacts / "runner-fault.log").is_file()
+
+
+def test_device_query_timeout_still_fails_a_warmup_slot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Warmup slots publish for --max-jobs 0 consumers, so they cannot withhold."""
+    artifacts = tmp_path / "update-artifacts"
+    artifacts.mkdir()
+    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "rust-warmup")
+    monkeypatch.delenv("NIXCFG_CANARY", raising=False)
+    monkeypatch.setattr(jobs, "is_hosted_darwin_runner", lambda: True)
+    monkeypatch.setattr(jobs, "hosted_device_faults", _query_times_out)
+    receipts = artifacts / "prefetch-receipts.jsonl"
+    with (
+        (artifacts / "stderr.log").open("w") as log,
+        pytest.raises(jobs.HostedDeviceQueryTimeoutError),
+    ):
+        jobs._finish_native_stage("validate", artifacts, receipts, log, 0)
+    assert not (artifacts / "device-unverified.log").exists()
+
+
+def test_device_query_errors_other_than_timeout_still_fail_the_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unanswered() -> list[str]:
+        msg = "log is missing; cannot check the hosted block device"
+        raise jobs.HostedDeviceStateError(msg)
+
+    artifacts = tmp_path / "update-artifacts"
+    artifacts.mkdir()
+    monkeypatch.setattr(jobs, "is_hosted_darwin_runner", lambda: True)
+    monkeypatch.setattr(jobs, "hosted_device_faults", unanswered)
+    receipts = artifacts / "prefetch-receipts.jsonl"
+    with (
+        (artifacts / "stderr.log").open("w") as log,
+        pytest.raises(jobs.HostedDeviceStateError, match="log is missing"),
+    ):
+        jobs._finish_native_stage("prepare", artifacts, receipts, log, 0)
+    assert not (artifacts / "device-unverified.log").exists()
+
+
 def test_runner_store_fault_hands_off_before_sibling_stop(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -5359,17 +5600,24 @@ def test_runner_handoff_without_a_step_output_keeps_the_updater_status(
     assert (tmp_path / "runner-fault.log").is_file()
 
 
-def test_flush_skips_a_discarded_runner_store_attempt(
-    native_job, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("marker", "reason"),
+    [
+        ("runner-fault.log", "Nix daemon or store faulted"),
+        ("device-unverified.log", "block device could not be verified"),
+    ],
+)
+def test_flush_skips_a_discarded_or_unverified_runner(
+    native_job, monkeypatch: pytest.MonkeyPatch, marker: str, reason: str
 ) -> None:
-    """A daemon-faulted shard must not push the attempt it is about to redo."""
+    """A discarded attempt or an unverified store must not reach Cachix."""
     env, checkout = native_job
     artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
     artifacts.mkdir(parents=True)
     (artifacts / "prefetch-receipts.jsonl").write_text(
         '{"storePath": "/nix/store/faulted.zip"}\n'
     )
-    (artifacts / "runner-fault.log").write_text("discarded\n")
+    (artifacts / marker).write_text("withheld\n")
     daemon_dir = _cachix_daemon_dir(Path(env["RUNNER_TEMP"]))
     for key, value in env.items():
         monkeypatch.setenv(key, value)
@@ -5379,7 +5627,7 @@ def test_flush_skips_a_discarded_runner_store_attempt(
     assert jobs.main("flush-cachix") == 0
     assert not Path(env["TEST_CACHE_LOG"]).exists()
     flush_log = (artifacts / "cachix-flush.log").read_text()
-    assert "Nix daemon or store faulted" in flush_log
+    assert reason in flush_log
     assert "prefetched store paths" not in flush_log
 
 

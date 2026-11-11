@@ -163,7 +163,12 @@ _STORAGE_FAULT_PREDICATE = (
     'eventMessage CONTAINS[c] "IOStorage"'
 )
 # A hosted VM boots for one job; 7h spans the 360-minute job cap plus boot.
-_KERNEL_LOG_WINDOW = "7h"
+# Queries start at the VM's boot instead when ``kern.boottime`` is readable
+# and inside that cap.
+_KERNEL_LOG_WINDOW_HOURS = 7
+_KERNEL_LOG_WINDOW = f"{_KERNEL_LOG_WINDOW_HOURS}h"
+_BOOT_SECONDS = re.compile(r"\bsec = (\d+)")
+_BOOT_QUERY_SECONDS = 10
 # 39883371442 prepare-darwin: the VM's virtual disk logged 99241 kernel
 # "(IOStorageFamily) disk2s7: I/O error." lines across the Nix Store, Data and
 # container devices (02:31:54-02:33:27) with 43+ GiB guest free, above
@@ -174,8 +179,12 @@ _KERNEL_LOG_WINDOW = "7h"
 # 39774011035) logged none. One such line makes the VM's store untrusted.
 _DEVICE_FAULT_LINE = re.compile(r"\(IOStorageFamily\) disk\d+(?:s\d+)*: I/O error\.")
 _DEVICE_FAULT_PREDICATE = 'process == "kernel" AND eventMessage CONTAINS[c] "I/O error"'
+# 42975052923 prepare-darwin-0: after a 1h35m shard on a storage-starved VM
+# (openchamber's node_modules installPhase took 20m20s, 1m27s-2m59s on the
+# three prior runs) this query passed 300s. The other shards answered in 3-6s.
 _DEVICE_FAULT_QUERY_SECONDS = 300
 _DEVICE_FAULT_NAME = "device-fault.log"
+_DEVICE_UNVERIFIED_NAME = "device-unverified.log"
 _RUNNER_FAULT_NAME = "runner-fault.log"
 _DEVICE_FAULT_EXCERPT_LINES = 50
 # 41339729368 validate-darwin-cascade-warmup (3): 110892 kernel
@@ -791,6 +800,39 @@ def dump_hosted_storage_fault() -> None:
         _outputs(device_fault=str(marker.is_file()).lower())
 
 
+def _boot_epoch() -> int | None:
+    """Return this machine's boot time in epoch seconds, or None if unreadable."""
+    sysctl = shutil.which("sysctl")
+    if sysctl is None:
+        return None
+    try:
+        result = subprocess.run(  # noqa: S603 -- resolved sysctl path
+            [sysctl, "-n", "kern.boottime"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=_BOOT_QUERY_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    match = _BOOT_SECONDS.search(result.stdout) if result.returncode == 0 else None
+    return int(match.group(1)) if match else None
+
+
+def _kernel_log_window() -> list[str]:
+    """Return ``log show`` arguments that cover this VM since boot.
+
+    The window never exceeds the job cap, and it falls back to that cap when
+    the boot time is unreadable or not in the past. A start after a fault
+    would hide that fault, so a doubtful boot time never narrows the query.
+    """
+    now = time.time()
+    boot = _boot_epoch()
+    if boot is None or not now - _KERNEL_LOG_WINDOW_HOURS * 3600 <= boot <= now:
+        return ["--last", _KERNEL_LOG_WINDOW]
+    return ["--start", time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(boot))]
+
+
 def _dump_kernel_storage_log(log_path: Path, report: Path) -> str:
     """Retain this VM's storage kernel log since boot and return its text."""
     log_bin = shutil.which("log")
@@ -802,8 +844,7 @@ def _dump_kernel_storage_log(log_path: Path, report: Path) -> str:
             [
                 log_bin,
                 "show",
-                "--last",
-                _KERNEL_LOG_WINDOW,
+                *_kernel_log_window(),
                 "--style",
                 "compact",
                 "--predicate",
@@ -829,6 +870,10 @@ class HostedDeviceStateError(RuntimeError):
     """The kernel log could not show whether the hosted block device faulted."""
 
 
+class HostedDeviceQueryTimeoutError(HostedDeviceStateError):
+    """``log show`` ran but did not finish inside its budget."""
+
+
 def device_fault_lines(text: str) -> list[str]:
     """Return kernel block-device I/O error lines from ``log show`` output."""
     return [line for line in text.splitlines() if _DEVICE_FAULT_LINE.search(line)]
@@ -838,7 +883,9 @@ def hosted_device_faults() -> list[str]:
     """Return this VM's kernel block-device I/O errors since boot.
 
     Fails closed: a missing or failing ``log show`` cannot prove the store
-    sound, so it raises instead of reporting no fault.
+    sound, so it raises instead of reporting no fault. A query that outlives
+    its budget raises :class:`HostedDeviceQueryTimeoutError`, so the caller
+    can tell "too slow to answer" apart from "cannot answer".
     """
     log_bin = shutil.which("log")
     if log_bin is None:
@@ -849,8 +896,7 @@ def hosted_device_faults() -> list[str]:
             [
                 log_bin,
                 "show",
-                "--last",
-                _KERNEL_LOG_WINDOW,
+                *_kernel_log_window(),
                 "--style",
                 "compact",
                 "--predicate",
@@ -861,7 +907,10 @@ def hosted_device_faults() -> list[str]:
             text=True,
             timeout=_DEVICE_FAULT_QUERY_SECONDS,
         )
-    except (OSError, subprocess.TimeoutExpired) as error:
+    except subprocess.TimeoutExpired as error:
+        msg = f"Kernel log query failed: {type(error).__name__}: {error}"
+        raise HostedDeviceQueryTimeoutError(msg) from error
+    except OSError as error:
         msg = f"Kernel log query failed: {type(error).__name__}: {error}"
         raise HostedDeviceStateError(msg) from error
     if result.returncode:
@@ -913,6 +962,32 @@ def _drop_cachix_queue(log: TextIO) -> None:
     except ProcessLookupError:
         return
     _write_diagnostic(log, f"Killed Cachix daemon pid={pid} without draining")
+
+
+def _withhold_unverified_runner(
+    artifacts: Path, error: HostedDeviceQueryTimeoutError, log: TextIO
+) -> None:
+    """Keep the stage result but publish nothing from an unverified store.
+
+    A timed-out kernel log query says the VM was slow, not that its disk
+    faulted, so the stage keeps its outcome. Its store is still unverified,
+    and a corrupt fixed-output path in Cachix would be substituted by later
+    validation instead of refetched and checked. The marker makes
+    ``flush-cachix`` publish nothing, as a device fault does.
+    """
+    (artifacts / _DEVICE_UNVERIFIED_NAME).write_text(f"{error}\n", encoding="utf-8")
+    _write_diagnostic(
+        log,
+        f"Hosted block device unverified ({error}); publishing nothing from "
+        "this runner",
+    )
+    _drop_cachix_queue(log)
+    sys.stdout.write(
+        "::warning title=Hosted block device check timed out::"
+        f"the kernel log query did not finish in {_DEVICE_FAULT_QUERY_SECONDS}s; "
+        "this runner's result stands but none of its store paths are published\n"
+    )
+    sys.stdout.flush()
 
 
 def _discard_runner_store_attempt(artifacts: Path, log: TextIO) -> None:
@@ -1678,7 +1753,9 @@ def _finish_native_stage(
     A sibling stop already blocked publish. Prefetch receipts still upload so
     the next attempt can substitute them. A device-fault retry stays reserved
     for a prepare shard or warmup slot that finished on a faulted disk with
-    no sibling failure. A warmup retry that faults again fails.
+    no sibling failure. A warmup retry that faults again fails. A prepare
+    device check that times out keeps the updater's outcome and publishes
+    nothing; a warmup slot's still fails.
     """
     if not _sibling_stop_recorded(artifacts) and (
         summary := _failure_summary(artifacts / "result.json")
@@ -1691,18 +1768,31 @@ def _finish_native_stage(
             "Sibling real failure recorded; this result is not a device-fault retry",
         )
         return _publish_prefetched_receipts(receipts, log, artifacts, returncode or 1)
+    unverified = False
     # A green updater on a faulted disk still hashed untrusted bytes.
-    if (
-        _hands_off_device_faults(stage)
-        and is_hosted_darwin_runner()
-        and (faults := hosted_device_faults())
-    ):
-        _quarantine_faulted_runner(artifacts, faults, log)
-        if stage == "validate" and os.environ.get(_DEVICE_FAULT_RETRY_ENV) == "true":
-            return _fail_device_fault_retry(faults, returncode)
-        return _hand_off_device_fault(faults, returncode)
+    if _hands_off_device_faults(stage) and is_hosted_darwin_runner():
+        try:
+            faults = hosted_device_faults()
+        except HostedDeviceQueryTimeoutError as error:
+            # A warmup slot exists to publish; withholding would only move its
+            # failure to a later --max-jobs 0 consumer.
+            if stage != "prepare":
+                raise
+            _withhold_unverified_runner(artifacts, error, log)
+            unverified = True
+        else:
+            if faults:
+                _quarantine_faulted_runner(artifacts, faults, log)
+                if (
+                    stage == "validate"
+                    and os.environ.get(_DEVICE_FAULT_RETRY_ENV) == "true"
+                ):
+                    return _fail_device_fault_retry(faults, returncode)
+                return _hand_off_device_fault(faults, returncode)
     if returncode and _hands_off_runner_store_fault(stage, artifacts):
         return _hand_off_runner_store_fault(log, artifacts, returncode)
+    if unverified:
+        return returncode
     return _publish_prefetched_receipts(receipts, log, artifacts, returncode)
 
 
@@ -3094,6 +3184,8 @@ def flush_cachix() -> None:
       makes this flush publish nothing from the untrusted store.
     - Runner daemon or store fault: ``runner-fault.log`` does the same for
       the discarded prepare attempt. The fresh VM publishes its own paths.
+    - Unverified block device (42975052923): ``device-unverified.log``
+      does the same when the kernel log query timed out.
     """
     os.environ["NIXCFG_CI_STAGE"] = "flush-cachix"
     artifacts = _temp() / "update-artifacts"
@@ -3112,6 +3204,11 @@ def flush_cachix() -> None:
             untrusted = (
                 "this runner's Nix daemon or store faulted, so this attempt "
                 "is discarded"
+            )
+        elif (artifacts / _DEVICE_UNVERIFIED_NAME).is_file():
+            untrusted = (
+                "this runner's block device could not be verified, so its "
+                "store paths are untrusted"
             )
         else:
             untrusted = ""
