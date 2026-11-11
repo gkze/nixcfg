@@ -1,6 +1,7 @@
 """Prepared derivations couple hash results to their evaluated certificates."""
 
 import asyncio
+import base64
 import json
 from collections.abc import Mapping
 
@@ -9,9 +10,10 @@ from nix_manipulator.expressions.set import AttributeSet
 from nix_manipulator.parser import parse
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
-from lib.tests._assertions import expect_instance
+from lib.tests._assertions import expect_instance, expect_not_none
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding
 from lib.update.config import resolve_config
+from lib.update.constants import FAKE_HASH
 from lib.update.events import CommandResult
 from lib.update.nix import (
     PreparedProbe,
@@ -217,6 +219,90 @@ def test_prepared_probe_rejects_an_unrelated_dependency_hash_mismatch(
             )
         )
     assert _UNRELATED in str(exc_info.value)
+
+
+def _fake_hash_mismatch(drv_path: str, got: str) -> str:
+    return (
+        f"error: hash mismatch in fixed-output derivation '{drv_path}':\n"
+        f" specified: {FAKE_HASH}\n got: {got}\n"
+    )
+
+
+_SIBLINGS = ("opencode", "openchamber", "mux", "t3code", "gooeypi")
+_SIBLING_PROBES = {
+    name: PreparedProbe(
+        f"/nix/store/{chr(ord('a') + index) * 32}-{name}-probe.drv",
+        name,
+        fingerprint_drv_path=f"/nix/store/{chr(ord('j') + index) * 32}-{name}.drv",
+    )
+    for index, name in enumerate(_SIBLINGS)
+}
+_SIBLING_HASHES = {
+    name: f"sha256-{base64.b64encode(name.encode().ljust(32, b'.')).decode()}"
+    for name in _SIBLINGS
+}
+
+
+@pytest.mark.parametrize(
+    "reported_by",
+    [{}, {"opencode": "openchamber", "openchamber": "opencode"}],
+    ids=["own-output", "swapped-output"],
+)
+def test_concurrent_fake_hash_probes_each_certify_only_their_own_derivation(
+    monkeypatch: pytest.MonkeyPatch, reported_by: dict[str, str]
+) -> None:
+    """Sibling probes that all specify ``lib.fakeHash`` never trade hashes.
+
+    Every prepared probe builds with an empty expression and the same fake
+    placeholder, so only the derivation path tells them apart. All builds are
+    in flight together; a sibling's mismatch is rejected, never adopted.
+    """
+    owner = {probe.drv_path: name for name, probe in _SIBLING_PROBES.items()}
+
+    async def run_all() -> dict[str, str | BaseException]:
+        started: list[str] = []
+        all_started = asyncio.Event()
+
+        async def build(_source, expr, *, options, **_kwargs):
+            assert expr == ""
+            name = owner[options.derivation_path]
+            started.append(name)
+            if len(started) == len(_SIBLINGS):
+                all_started.set()
+            await all_started.wait()
+            reporter = reported_by.get(name, name)
+            return CommandResult(
+                args=["nix", "build"],
+                returncode=1,
+                stdout="",
+                stderr=_fake_hash_mismatch(
+                    expect_not_none(_SIBLING_PROBES[reporter].fingerprint_drv_path),
+                    _SIBLING_HASHES[reporter],
+                ),
+            )
+
+        monkeypatch.setattr("lib.update.nix._run_fixed_output_build", build)
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                *(
+                    compute_fixed_output_hash(name, _SIBLING_PROBES[name])
+                    for name in _SIBLINGS
+                ),
+                return_exceptions=True,
+            ),
+            timeout=1,
+        )
+        return dict(zip(_SIBLINGS, results, strict=True))
+
+    results = asyncio.run(run_all())
+    for name in _SIBLINGS:
+        if name not in reported_by:
+            assert results[name] == _SIBLING_HASHES[name]
+            continue
+        error = str(expect_instance(results[name], RuntimeError))
+        assert "unexpected derivation" in error
+        reporter = _SIBLING_PROBES[reported_by[name]]
+        assert expect_not_none(reporter.fingerprint_drv_path) in error
 
 
 def test_prepared_probe_without_a_mismatch_keeps_the_extraction_error(
