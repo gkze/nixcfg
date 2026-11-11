@@ -715,6 +715,63 @@ def test_signer_tracks_the_2_28_ble_scanner_inventory(tmp_path: Path) -> None:
         module.discover_inventory(app)
 
 
+def test_signer_tracks_the_2_31_app_shim_loader_inventory(tmp_path: Path) -> None:
+    """2.31.0 bundles add app_shim_loader; 2.28.2 bundles must not carry it."""
+    module = _load_signing_module()
+    app = _write_signing_bundle(tmp_path)
+    scanner = "Contents/Resources/bin/cable_ble_scanner"
+    shim = "Contents/Frameworks/Electron Framework.framework/Versions/A/Helpers/app_shim_loader"
+    info_path = app / "Contents/Info.plist"
+    for label in module._ELECTRON_44_REMOVED_MACHOS:
+        (app / label).unlink()
+    for label in (scanner, shim):
+        (app / label).write_bytes(bytes.fromhex("cffaedfe") + b"test Mach-O")
+
+    def set_version(version: str) -> None:
+        with info_path.open("wb") as info_handle:
+            plistlib.dump({"CFBundleShortVersionString": version}, info_handle)
+
+    set_version("2.28.2")
+    with pytest.raises(module.SigningError, match="Mach-O inventory"):
+        module.discover_inventory(app)
+
+    set_version("2.31.0")
+    machos, bundles = module.discover_inventory(app)
+    labels = tuple(path.relative_to(app).as_posix() for path in machos)
+    assert labels == tuple(
+        sorted(
+            (
+                *(
+                    label
+                    for label in module.EXPECTED_MACHOS
+                    if label not in module._ELECTRON_44_REMOVED_MACHOS
+                ),
+                scanner,
+                shim,
+            ),
+            key=os.fsencode,
+        )
+    )
+    assert (
+        tuple(path.relative_to(app).as_posix() for path in bundles)
+        == _EXPECTED_NESTED_BUNDLES
+    )
+    assert module.EXPECTED_ENTITLEMENTS[shim] == _JIT_ENTITLEMENTS
+
+    # The upstream 2.31.0 signature carries allow-jit on both helpers; the
+    # source and post-sign entitlement gates must accept exactly that.
+    _calls, _explicit, runner = _signature_runner(
+        app,
+        entitlements_overrides={scanner: _JIT_ENTITLEMENTS, shim: _JIT_ENTITLEMENTS},
+        source_before_sign=True,
+    )
+    module.resign_bundle(app, runner=runner)
+
+    (app / shim).unlink()
+    with pytest.raises(module.SigningError, match="Mach-O inventory"):
+        module.discover_inventory(app)
+
+
 @pytest.mark.parametrize(
     ("label", "entitlements"),
     [
