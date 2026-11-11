@@ -708,7 +708,11 @@ def test_check_applied_repair_rechecks_the_staged_patch(
 ) -> None:
     """The publishing job re-runs the path and skip policy on what it commits."""
     git(tmp_path, "init", "-q")
-    git(tmp_path, "commit", "-q", "--allow-empty", "-m", "base")
+    git(
+        tmp_path,
+        *("-c", "user.name=Test", "-c", "user.email=test@example.invalid"),
+        *("-c", "commit.gpgSign=false", "commit", "-q", "--allow-empty", "-m", "base"),
+    )
     target = tmp_path / path
     target.parent.mkdir(parents=True)
     target.write_text(content)
