@@ -187,6 +187,67 @@ let
       fi
     '';
   };
+  # launchd socket-activates the system ssh-agent, so at login the advertised
+  # SSH_AUTH_SOCK can still be missing or not answering when this job runs. A
+  # bare `ssh-add --apple-load-keychain` then exits 2 and, under
+  # LaunchOnlyOnce, never retries for the rest of the session. Wait for the
+  # socket to answer, load the stored passphrases, and record the outcome so a
+  # silent failure is visible in the log and in launchd's last exit status.
+  sshAgentLoginLoad = pkgs.writeShellApplication {
+    name = "ssh-agent-login-load";
+    runtimeInputs = [ pkgs.coreutils ];
+    text = ''
+      set -euo pipefail
+
+      note() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+
+      sock="''${SSH_AUTH_SOCK:-}"
+      if [ -z "$sock" ]; then
+        sock="$(/bin/launchctl getenv SSH_AUTH_SOCK 2>/dev/null || true)"
+      fi
+      if [ -z "$sock" ]; then
+        note "error: no SSH_AUTH_SOCK in the launchd environment" >&2
+        exit 1
+      fi
+      export SSH_AUTH_SOCK="$sock"
+
+      # ssh-add exits 0 when it can list identities, 1 when the agent answers
+      # but holds none, and 2 when it cannot reach the socket at all.
+      wait_seconds="''${SSH_AGENT_WAIT_SECONDS:-60}"
+      deadline=$(( SECONDS + wait_seconds ))
+      while :; do
+        status=0
+        /usr/bin/ssh-add -l >/dev/null 2>&1 || status=$?
+        case "$status" in
+          0 | 1) break ;;
+        esac
+        if [ "$SECONDS" -ge "$deadline" ]; then
+          note "error: ssh-agent on $sock did not answer within ''${wait_seconds}s (ssh-add exit $status)" >&2
+          exit 1
+        fi
+        sleep 1
+      done
+
+      # The login keychain can still be locked this early; retry the load
+      # instead of giving up on the first failure.
+      attempt=1
+      while ! /usr/bin/ssh-add --apple-load-keychain --apple-use-keychain; do
+        if [ "$attempt" -ge 3 ]; then
+          note "error: ssh-add --apple-load-keychain failed 3 times on $sock; stored passphrases were not loaded" >&2
+          exit 1
+        fi
+        attempt=$(( attempt + 1 ))
+        sleep 2
+      done
+
+      if listed="$(/usr/bin/ssh-add -l 2>/dev/null)"; then
+        count="$(printf '%s\n' "$listed" | wc -l | tr -d ' ')"
+      else
+        count=0
+      fi
+      note "ok: ssh-agent reachable on $sock, $count identities loaded"
+    '';
+  };
 in
 {
   imports = [ ./appearance.nix ];
@@ -325,13 +386,17 @@ in
       enable = true;
       config = {
         Label = "org.openssh.add";
-        LaunchOnlyOnce = true;
         RunAtLoad = true;
+        # Deliberately not LaunchOnlyOnce: the job stays resident so
+        # `launchctl print` keeps its last exit status and `kickstart` can
+        # retry it without a fresh login.
         ProgramArguments = [
-          "/usr/bin/ssh-add"
-          "--apple-load-keychain"
-          "--apple-use-keychain"
+          "/bin/sh"
+          "-c"
+          "/bin/wait4path /nix/store && exec ${lib.getExe sshAgentLoginLoad}"
         ];
+        StandardOutPath = "${config.home.homeDirectory}/Library/Logs/ssh-agent-login.log";
+        StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/ssh-agent-login.log";
       };
     };
     gpg-home = {
