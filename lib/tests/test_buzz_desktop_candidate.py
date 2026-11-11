@@ -33,6 +33,7 @@ from lib.tests._buzz_native_lock import (
     buzz_native_lock_string,
     render_buzz_native_lock_interpolations,
 )
+from lib.tests._darwin_tools import requires_plistbuddy
 from lib.tests._mac_app_passthru import mac_app_passthru_args
 from lib.tests._macho import build_version, macho, string_command
 from lib.tests._nix_ast import (
@@ -803,6 +804,7 @@ def test_validator_command_prefix_keeps_call_site_arguments_on_same_command(
     assert command.value == prefix + invocation
 
 
+@requires_plistbuddy
 def test_assembly_embeds_runtime_last_and_signs_only_mutable_app_code(
     tmp_path: Path,
 ) -> None:
@@ -837,6 +839,7 @@ def test_assembly_embeds_runtime_last_and_signs_only_mutable_app_code(
     assert all("mesh-runtime" not in line for line in signing)
 
 
+@requires_plistbuddy
 def test_assembly_relocates_the_payload_sdk_iconv_edge_before_signing(
     tmp_path: Path,
 ) -> None:
@@ -854,6 +857,7 @@ def test_assembly_relocates_the_payload_sdk_iconv_edge_before_signing(
     ]
 
 
+@requires_plistbuddy
 def test_assembly_revalidates_runtime_after_outer_app_signing(tmp_path: Path) -> None:
     """Any signing-time mutation of a manifest-covered byte must fail the build."""
     result, _output, _runtime, _sign_log = _run_assembly(
@@ -877,6 +881,7 @@ def test_assembly_rejects_extra_source_entitlement_before_signing(
     assert not sign_log.exists()
 
 
+@requires_plistbuddy
 @pytest.mark.parametrize(
     ("case", "expected_error"),
     [
@@ -940,6 +945,7 @@ def test_assembly_rejects_runtime_manifest_contract_drift(
     assert expected_error in result.stderr
 
 
+@requires_plistbuddy
 def test_assembly_propagates_inventory_enumerator_failure(tmp_path: Path) -> None:
     """A valid-looking partial find stream must not satisfy exact inventory."""
     result, _output, _runtime, _sign_log = _run_assembly(
@@ -950,6 +956,7 @@ def test_assembly_propagates_inventory_enumerator_failure(tmp_path: Path) -> Non
     assert "failed to enumerate MacOS inventory" in result.stderr
 
 
+@requires_plistbuddy
 def test_assembly_propagates_unsupported_entry_enumerator_failure(
     tmp_path: Path,
 ) -> None:
@@ -962,6 +969,7 @@ def test_assembly_propagates_unsupported_entry_enumerator_failure(
     assert "failed to inspect unsupported MacOS entries" in result.stderr
 
 
+@requires_plistbuddy
 def test_install_check_accepts_exact_candidate(tmp_path: Path) -> None:
     """The install audit accepts the exact assembled candidate contract."""
     assembly, output, _runtime, _sign_log = _run_assembly(tmp_path)
@@ -980,6 +988,7 @@ def test_install_check_accepts_exact_candidate(tmp_path: Path) -> None:
     assert not (smoke_root / "home/Library").exists()
 
 
+@requires_plistbuddy
 def test_install_check_rejects_a_launcher_that_cannot_start(tmp_path: Path) -> None:
     """The install audit must execute the exact packaged launcher."""
     assembly, output, _runtime, _sign_log = _run_assembly(tmp_path)
@@ -1056,6 +1065,7 @@ struct AbiVersion skippy_abi_version(void) {{
     ) == ['"$RUNTIME_LOAD_VALIDATOR" "$runtime"']
 
 
+@requires_plistbuddy
 @pytest.mark.parametrize("macho_case", ["resolved-loader", "resolved-rpath"])
 def test_install_check_accepts_resolved_app_local_dynamic_edges(
     tmp_path: Path,
@@ -1068,6 +1078,7 @@ def test_install_check_accepts_resolved_app_local_dynamic_edges(
     assert result.returncode == 0, result.stderr
 
 
+@requires_plistbuddy
 def test_install_check_rejects_non_file_macos_entry(tmp_path: Path) -> None:
     """Final inventory rejects a directory or symlink hidden from file-only find."""
     assembly, output, _runtime, _sign_log = _run_assembly(tmp_path)
@@ -1079,6 +1090,7 @@ def test_install_check_rejects_non_file_macos_entry(tmp_path: Path) -> None:
     assert "contains a non-file MacOS entry" in result.stderr
 
 
+@requires_plistbuddy
 @pytest.mark.parametrize(
     ("key", "value"),
     [
@@ -1104,6 +1116,7 @@ def test_install_check_rejects_app_identity_drift(
     assert result.returncode != 0
 
 
+@requires_plistbuddy
 @pytest.mark.parametrize(
     ("failure", "expected_error"),
     [

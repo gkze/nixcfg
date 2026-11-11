@@ -11,6 +11,7 @@ from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.tests._assertions import expect_instance
+from lib.tests._darwin_tools import requires_plistbuddy
 from lib.tests._mac_app_passthru import mac_app_passthru_args
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding
 from lib.tests._nix_source import nix_file_expr
@@ -85,6 +86,7 @@ def test_package_wires_the_app_to_the_managed_claude_cli() -> None:
     )
 
 
+@requires_plistbuddy
 def test_installer_builds_a_runnable_app_bundle(tmp_path: Path) -> None:
     """The generated executable link should point only at the supplied Nix CLI."""
     output = tmp_path / "output"
