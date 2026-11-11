@@ -636,6 +636,80 @@ rec {
     ];
   };
 
+  # csvview tables are keyed by preset action name and each value carries the
+  # lhs plus the modes to bind, so these items name the preset in `action`.
+  csvview = {
+    id = "csvview";
+    label = "CSV / TSV table view";
+    attrPath = [
+      "programs"
+      "nixvim"
+      "plugins"
+      "csvview"
+      "settings"
+      "keymaps"
+    ];
+    kind = "preset-map";
+    context = "buffer-local, only while CsvView is enabled for the buffer";
+    sections = [
+      {
+        title = "Field and row jumps";
+        items = [
+          {
+            key = "<Tab>";
+            action = "jump_next_field_end";
+            mode = [
+              "n"
+              "v"
+            ];
+            desc = "Jump to the end of the next field";
+          }
+          {
+            key = "<S-Tab>";
+            action = "jump_prev_field_end";
+            mode = [
+              "n"
+              "v"
+            ];
+            desc = "Jump to the end of the previous field";
+          }
+          {
+            key = "<CR>";
+            action = "jump_next_row";
+            mode = [
+              "n"
+              "v"
+            ];
+            desc = "Jump to the same field in the next row";
+          }
+        ];
+      }
+      {
+        title = "Field text objects";
+        items = [
+          {
+            key = "if";
+            action = "textobject_field_inner";
+            mode = [
+              "o"
+              "x"
+            ];
+            desc = "Select the current field";
+          }
+          {
+            key = "af";
+            action = "textobject_field_outer";
+            mode = [
+              "o"
+              "x"
+            ];
+            desc = "Select the current field including its delimiter";
+          }
+        ];
+      }
+    ];
+  };
+
   mkMapItem = key: action: desc: {
     inherit key action desc;
   };
@@ -947,6 +1021,7 @@ rec {
     blinkCmp
     telescope
     gitlinker
+    csvview
     alpha
   ];
 }

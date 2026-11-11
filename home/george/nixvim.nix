@@ -9,6 +9,7 @@ let
     concatStringsSep
     head
     isAttrs
+    isList
     isString
     ;
   inherit (lib.attrsets) listToAttrs mapAttrsToList;
@@ -38,6 +39,9 @@ let
 
   scopeSectionTitles = scope: map (section: section.title) scope.sections;
   itemMode = scope: item: item.mode or (scope.mode or "n");
+  # Keymap data carries modes as either a string or a list; the cheat sheet and
+  # the keymap picker need one label for both shapes.
+  modeLabel = mode: if isList mode then concatStringsSep "/" mode else mode;
 
   sectionItems =
     scope: sectionNames:
@@ -99,7 +103,7 @@ let
               inherit (scope) kind;
               context = scope.context or "";
               inherit (item) key;
-              mode = itemMode scope item;
+              mode = modeLabel (itemMode scope item);
               displayAction = itemDisplayAction item;
               desc = item.desc or item.summary or "";
             }) section.items
@@ -115,7 +119,7 @@ let
         if scope ? context && scope.context != "" then "Context: ${scope.context}\n\n" else "";
       renderItem =
         item:
-        "- `${item.key}` (`${itemMode scope item}`) → `${itemDisplayAction item}` — ${
+        "- `${item.key}` (`${modeLabel (itemMode scope item)}`) → `${itemDisplayAction item}` — ${
           item.desc or item.summary or ""
         }";
     in
@@ -141,6 +145,21 @@ let
   lspExtraKeymaps = mkKeymapListFromSections keymapData.lsp [ "Docs / diagnostics" ];
   lspBufKeymaps = mkAttrsetFromSections keymapData.lsp [ "Navigation" ];
   blinkCmpKeymaps = mkAttrset keymapData.blinkCmp;
+
+  # csvview keymaps are keyed by preset action name and each value is a
+  # positional `{ "<lhs>", mode = ... }` table, so mkAttrsetFromItems cannot
+  # express them.
+  csvviewScope = keymapData.csvview;
+  csvviewKeymaps = listToAttrs (
+    map (item: {
+      name = item.action;
+      value = {
+        __unkeyed-1 = item.key;
+        mode = itemMode csvviewScope item;
+        desc = item.desc or "";
+      };
+    }) (sectionItems csvviewScope (scopeSectionTitles csvviewScope))
+  );
 
   # nvim-treesitter-textobjects dropped the `settings.*.keymaps` schema in its
   # main-branch rewrite; mappings must now call the module API directly. The
@@ -346,6 +365,24 @@ in
         }
       );
       files."ftplugin/json.lua".opts.shiftwidth = 2;
+      # CSV/TSV buffers (both are detected by Neovim itself) open straight into
+      # the table view; :CsvViewToggle and :CsvViewDisable still act per buffer.
+      autoGroups.csvview = { };
+      autoCmd = [
+        {
+          event = "FileType";
+          pattern = [
+            "csv"
+            "tsv"
+          ];
+          group = "csvview";
+          desc = "Enable the csvview table view";
+          command = "CsvViewEnable";
+          # CsvViewEnable opens the sticky-header window; let that window's
+          # events reach the regular handlers.
+          nested = true;
+        }
+      ];
       globals.mapleader = " ";
       opts = {
         colorcolumn = [
@@ -904,6 +941,15 @@ in
           };
         };
         comment.enable = true;
+        csvview = {
+          enable = true;
+          settings = {
+            # Draw the delimiter as a vertical rule instead of recolouring the
+            # cell, matching the box-drawing glyphs used for splits and folds.
+            view.display_mode = "border";
+            keymaps = csvviewKeymaps;
+          };
+        };
         dap-python.enable = true;
         dap-ui.enable = true;
         dap.enable = true;
