@@ -3004,35 +3004,33 @@ def test_unsloth_rejects_invalid_backend_upload_time(value: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "version",
+    ("declared", "expected"),
     [
-        "0.1.902-beta",
-        "0.1.909-beta",
-        "0.1.910-beta",
-        "0.1.911-beta",
-        "0.1.913-beta",
-        "0.1.914-beta",
+        ("1.89.0", "1.90.0"),
+        ("1.9.0", "1.90.0"),
+        ("1.90.0", "1.90.0"),
+        ("1.90.1", "1.90.1"),
+        ("1.100.0", "1.100.0"),
     ],
 )
-def test_unsloth_build_toolchain_override_is_updater_owned(version: str) -> None:
-    """A release whose own lockfile needs a newer compiler is recorded, not restated in Nix."""
+@pytest.mark.parametrize("version", ["0.1.914-beta", "0.1.916-beta"])
+def test_unsloth_build_toolchain_floor_is_updater_owned(
+    version: str, declared: str, expected: str
+) -> None:
+    """The lockfile's compiler floor raises, but never lowers, the declared minimum.
+
+    It applies to every release, so a new release needs no per-version entry.
+    """
     module = _load_updater_module()
     source = _candidate_source(module)
-    metadata = {**_metadata(), "rustToolchainVersion": "1.89.0"}
+    metadata = {**_metadata(), "rustToolchainVersion": declared}
 
-    overridden = module._closure_plan_payload(
+    plan = module._closure_plan_payload(
         VersionInfo(version, metadata),
         source,
         metadata,
     )
-    assert overridden["app"]["rustToolchainVersion"] == "1.90.0"
-
-    declared_only = module._closure_plan_payload(
-        VersionInfo("0.1.813-beta", metadata),
-        source,
-        metadata,
-    )
-    assert declared_only["app"]["rustToolchainVersion"] == "1.89.0"
+    assert plan["app"]["rustToolchainVersion"] == expected
 
 
 def test_unsloth_closure_plan_is_derived_from_candidate_source() -> None:
@@ -3047,7 +3045,7 @@ def test_unsloth_closure_plan_is_derived_from_candidate_source() -> None:
 
     assert plan["app"] == {
         "commit": _COMMIT,
-        "rustToolchainVersion": _RUST_TOOLCHAIN_VERSION,
+        "rustToolchainVersion": "1.90.0",
         "sourceHash": _SRC_HASH,
         "tag": _TAG,
         "version": _VERSION,

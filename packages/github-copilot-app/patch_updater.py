@@ -41,10 +41,18 @@ PATCHES: tuple[tuple[str, bytes, bytes, int], ...] = (
 
 # 1.1.34 added a three-variant serde enum (``latest.json``/``gdrive``/``local``)
 # in the automation string table. It is not an update manifest, so its bytes
-# stay vendor-owned; the span is pinned by its own exact count and every anchor
-# above is counted and replaced only outside it.
+# stay vendor-owned. 1.2.0 no longer stores the three names contiguously:
+# ``gdrive``/``local`` sit beside the ``github/get_automation`` tool names, and
+# the enum's ``latest.json`` is the one copy outside the update strings, packed
+# before the ``agents``/``mission_control_internal`` tracing targets. The span is
+# pinned by its own exact count and every anchor above is counted and replaced
+# only outside it.
 UNRELATED_SPANS: tuple[tuple[str, bytes, int], ...] = (
-    ("automation storage enum", b"latest.jsongdrivelocal", 1),
+    (
+        "automation storage enum",
+        b"latest.jsonagentsmission_control_internal",
+        1,
+    ),
 )
 
 

@@ -86,7 +86,7 @@ def test_town_assistant_nightly_package_uses_dmg_app_copy_mode() -> None:
     )
     assert_nix_ast_equal(
         expect_binding(derivation_args.values, "appName").value,
-        StringPrimitive(value="Town Assistant"),
+        StringPrimitive(value="Town"),
     )
     assert_nix_ast_equal(
         expect_binding(derivation_args.values, "macApp").value,

@@ -98,22 +98,14 @@ _MAX_BACKEND_SDIST_BYTES = 256 * 1024 * 1024
 _MAX_BACKEND_SDIST_MEMBERS = 50_000
 _MAX_BACKEND_SDIST_EXPANDED_BYTES = 2 * 1024 * 1024 * 1024
 _MAX_OXC_SOURCE_BYTES = 1024 * 1024
-# The compiler a release's own lockfile requires, when that is newer than the
-# `rust-version` the source declares. The updater verifies the declared minimum
-# against the source, so the compiler to *build* with is owned here instead of
-# being restated in Nix. Drop an entry once the release's own `rust-version`
-# reaches it.
-_RUST_TOOLCHAIN_BUILD_OVERRIDES: dict[str, str] = {
-    "0.1.902-beta": "1.90.0",
-    "0.1.909-beta": "1.90.0",
-    "0.1.910-beta": "1.90.0",
-    # tauri 2.12.4 and muda 0.20.0 require rustc 1.90; rust-version stays 1.89.
-    "0.1.911-beta": "1.90.0",
-    # tauri 2.12.5 and muda 0.20.0 still require rustc 1.90; rust-version 1.89.
-    "0.1.913-beta": "1.90.0",
-    # 0.1.914-beta keeps tauri 2.12.5, muda 0.20.0, and rust-version 1.89.
-    "0.1.914-beta": "1.90.0",
-}
+# The oldest compiler the desktop lockfile builds with. Since 0.1.902-beta the
+# locked tauri (2.12.4 and later), muda 0.20.0, and tray-icon crates require
+# rustc 1.90 while the source still declares `rust-version = 1.89`; 0.1.916-beta
+# failed with that 1.89 compiler. The updater verifies the declared minimum
+# against the source, and the compiler to *build* with is the newer of the
+# two. Raise this floor when a locked crate needs a newer compiler; drop it once
+# the source's own `rust-version` reaches it.
+_RUST_TOOLCHAIN_BUILD_FLOOR = "1.90.0"
 _OXC_PACKAGE_PATH = "studio/backend/core/data_recipe/oxc-validator/package.json"
 _OXC_LOCK_PATH = "studio/backend/core/data_recipe/oxc-validator/package-lock.json"
 _OXC_VALIDATE_PATH = OXC_VALIDATOR_PATH.as_posix()
@@ -901,14 +893,17 @@ def _source_hash(source: SourceEntry, hash_type: str, url: str | None = None) ->
     return matches[0]
 
 
-def _rust_toolchain_build_version(*, version: str, declared: str) -> str:
-    """Return the compiler this release's closure builds with.
+def _rust_toolchain_build_version(declared: str) -> str:
+    """Return the compiler the candidate closure builds with.
 
-    ``declared`` is the source-owned ``rust-version`` the updater verifies
-    against the candidate; an override only widens it for releases whose own
-    lockfile needs a newer compiler.
+    ``declared`` is the canonical source-owned ``rust-version`` the updater
+    verifies against the candidate; the lockfile floor only ever raises it.
     """
-    return _RUST_TOOLCHAIN_BUILD_OVERRIDES.get(version, declared)
+    return max(
+        declared,
+        _RUST_TOOLCHAIN_BUILD_FLOOR,
+        key=lambda version: tuple(int(part) for part in version.split(".")),
+    )
 
 
 def _closure_plan_payload(
@@ -927,8 +922,7 @@ def _closure_plan_payload(
         "app": {
             "commit": source.commit,
             "rustToolchainVersion": _rust_toolchain_build_version(
-                version=info.version,
-                declared=cast("str", metadata["rustToolchainVersion"]),
+                cast("str", metadata["rustToolchainVersion"]),
             ),
             "sourceHash": _source_hash(source, "srcHash"),
             "tag": cast("str", metadata["tag"]),

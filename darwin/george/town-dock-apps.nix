@@ -34,7 +34,7 @@ dock.mkDockModule {
     (appPath "claude" "Claude.app")
     (appPath "codex" "ChatGPT.app")
     (appPath "grok-bot" "Grok Bot.app")
-    (appPath "town-assistant" "Town Assistant.app")
+    (appPath "town-assistant" "Town.app")
     (appPath "capy-nightly" "Capy Nightly.app")
     (appPath "ghostty" "Ghostty.app")
     (appPath "rex-beta" "Rex Beta.app")

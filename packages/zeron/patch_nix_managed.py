@@ -451,8 +451,34 @@ _PATCHES_136 = (
 )
 
 
+# 0.2.138 lets another device ask this engine to update: apply_inner first
+# consults UpdateAbility, then records a durable update transaction
+# (crates/update/src/transaction.rs) that the engine tries and commits on its
+# next boot. Every transaction request still follows a guarded fetch_latest,
+# here or in the CLI, so no transaction can be created under Nix. The guard
+# precedes the ability check so a remote request reports Nix ownership rather
+# than a vendor install-method refusal.
+_PATCHES_138 = (
+    *_PATCHES_136[:-1],
+    _update(
+        (
+            "    async fn apply_inner(&self, require_quiescent: bool)"
+            " -> anyhow::Result<Option<AppliedUpdate>> {\n"
+            "        let ability = UpdateAbility::current();\n"
+        ),
+        (
+            "    async fn apply_inner(&self, require_quiescent: bool)"
+            " -> anyhow::Result<Option<AppliedUpdate>> {\n"
+            "        ensure_updates_mutable()?;\n"
+            "        let ability = UpdateAbility::current();\n"
+        ),
+    ),
+)
+
+
 # Supported updater layouts, newest first. Exactly one must match the tree.
 _LAYOUTS = {
+    "0.2.138": _PATCHES_138,
     "0.2.136": _PATCHES_136,
     "0.2.115": _PATCHES_115,
     "0.2.97": _PATCHES_097,

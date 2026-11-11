@@ -267,6 +267,9 @@ def test_copilot_registry_exports_only_on_arm64_darwin() -> None:
     }
 
 
+_AUTOMATION_ENUM_SPAN = b"latest.jsonagentsmission_control_internal"
+
+
 def test_copilot_patch_disables_acquisition_and_staged_install() -> None:
     """No update can be fetched, downloaded, or verified after transformation."""
     module = _load_patch_module()
@@ -276,7 +279,7 @@ def test_copilot_patch_disables_acquisition_and_staged_install() -> None:
 
     assert len(patched) == len(original)
     module.validate_disabled_payload(patched)
-    unrelated = b"latest.jsongdrivelocal"
+    unrelated = _AUTOMATION_ENUM_SPAN
     for _label, vendor, disabled, expected_count in module.PATCHES:
         assert vendor not in patched.replace(unrelated, b"")
         assert patched.count(disabled) == expected_count
@@ -337,9 +340,9 @@ def test_copilot_patch_rejects_drifted_vendor_inventory(
 
 
 def test_copilot_patch_keeps_the_unrelated_latest_json_enum_variant() -> None:
-    """1.1.34's automation enum spells latest.json but is not an update manifest."""
+    """The automation enum spells latest.json but is not an update manifest."""
     module = _load_patch_module()
-    span = b"latest.jsongdrivelocal"
+    span = _AUTOMATION_ENUM_SPAN
     assert [entry[1] for entry in module.UNRELATED_SPANS] == [span]
     original = _reviewed_patch_fixture(module)
     assert original.count(b"latest.json") == 4
@@ -358,7 +361,7 @@ def test_copilot_patch_rejects_drifted_unrelated_span_inventory(
 ) -> None:
     """The exempted span is pinned too, before mutation and after signing."""
     module = _load_patch_module()
-    span = b"latest.jsongdrivelocal"
+    span = _AUTOMATION_ENUM_SPAN
     original = _reviewed_patch_fixture(module)
     patched = module.patch_payload(original)
     drifted_original = original.replace(span, b"|".join([span] * span_count))

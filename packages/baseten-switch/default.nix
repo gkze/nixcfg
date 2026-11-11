@@ -52,25 +52,18 @@ let
       # StatusItemController tests ask NSStatusBar for an item before anything
       # created NSApplication; SkyLight then aborts in CGSConnectionByID
       # (Update run 41275217088). Initialize AppKit in those test classes'
-      # setUp the way the app does at launch, on the main thread. swift test
-      # runs that nonisolated hook on the XCTest worker, and creating
-      # NSApplication there made the worker's next Data(contentsOf:) SIGTRAP
-      # (signal 5, "System trap"; Updates 41616086680 and 41733265858).
+      # setUp the way the app does at launch, on the main thread.
       ./status-item-appkit-test-setup.patch
-      # That main-thread NSApplication moved the same shared-cache SIGTRAP
-      # (page offset 0x077c) from the first worker-side fixture read to the
-      # next one, testLegacySnapshot, after Shape.path ran on the worker
-      # (Update 41824237606, slots 0 and 4). The friendly backtrace preset
-      # skips those system frames. Run the fixture reads and SwiftUI tests
-      # on the main actor and keep Data(contentsOf:).
-      ./traffic-main-actor-tests.patch
-      # The status-item menu rebuild then left NSImage(contentsOf:) and its
-      # drawing handlers for a GCD workqueue. Update 42071786632 SIGTRAPped
-      # at the same page offset 0x077c on Thread 5 (_pthread_wqthread) after
-      # testUnsupportedStatusFallsBackWithoutRepeatedProbe started. Read and
-      # rasterize those images on the main thread, and remove the status
-      # item there too.
-      ./status-item-main-thread-images.patch
+      # SystemCLIRunner cleared its pipes' readabilityHandlers, an
+      # asynchronous dispatch-source cancel, and then closed or released the
+      # read handles. The next open() reused a still-watched descriptor and
+      # libdispatch trapped on a workqueue thread: SIGTRAP at shared-cache
+      # page offset 0x077c in every Update from 41616086680 through
+      # 42994094303, each time in the first test to open a file after
+      # testSystemRunnerMarksTimeoutBeforeTerminatingProcess. Drain each pipe
+      # with one blocking reader that alone closes it after EOF, and test the
+      # timeout-then-reuse sequence directly.
+      ./system-cli-runner-pipe-ownership.patch
     ];
 
     # Match upstream's release build: one universal Go CLI plus one universal,
@@ -146,9 +139,8 @@ let
       # `swift test` also starts swiftpm-testing-helper. This suite is XCTest
       # only. On Update 41616086680 attempt 2 the helper SIGTRAPped on
       # teardown while XCTest kept running, and SwiftPM failed the build.
-      # `--disable-swift-testing` stops that helper. The fixture SIGTRAP is
-      # the main-actor test patch above, and the workqueue SIGTRAP is the
-      # status-item image patch above, not this flag.
+      # `--disable-swift-testing` stops that helper. The workqueue SIGTRAP in
+      # XCTest itself is the pipe-ownership patch above, not this flag.
       (
         cd "$repo_root/mac/BasetenSwitch"
         env \

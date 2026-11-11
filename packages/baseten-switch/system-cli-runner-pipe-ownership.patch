@@ -1,0 +1,149 @@
+diff --git a/mac/BasetenSwitch/Sources/BasetenSwitch/RuntimeCoordination.swift b/mac/BasetenSwitch/Sources/BasetenSwitch/RuntimeCoordination.swift
+index 714e198..b6f63f6 100644
+--- a/mac/BasetenSwitch/Sources/BasetenSwitch/RuntimeCoordination.swift
++++ b/mac/BasetenSwitch/Sources/BasetenSwitch/RuntimeCoordination.swift
+@@ -245,6 +245,48 @@ private final class BoundedProcessBuffer: @unchecked Sendable {
+     }
+ }
+ 
++/// Drains one pipe with blocking reads and is the only owner of its
++/// descriptor, which it closes after EOF.
++///
++/// `readabilityHandler = nil` cancels FileHandle's dispatch read source
++/// asynchronously. Closing or releasing the handle right after it leaves
++/// libdispatch watching a closed descriptor; once the next open() reuses
++/// the number, libdispatch traps on a workqueue thread (SIGTRAP). Reading
++/// without a dispatch source, and closing only from the reader, removes
++/// that window. A timed-out caller stops waiting but does not close the
++/// pipe, so a lingering grandchild that still holds the write end only
++/// keeps this reader alive until it exits.
++private final class PipeDrain: @unchecked Sendable {
++    private let buffer: BoundedProcessBuffer
++    private let finished = DispatchGroup()
++
++    init(_ handle: FileHandle, limit: Int) {
++        let buffer = BoundedProcessBuffer(limit: limit)
++        self.buffer = buffer
++        finished.enter()
++        DispatchQueue.global(qos: .utility).async { [finished] in
++            while let data = try? handle.read(upToCount: 64 * 1024),
++                  !data.isEmpty {
++                buffer.append(data)
++            }
++            try? handle.close()
++            finished.leave()
++        }
++    }
++
++    func waitForEOF() async {
++        await withCheckedContinuation { continuation in
++            finished.notify(queue: .global(qos: .utility)) {
++                continuation.resume()
++            }
++        }
++    }
++
++    func string() -> String {
++        buffer.string()
++    }
++}
++
+ private final class ProcessCompletion: @unchecked Sendable {
+     private let lock = NSLock()
+     private var continuation: CheckedContinuation<(Int32, Bool), Never>?
+@@ -300,16 +342,8 @@ struct SystemCLIRunner: CLIRunning {
+ 
+         let stdoutPipe = Pipe()
+         let stderrPipe = Pipe()
+-        let stdout = BoundedProcessBuffer(limit: outputLimit)
+-        let stderr = BoundedProcessBuffer(limit: outputLimit)
+         process.standardOutput = stdoutPipe
+         process.standardError = stderrPipe
+-        stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
+-            stdout.append(handle.availableData)
+-        }
+-        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
+-            stderr.append(handle.availableData)
+-        }
+ 
+         let completion = ProcessCompletion()
+         process.terminationHandler = { terminated in
+@@ -319,14 +353,16 @@ struct SystemCLIRunner: CLIRunning {
+         do {
+             try process.run()
+         } catch {
+-            stdoutPipe.fileHandleForReading.readabilityHandler = nil
+-            stderrPipe.fileHandleForReading.readabilityHandler = nil
+             return CLIExecutionResult(
+                 status: -1,
+                 standardOutput: "",
+                 standardError: "Unable to launch command.",
+                 timedOut: false)
+         }
++        let stdout = PipeDrain(
++            stdoutPipe.fileHandleForReading, limit: outputLimit)
++        let stderr = PipeDrain(
++            stderrPipe.fileHandleForReading, limit: outputLimit)
+ 
+         let timeout = max(request.timeout, 0.1)
+         let timeoutTask = Task.detached {
+@@ -349,14 +385,9 @@ struct SystemCLIRunner: CLIRunning {
+             completion.install($0)
+         }
+         timeoutTask.cancel()
+-        stdoutPipe.fileHandleForReading.readabilityHandler = nil
+-        stderrPipe.fileHandleForReading.readabilityHandler = nil
+-        if timedOut {
+-            try? stdoutPipe.fileHandleForReading.close()
+-            try? stderrPipe.fileHandleForReading.close()
+-        } else {
+-            stdout.append(stdoutPipe.fileHandleForReading.readDataToEndOfFile())
+-            stderr.append(stderrPipe.fileHandleForReading.readDataToEndOfFile())
++        if !timedOut {
++            await stdout.waitForEOF()
++            await stderr.waitForEOF()
+         }
+ 
+         return CLIExecutionResult(
+diff --git a/mac/BasetenSwitch/Tests/BasetenSwitchTests/RuntimeCoordinationTests.swift b/mac/BasetenSwitch/Tests/BasetenSwitchTests/RuntimeCoordinationTests.swift
+index 2e8fefb..1e02cdd 100644
+--- a/mac/BasetenSwitch/Tests/BasetenSwitchTests/RuntimeCoordinationTests.swift
++++ b/mac/BasetenSwitch/Tests/BasetenSwitchTests/RuntimeCoordinationTests.swift
+@@ -2281,6 +2281,37 @@ final class RuntimeCoordinationTests: XCTestCase {
+         XCTAssertLessThan(Date().timeIntervalSince(started), 1.5)
+     }
+ 
++    func testSystemRunnerCapturesOutputAfterNormalExit() async {
++        let result = await SystemCLIRunner().run(CLIExecutionRequest(
++            binary: URL(fileURLWithPath: "/bin/sh"),
++            arguments: ["-c", "printf out; printf err >&2; exit 3"],
++            environment: ["PATH": "/usr/bin:/bin"],
++            timeout: 5))
++
++        XCTAssertFalse(result.timedOut)
++        XCTAssertEqual(result.status, 3)
++        XCTAssertEqual(result.standardOutput, "out")
++        XCTAssertEqual(result.standardError, "err")
++    }
++
++    // A pipe descriptor closed while a dispatch read source still watches it
++    // is reused by the next open(); libdispatch then traps on a workqueue
++    // thread and takes down whichever test runs next.
++    func testSystemRunnerTimeoutLeavesNoWatchedDescriptorForReuse() async throws {
++        let result = await SystemCLIRunner().run(CLIExecutionRequest(
++            binary: URL(fileURLWithPath: "/bin/sh"),
++            arguments: ["-c", "sleep 2"],
++            environment: ["PATH": "/usr/bin:/bin"],
++            timeout: 0.1))
++        XCTAssertTrue(result.timedOut)
++
++        for _ in 0..<256 {
++            let handle = try XCTUnwrap(FileHandle(forReadingAtPath: "/dev/null"))
++            try handle.close()
++        }
++        try await Task.sleep(nanoseconds: 300_000_000)
++    }
++
+     @MainActor
+     func testStateUsesInjectedAdminReaderAndOneImmutableSnapshot() async {
+         let reader = CountingAdminReader(

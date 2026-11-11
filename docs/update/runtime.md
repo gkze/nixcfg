@@ -179,19 +179,25 @@ cases (`testUnusableSecondaryReceiptRetainsRecoveryGate` and
 `testRouterWindowContentUsesNonObscuredLayoutGuide`) and passes
 `--disable-swift-testing`. The suite has no Swift Testing tests;
 `swiftpm-testing-helper` can SIGTRAP on teardown while XCTest is still
-running (Update 41616086680, attempt 2). That flag does not cover
-`testApprovedFixtureDecodesFullAnalyticsContract`. The status-item setUp
-was calling `NSApplication.shared` on the XCTest worker, and that worker's
-next `Data(contentsOf:)` then SIGTRAPped in the shared cache (signal 5,
-"System trap"; Updates 41616086680 and 41733265858). setUp now creates the
-application on the main thread, and the fixture test still uses
-`Data(contentsOf:)`. Menu images from `NSImage(contentsOf:)` and drawing
-handlers were still finishing on a GCD workqueue. Update 42071786632
-SIGTRAPped at that same page offset on `_pthread_wqthread` after the
-status-item menu rebuild, once
-`testUnsupportedStatusFallsBackWithoutRepeatedProbe` had started. Those
-reads and the status-item removal now run on the main thread. Those limits
-do not place the current release on hold.
+running (Update 41616086680, attempt 2). The status-item tests create
+`NSApplication` on the main thread in setUp, because SkyLight aborts in
+`CGSConnectionByID` without it.
+
+A separate SIGTRAP (signal 5, "System trap", on a `_pthread_wqthread`, at
+shared-cache page offset 0x077c) failed every Update from 41616086680
+through 42994094303. It never came from the test it interrupted. It always
+followed `testSystemRunnerMarksTimeoutBeforeTerminatingProcess` and landed
+in the next test to open a file: TrafficTests' first fixture read or
+`testUnsupportedStatusFallsBackWithoutRepeatedProbe`. On timeout,
+`SystemCLIRunner` cleared its pipes' `readabilityHandler`s, which cancel a
+dispatch read source asynchronously, and then closed the read handles. The
+next `open()` reused a descriptor that libdispatch still watched, and
+libdispatch trapped. The package patch drains each pipe with one blocking
+reader that alone closes the descriptor after EOF, and the suite now
+times out a process and then reuses descriptors in a dedicated test.
+Earlier patches that moved fixture reads and menu images to the main
+thread only changed which test the trap interrupted, so they were removed.
+The remaining limits do not place the current release on hold.
 
 Hosted Darwin validation builds native `root-closures` in continuation
 shards. Run 36672202468 showed why one job cannot do that work. After a
