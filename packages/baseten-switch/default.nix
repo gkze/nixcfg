@@ -49,21 +49,6 @@ let
       # 2026-10-30 UTC on. Pin that helper's writer clock to each event, so the
       # test keeps checking segment reads rather than the build date.
       ./raw-telemetry-test-clock.patch
-      # StatusItemController tests ask NSStatusBar for an item before anything
-      # created NSApplication; SkyLight then aborts in CGSConnectionByID
-      # (Update run 41275217088). Initialize AppKit in those test classes'
-      # setUp the way the app does at launch, on the main thread.
-      ./status-item-appkit-test-setup.patch
-      # SystemCLIRunner cleared its pipes' readabilityHandlers, an
-      # asynchronous dispatch-source cancel, and then closed or released the
-      # read handles. The next open() reused a still-watched descriptor and
-      # libdispatch trapped on a workqueue thread: SIGTRAP at shared-cache
-      # page offset 0x077c in every Update from 41616086680 through
-      # 42994094303, each time in the first test to open a file after
-      # testSystemRunnerMarksTimeoutBeforeTerminatingProcess. Drain each pipe
-      # with one blocking reader that alone closes it after EOF, and test the
-      # timeout-then-reuse sequence directly.
-      ./system-cli-runner-pipe-ownership.patch
     ];
 
     # Match upstream's release build: one universal Go CLI plus one universal,
@@ -131,16 +116,25 @@ let
         "$swift_test_home" \
         "$swift_test_clang_cache" \
         "$swift_test_module_cache"
-      # Hosted macos-15 builds of 0.8.1 SIGTRAPped inside XCTest (Update run
-      # 41275217088). The friendly backtrace preset skips system frames, so
-      # the crashed thread printed only "...". preset=full keeps the system
-      # frame that owns the trap. It does not change which tests run.
+      # preset=full prints the app and XCTest frames of a trapping thread.
+      # Frames inside system libraries are still omitted, so a trap on a GCD
+      # worker shows only `_pthread_wqthread`. It does not change which tests
+      # run.
       #
       # `swift test` also starts swiftpm-testing-helper. This suite is XCTest
       # only. On Update 41616086680 attempt 2 the helper SIGTRAPped on
       # teardown while XCTest kept running, and SwiftPM failed the build.
-      # `--disable-swift-testing` stops that helper. The workqueue SIGTRAP in
-      # XCTest itself is the pipe-ownership patch above, not this flag.
+      # `--disable-swift-testing` stops that helper.
+      #
+      # Darwin Nix builds run as a _nixbld user under the system-domain
+      # nix-daemon, which has no window-server session. AppKit traps
+      # (SIGTRAP at shared-cache page offset 0x077c) when such a process
+      # creates a window or status item: synchronously in NSWindow.init, or
+      # on a GCD worker soon after NSApplication.shared exists. That trap
+      # failed every Update from 41616086680 through 43110633449, and hosted
+      # probes as _nixbld1 reproduced it with or without the SystemCLIRunner
+      # tests. The skipped window and status-item cases need a headed
+      # session; no test here creates NSApplication.
       (
         cd "$repo_root/mac/BasetenSwitch"
         env \
@@ -163,7 +157,14 @@ let
             --disable-swift-testing \
             --scratch-path "$swift_test_build" \
             --skip testUnusableSecondaryReceiptRetainsRecoveryGate \
-            --skip testRouterWindowContentUsesNonObscuredLayoutGuide
+            --skip testRouterWindowContentUsesNonObscuredLayoutGuide \
+            --skip testTrackedStatusMenuRefreshProjectsAndRebuildsAuthAttention \
+            --skip testUpdateDetailsKeepUsableContentHeightWhenHostedWithoutShowing \
+            --skip testUpdateWindowCentersUsingItsFinalContentSizeWithoutShowing \
+            --skip testAvailableMenuItemDispatchesNativeActionToUpdateWindowCallback \
+            --skip testUnconfiguredDesktopIsDiscoverableAndOpensItsConfiguration \
+            --skip testCurrentMenuKeepsManualCheckBeforeOpenAppAndNoReleaseMarker \
+            --skip testReleaseChangesDoNotRebuildTrackedMenuOrChangeRoutingHealth
       )
       runHook postCheck
     '';
