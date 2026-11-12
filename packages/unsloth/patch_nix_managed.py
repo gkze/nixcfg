@@ -1304,6 +1304,62 @@ _BACKEND_PATCHES = (
         return False
 
 """,
+        ), (
+            # 0.1.917-beta shortened the docstring and added a nested cleanup
+            # that can uninstall or hide an extension-free copy. The guard
+            # stays ahead of that cleanup as well as of installation.
+            """def _install_package_wheel_first(
+    *,
+    event_queue: Any,
+    import_name: str,
+    display_name: str,
+    pypi_name: str,
+    required: bool = False,
+    extension: str | None = None,
+    **kwargs: Any,
+) -> bool:
+    \"\"\"Install a wheel-first fast-path package; any unsuccessful exit discards what it left; offline
+    changes nothing; with extension, an extension-free copy is replaced, not accepted.\"\"\"
+    from utils.ssm_runtime import _unblock_import, forget_imported_modules
+
+    _unblock_import(import_name)  # an earlier in-process block; this call probes afresh
+
+    def kernel_usable() -> bool:
+        return _is_importable(import_name) and (extension is None or _is_importable(extension))
+
+    if kernel_usable():
+        logger.info("%s already installed", display_name)
+        return True
+
+""",
+            """def _install_package_wheel_first(
+    *,
+    event_queue: Any,
+    import_name: str,
+    display_name: str,
+    pypi_name: str,
+    required: bool = False,
+    extension: str | None = None,
+    **kwargs: Any,
+) -> bool:
+    \"\"\"Install a wheel-first fast-path package; any unsuccessful exit discards what it left; offline
+    changes nothing; with extension, an extension-free copy is replaced, not accepted.\"\"\"
+    from utils.ssm_runtime import _unblock_import, forget_imported_modules
+
+    _unblock_import(import_name)  # an earlier in-process block; this call probes afresh
+
+    def kernel_usable() -> bool:
+        return _is_importable(import_name) and (extension is None or _is_importable(extension))
+
+    if kernel_usable():
+        logger.info("%s already installed", display_name)
+        return True
+
+    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
+        logger.info("Skipping %s installation in the Nix-managed backend", display_name)
+        return False
+
+""",
         ),),
     ),
     _SourcePatch(

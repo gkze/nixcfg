@@ -1,0 +1,5 @@
+{
+  "commit": "475ceee98d8d141423201193c9cf2be2da30e600",
+  "path": "studio/backend/core/training/worker.py",
+  "original": "def _install_package_wheel_first(\n    *,\n    event_queue: Any,\n    import_name: str,\n    display_name: str,\n    pypi_name: str,\n    required: bool = False,\n    extension: str | None = None,\n    **kwargs: Any,\n) -> bool:\n    \"\"\"Install a wheel-first fast-path package; any unsuccessful exit discards what it left; offline\n    changes nothing; with extension, an extension-free copy is replaced, not accepted.\"\"\"\n    from utils.ssm_runtime import _unblock_import, forget_imported_modules\n\n    _unblock_import(import_name)  # an earlier in-process block; this call probes afresh\n\n    def kernel_usable() -> bool:\n        return _is_importable(import_name) and (extension is None or _is_importable(extension))\n\n    if kernel_usable():\n        logger.info(\"%s already installed\", display_name)\n        return True\n\n"
+}
