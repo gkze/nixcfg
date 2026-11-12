@@ -26,9 +26,9 @@
       procps
     ];
     # `cmd/openai` is one mostly serial test binary that also compiles the
-    # CLI for its shell tests. A healthy hosted macos-15 builder needed 552s
-    # for 1.51.5 and 636s for 1.52.0, so Go's implicit 10m per-binary limit
-    # killed 1.52.0 in Update 43110633449. Keep an explicit bound for hangs.
+    # CLI for its shell tests. Healthy hosted macos-15 builders needed 552s
+    # for 1.51.5 and 636-747s for 1.52.0, so Go's implicit 10m per-binary
+    # limit killed 1.52.0 in Update 43110633449. Keep an explicit hang bound.
     checkFlags = (old.checkFlags or [ ]) ++ [ "-timeout=30m" ];
     patches = (old.patches or [ ]) ++ [
       ./darwin-provenance.patch

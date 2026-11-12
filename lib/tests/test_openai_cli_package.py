@@ -31,7 +31,7 @@ def test_openai_cli_runs_upstream_checks() -> None:
 
 
 def test_openai_cli_bounds_its_test_binary_above_the_hosted_darwin_runtime() -> None:
-    """1.52.0's `cmd/openai` binary took 636s on macos-15, past Go's 10m default."""
+    """1.52.0's `cmd/openai` binary took 636-747s on macos-15, past Go's 10m default."""
     assert_nix_ast_equal(
         expect_binding(_override_attrs().values, "checkFlags").value,
         '(old.checkFlags or [ ]) ++ [ "-timeout=30m" ]',
