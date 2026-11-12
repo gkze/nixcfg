@@ -1,11 +1,11 @@
 """Pure flake.lock rollback policy for partial promotion.
 
 When an update run fails for some targets, the run keeps promoting the
-targets that did not fail. A failed target whose flake input is lock-only
-(no ref pinned in ``flake.nix``) can be rolled back per input: point the root
-edge back at the baseline node, restore that node, and drop nodes that no
-longer participate in the graph. The rest of the lock keeps describing the
-candidate.
+targets that did not fail. A failed target's flake input can be rolled back
+per input: point the root edge back at the baseline node, restore that node,
+and drop nodes that no longer participate in the graph. The rest of the lock
+keeps describing the candidate. A ref is included only after its ``flake.nix``
+declaration was restored the same way.
 
 This module owns that graph transformation on the typed :class:`FlakeLock`
 model. Callers own the file I/O. A rollback that cannot be proven safe returns

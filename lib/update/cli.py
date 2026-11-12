@@ -58,6 +58,7 @@ from lib.update.derivation_validation import (
 from lib.update.errors import format_exception
 from lib.update.event_queue import EVENT_QUEUE_SIZE, run_event_pipeline
 from lib.update.failures import is_runner_store_fault
+from lib.update.flake_inputs import input_declaration_text, restore_input_declaration
 from lib.update.paths import get_repo_root
 from lib.update.prepare_shard import partition_prepare_targets
 from lib.update.quarantine import (
@@ -1315,24 +1316,77 @@ def _failed_targets_touched_flake(
     return tuple(touched)
 
 
+def _restore_ref_declarations(
+    workspace: update_persistence.IsolatedUpdateWorkspace,
+    input_names: frozenset[str],
+) -> str | None:
+    """Return ``flake.nix`` with each named input's attrset restored.
+
+    ``None`` means at least one input is not an attribute-set declaration in
+    both the baseline and the candidate. The caller then reverts both flake
+    files, because a partial declaration edit would leave that input's pin
+    split across the two files.
+    """
+    baseline_bytes = workspace.baseline_content(Path("flake.nix"))
+    nix_path = workspace.root / "flake.nix"
+    if baseline_bytes is None or not nix_path.is_file():
+        return None
+    try:
+        current = nix_path.read_text(encoding="utf-8")
+        baseline = baseline_bytes.decode()
+    except UnicodeError:
+        return None
+    restored = current
+    for name in sorted(input_names):
+        try:
+            if (
+                input_declaration_text(restored, name) is None
+                or input_declaration_text(baseline, name) is None
+            ):
+                return None
+            restored = restore_input_declaration(restored, baseline, name)
+        except ValueError:
+            return None
+    return restored
+
+
+def _ref_rollback_covers(
+    rollback: update_lock_policy.LockRollback | update_lock_policy.RollbackUnavailable,
+    touched_refs: frozenset[str],
+) -> bool:
+    """Return whether *rollback* puts every touched ref back on the baseline.
+
+    A ref the lock policy skipped, including one that follows another input,
+    is not covered. The caller then reverts both flake files instead of
+    leaving that ref's declaration and lock node on different pins.
+    """
+    if isinstance(rollback, update_lock_policy.LockRollback):
+        return touched_refs <= frozenset(rollback.inputs)
+    return rollback.reason == "failed inputs already match the baseline lock"
+
+
 def _rollback_failed_input_locks(
     workspace: update_persistence.IsolatedUpdateWorkspace,
     plan: _RunPlan,
     failed: Iterable[str],
     updaters: Mapping[str, UpdaterClass],
+    *,
+    include_refs: frozenset[str] = frozenset(),
+    commit: bool = True,
 ) -> update_lock_policy.LockRollback | update_lock_policy.RollbackUnavailable:
-    """Restore failed targets' lock-only input nodes in flake.lock.
+    """Restore failed targets' input nodes in flake.lock.
 
-    Ref-backed inputs are pinned by a URL in flake.nix, which cannot be rolled
-    back per-input, so those stay on the whole-file revert path. The graph
-    policy lives in :mod:`lib.update.lock_policy`; this function owns only the
-    reads and the write.
+    ``include_refs`` names ref inputs whose ``flake.nix`` declarations were
+    restored on their own. Every other ref stays out of this rollback so a
+    declaration that cannot be restored still takes the whole-file path. The
+    graph policy lives in :mod:`lib.update.lock_policy`; this function owns
+    the reads and, when ``commit`` is set, the write.
     """
     ref_names = {ref.name for ref in plan.resolved.all_ref_inputs}
     candidates: set[str] = set()
     for name in failed:
         candidates.update(_target_input_names(name, plan, updaters))
-    candidates -= ref_names
+    candidates -= ref_names - include_refs
     if not candidates:
         return update_lock_policy.RollbackUnavailable(
             "failed targets have no lock-only inputs"
@@ -1351,11 +1405,79 @@ def _rollback_failed_input_locks(
     result = update_lock_policy.rollback_input_locks(
         baseline, current, frozenset(candidates)
     )
-    if isinstance(result, update_lock_policy.LockRollback):
+    if commit and isinstance(result, update_lock_policy.LockRollback):
         lock_path.write_text(
             update_lock_policy.render_lock(result.lock), encoding="utf-8"
         )
     return result
+
+
+def _touched_ref_inputs(
+    plan: _RunPlan,
+    touched: tuple[str, ...],
+    updaters: Mapping[str, UpdaterClass],
+) -> frozenset[str]:
+    """Return ref inputs whose pins the touched failures moved."""
+    ref_names = {ref.name for ref in plan.resolved.all_ref_inputs}
+    return frozenset(
+        input_name
+        for name in touched
+        for input_name in _target_input_names(name, plan, updaters)
+        if input_name in ref_names
+    )
+
+
+def _commit_surgical_ref_rollback(
+    workspace: update_persistence.IsolatedUpdateWorkspace,
+    rollback: update_lock_policy.LockRollback | update_lock_policy.RollbackUnavailable,
+    restored_nix: str,
+) -> None:
+    """Write a planned declaration restore and its matching lock rollback."""
+    nix_path = workspace.root / "flake.nix"
+    if restored_nix != nix_path.read_text(encoding="utf-8"):
+        nix_path.write_text(restored_nix, encoding="utf-8")
+    if isinstance(rollback, update_lock_policy.LockRollback):
+        (workspace.root / "flake.lock").write_text(
+            update_lock_policy.render_lock(rollback.lock), encoding="utf-8"
+        )
+    update_flake.invalidate_flake_lock()
+
+
+def _roll_back_touched_inputs(
+    workspace: update_persistence.IsolatedUpdateWorkspace,
+    plan: _RunPlan,
+    failed: list[str],
+    updaters: Mapping[str, UpdaterClass],
+    touched: tuple[str, ...],
+) -> tuple[frozenset[str], str | None]:
+    """Roll failed inputs back, keeping every unrelated pin.
+
+    Returns the inputs restored to the baseline and, when per-input rollback
+    could not cover a moved input, the reason the whole-file path is required.
+    """
+    touched_refs = _touched_ref_inputs(plan, touched, updaters)
+    restored_nix = (
+        _restore_ref_declarations(workspace, touched_refs) if touched_refs else None
+    )
+    if touched_refs and restored_nix is not None:
+        rollback = _rollback_failed_input_locks(
+            workspace,
+            plan,
+            failed,
+            updaters,
+            include_refs=touched_refs,
+            commit=False,
+        )
+        if _ref_rollback_covers(rollback, touched_refs):
+            _commit_surgical_ref_rollback(workspace, rollback, restored_nix)
+            rolled = set(touched_refs)
+            if isinstance(rollback, update_lock_policy.LockRollback):
+                rolled.update(rollback.inputs)
+            return frozenset(rolled), None
+    rollback = _rollback_failed_input_locks(workspace, plan, failed, updaters)
+    if isinstance(rollback, update_lock_policy.LockRollback):
+        return frozenset(rollback.inputs), None
+    return frozenset(), rollback.reason
 
 
 def _input_backed_targets(
@@ -1379,11 +1501,14 @@ def _withhold_failed_clusters(
     """Revert candidates coupled to failed targets so the rest can be promoted.
 
     Coupling follows companion, aggregate, and flake-input edges. When a failure
-    left flake.lock changed, the failed targets' lock-only input nodes are
-    rolled back per-input so unrelated input-backed candidates survive. Ref
-    inputs pinned in flake.nix cannot be rolled back per-input; a failure on
-    one of those still reverts every input-backed candidate together with the
-    flake files.
+    left flake.lock changed, the failed targets' lock nodes are rolled back
+    per input so unrelated input-backed candidates survive. A ref whose
+    ``flake.nix`` declaration is an attribute set is restored the same way:
+    that declaration goes back to the baseline and the lock node follows it.
+    Other inputs, including a crate2nix package's source pin and the artifacts
+    generated for it, stay. A ref that is not an attribute set still reverts
+    both flake files and every input-backed candidate, because splitting that
+    pin across the two files cannot be proven.
     """
     statuses = outcome.summary.statuses
     failed = [name for name, status in statuses.items() if status == "error"]
@@ -1401,11 +1526,9 @@ def _withhold_failed_clusters(
     global_flake_revert = False
     rollback_unavailable: str | None = None
     if touched:
-        rollback = _rollback_failed_input_locks(workspace, plan, failed, updaters)
-        if isinstance(rollback, update_lock_policy.LockRollback):
-            rolled_back_inputs = frozenset(rollback.inputs)
-        else:
-            rollback_unavailable = rollback.reason
+        rolled_back_inputs, rollback_unavailable = _roll_back_touched_inputs(
+            workspace, plan, failed, updaters, touched
+        )
         global_flake_revert = any(
             bool(_target_input_names(name, plan, updaters) - rolled_back_inputs)
             for name in touched
@@ -1479,7 +1602,7 @@ def _withhold_failed_clusters(
             "withheld coupled candidates",
             failed=failed,
             withheld=sorted(dropped),
-            flakeReverted=bool(touched),
+            flakeReverted=global_flake_revert,
         )
         if rollback_unavailable is not None:
             monitor.note(

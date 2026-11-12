@@ -219,9 +219,12 @@ flowchart TD
 
 1. **A quarantine on one platform holds the package on all of them.** The
    prepare records its hold on the candidate: the files it restored for
-   failed and withheld packages, both flake files after a whole-file revert,
-   and the lock-only inputs it rolled back. Scratch writes restored only as
-   cleanup are not held. Both native folds restore the union of holds in
+   failed and withheld packages, the inputs whose lock nodes it rolled back,
+   and both flake files only when a ref declaration cannot be restored on its
+   own. A ref declared as an attribute set is restored in place so other pins,
+   including a crate2nix source pin and the artifacts generated for it, stay
+   together. Scratch writes restored only as cleanup are not held. Both native
+   folds restore the union of holds in
    every candidate before the 3-way merge, so another platform's bump of a
    quarantined package cannot win against a restore that equals the
    baseline. Disagreements no hold explains, such as two revisions of one

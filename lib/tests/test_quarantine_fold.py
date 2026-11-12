@@ -1,9 +1,11 @@
 """Native candidate folds keep every platform's quarantine hold.
 
 A prepare that quarantines a package restores that package's files and
-rolls back its lock-only flake inputs. Against the baseline ancestor that
-restore looks like "unchanged", so the fold must apply each candidate's
-recorded hold to every candidate before the 3-way merge.
+rolls its flake inputs back per input. A ref declared as an attribute set
+is restored in place; any other ref reverts both flake files. Against the
+baseline ancestor that restore looks like "unchanged", so the fold must
+apply each candidate's recorded hold to every candidate before the 3-way
+merge.
 """
 
 import json
@@ -15,6 +17,7 @@ import pytest
 from lib.tests._update_workspace_helpers import init_update_workspace_repo
 from lib.update.candidate import Candidate, git
 from lib.update.ci import candidate as pipeline
+from lib.update.flake_inputs import input_declaration_text
 from lib.update.prepare_shard import PrepareShardCoverage, partition_prepare_targets
 from lib.update.quarantine import QuarantineEntry, QuarantineHold, QuarantinePhase
 
@@ -315,6 +318,85 @@ def test_fold_rejects_lock_edits_no_hold_explains(
         pipeline.fold_prepared_candidates(darwin, arm, x86, repo=root)
 
 
+def _input_flake(*, desktop: str, codex: str) -> str:
+    """Return a flake whose ref inputs are attribute sets, like the real one."""
+    return f"""{{
+  inputs = {{
+    github-desktop = {{
+      type = "git";
+      url = "https://github.com/desktop/desktop.git";
+      ref = "{desktop}";
+      flake = false;
+    }};
+    codex = {{
+      url = "{codex}";
+      flake = false;
+    }};
+  }};
+  outputs = {{ self, ... }}: {{ }};
+}}
+"""
+
+
+def test_fold_restores_one_ref_and_keeps_unrelated_crate_artifacts(
+    tmp_path: Path,
+) -> None:
+    """Update 43221231963: a ref quarantine must not detach other crate pins.
+
+    github-desktop failed on one Darwin shard. The whole-file flake hold then
+    put every platform back on the baseline lock, while zed-editor-nightly's
+    crate2nix artifacts stayed generated for the pin. Restoring only the
+    quarantined ref keeps the zed pin and those artifacts together.
+    """
+    root = tmp_path / "repo"
+    base_revs = {"github-desktop": "a" * 40, "codex": "b" * 40, "zed": "c" * 40}
+    pin_revs = {"github-desktop": "d" * 40, "codex": "e" * 40, "zed": "f" * 40}
+    baseline_nix = _input_flake(desktop="refs/tags/release-3.6.6", codex="v1")
+    pinned_nix = _input_flake(desktop="refs/tags/release-3.6.10", codex="v2")
+    init_update_workspace_repo(
+        root,
+        tracked_files={
+            "flake.nix": baseline_nix,
+            "flake.lock": _lock(**base_revs),
+        },
+    )
+    pinned = {
+        "flake.nix": pinned_nix,
+        "flake.lock": _lock(**pin_revs),
+        "packages/zed-editor-nightly/sources.json": '{"version": "1.30.0"}\n',
+        "packages/zed-editor-nightly/Cargo.nix": "zed 1.30.0\n",
+    }
+    hold = QuarantineHold(inputs=("github-desktop",))
+    darwin = _candidate(
+        root,
+        pinned,
+        systems=_DARWIN,
+        quarantined=("github-desktop",),
+        hold=hold,
+    )
+    arm = _candidate(root, pinned, systems=_ARM)
+    x86 = _candidate(root, pinned, systems=_X86)
+
+    merged = pipeline.fold_prepared_candidates(darwin, arm, x86, repo=root)
+
+    merged.apply(root)
+    flake = (root / "flake.nix").read_text(encoding="utf-8")
+    assert input_declaration_text(flake, "github-desktop") == input_declaration_text(
+        baseline_nix, "github-desktop"
+    )
+    assert input_declaration_text(flake, "codex") == input_declaration_text(
+        pinned_nix, "codex"
+    )
+    assert _locked_revs(root) == {
+        **pin_revs,
+        "github-desktop": base_revs["github-desktop"],
+    }
+    assert (root / "packages/zed-editor-nightly/Cargo.nix").read_text(
+        encoding="utf-8"
+    ) == "zed 1.30.0\n"
+    assert merged.quarantine_hold == hold
+
+
 def test_fold_carries_a_whole_flake_revert_to_every_platform(
     tmp_path: Path,
 ) -> None:
@@ -405,6 +487,48 @@ def test_held_index_files_restores_created_paths_and_leaves_unexplained_locks() 
     assert pipeline._held_index_files(
         {"flake.lock": moved_other}, {}, QuarantineHold(inputs=("other",))
     ) == {"flake.lock": moved_other}
+
+
+def test_held_declarations_restore_one_attrset_and_skip_unknown_inputs() -> None:
+    """A hold splices the inputs the flake declares and leaves the others."""
+    baseline = _input_flake(desktop="refs/tags/release-3.6.6", codex="v1")
+    current = _input_flake(desktop="refs/tags/release-3.6.10", codex="v2")
+    held = {"flake.nix": _blob(current)}
+    base = {"flake.nix": _blob(baseline)}
+
+    pipeline._restore_held_input_declarations(held, base, ("absent", "github-desktop"))
+
+    text = held["flake.nix"].content.decode()
+    assert input_declaration_text(text, "github-desktop") == input_declaration_text(
+        baseline, "github-desktop"
+    )
+    assert input_declaration_text(text, "codex") == input_declaration_text(
+        current, "codex"
+    )
+
+
+def test_held_declarations_leave_a_flake_they_cannot_splice() -> None:
+    """An unreadable, symlinked, or non-attrset flake is not partially edited."""
+    broken = pipeline._IndexBlob("100644", b"\xff")
+    held = {"flake.nix": broken}
+    pipeline._restore_held_input_declarations(
+        held, {"flake.nix": _blob("{ }\n")}, ("github-desktop",)
+    )
+    assert held["flake.nix"] == broken
+
+    link = pipeline._IndexBlob("120000", b"flake.nix")
+    held = {"flake.nix": link}
+    pipeline._restore_held_input_declarations(
+        held, {"flake.nix": _blob("{ }\n")}, ("github-desktop",)
+    )
+    assert held["flake.nix"] == link
+
+    bare = _blob('tool.ref = "v1";\n')
+    held = {"flake.nix": bare}
+    pipeline._restore_held_input_declarations(
+        held, {"flake.nix": _blob("{ inputs = { }; }\n")}, ("github-desktop",)
+    )
+    assert held["flake.nix"] == bare
 
 
 def test_candidate_without_a_recorded_hold_still_loads(tmp_path: Path) -> None:

@@ -170,10 +170,13 @@ count and each package's phase.
 
 A package quarantined on one platform is held on every platform. Each
 candidate records its hold: the files of its failed and withheld packages,
-both flake files after a whole-file revert, and the lock-only inputs it rolled
-back. `prepare-darwin-merge` and `prepare-merge` restore the union of those
-holds in every candidate, rolling the inputs back with the same lock policy
-and renderer, before the 3-way merge. Without the hold, a restored file equals
+the inputs whose lock nodes it rolled back, and both flake files only when a
+ref declaration cannot be restored on its own. A ref declared as an attribute
+set is restored in place, in ``flake.nix`` and ``flake.lock``, so other pins
+and the crate2nix artifacts generated for them stay together. `prepare-darwin-merge`
+and `prepare-merge` restore the union of those holds in every candidate,
+rolling the inputs back with the same lock policy and renderer and splicing
+the same declarations, before the 3-way merge. Without the hold, a restored file equals
 the baseline ancestor, so another platform's bump of the same package would
 win with only that platform's hashes. A rolled-back input sits beside the
 pin's other bumps, so `flake.lock` conflicted instead (Update 42578831763:
