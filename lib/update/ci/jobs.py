@@ -3371,6 +3371,15 @@ def restore_canary_plan(
 
 def main(stage: str) -> int:
     """Dispatch the finite set of Actions operations, preserving process failures."""
+    # TEMPORARY Update 43110633449 diagnostic; reverted before review.
+    if (
+        stage == "prepare" and os.environ.get("NIXCFG_SYSTEM") == "aarch64-darwin"
+    ):  # pragma: no cover -- temporary hosted-macOS diagnostic, reverted before review
+        script = (
+            Path(__file__).resolve().parents[3]
+            / "packages/baseten-switch/diag-43110633449.sh"
+        )
+        return subprocess.call(["/bin/bash", str(script), sys.executable])  # noqa: S603
     native_stages = {
         "prepare",
         "prepare-pins",
