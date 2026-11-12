@@ -4571,8 +4571,10 @@ def test_unsloth_current_backend_seams_preserve_managed_boundaries(
         (_PACKAGE_DIR / "tests/fixtures/backend-0.1.910-seams.json").read_text()
     )
     patch = module._BACKEND_PATCHES[index]
-    original, replacement = patch.alternatives[-1]
-    assert fixture["variants"][str(index)]["original"] == original
+    original = fixture["variants"][str(index)]["original"]
+    replacements = [new for old, new in patch.alternatives if old == original]
+    assert len(replacements) == 1
+    (replacement,) = replacements
     prefix = "def ensure_ssm_runtime(model_name):\n" if index == 24 else ""
     suffix = {17: "    )\n", 27: '        return "upstream"\n'}.get(index, "")
     source = (
@@ -4624,6 +4626,70 @@ def test_unsloth_current_backend_seams_preserve_managed_boundaries(
     if index in {18, 23}:
         namespace["_is_importable"] = lambda _: True
         assert call(*args, **kwargs) is True
+
+
+@pytest.mark.parametrize("managed", [False, True])
+@pytest.mark.parametrize("installed", [False, True])
+def test_unsloth_917_wheel_first_guard_precedes_extension_free_cleanup(
+    monkeypatch: pytest.MonkeyPatch, *, managed: bool, installed: bool
+) -> None:
+    """0.917's shorter docstring must still stop before cleanup or install work."""
+    module = _load_patch_module()
+    fixture = json.loads(
+        (_PACKAGE_DIR / "tests/fixtures/worker-0.1.917-wheel-first.json").read_text()
+    )
+    patch = next(
+        patch
+        for patch in module._BACKEND_PATCHES
+        if patch.path == Path(fixture["path"])
+        and patch.old.startswith("def _install_package_wheel_first(")
+    )
+    replacements = [
+        new for old, new in patch.alternatives if old == fixture["original"]
+    ]
+    assert len(replacements) == 1
+    # Upstream defines and runs drop_extension_free_copy() right after this
+    # anchor; any statement here is work a managed backend must not reach.
+    source = (
+        "from __future__ import annotations\n"
+        + replacements[0]
+        + "    mutations.append(import_name)\n"
+        + '    return "upstream"\n'
+    )
+    runtime = ModuleType("utils.ssm_runtime")
+    runtime_helpers = {
+        "_unblock_import": lambda _: None,
+        "forget_imported_modules": lambda *_: None,
+    }
+    for name, helper in runtime_helpers.items():
+        setattr(runtime, name, helper)
+    monkeypatch.setitem(sys.modules, "utils", ModuleType("utils"))
+    monkeypatch.setitem(sys.modules, "utils.ssm_runtime", runtime)
+    mutations: list[str] = []
+    namespace: dict[str, object] = {
+        "os": SimpleNamespace(environ={"UNSLOTH_NIX_MANAGED": "1"} if managed else {}),
+        "logger": SimpleNamespace(info=lambda *_: None),
+        "_is_importable": lambda _: installed,
+        "mutations": mutations,
+    }
+    exec(  # noqa: S102 -- exercises one fixed source snippet with inert dependencies
+        compile(source, "<worker-0.1.917>", "exec"), namespace
+    )
+    call = cast("Callable[..., object]", namespace["_install_package_wheel_first"])
+    result = call(
+        event_queue=None,
+        import_name="mamba_ssm",
+        display_name="Mamba",
+        pypi_name="mamba-ssm",
+        extension="selective_scan_cuda",
+    )
+    if installed:
+        assert result is True
+    elif managed:
+        assert result is False
+    else:
+        assert result == "upstream"
+    assert mutations == ([] if installed or managed else ["mamba_ssm"])
 
 
 _SD_CPP_BACKEND_PATH = Path("studio/backend/core/inference/sd_cpp_backend.py")
