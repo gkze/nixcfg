@@ -119,8 +119,20 @@ def test_package_serializes_go_packages_with_timing_sensitive_probe_tests() -> N
     assert command_texts(shell, "go") == ["go test -p 1 ./..."]
 
 
-def test_package_skips_headed_swift_layout_guide_check() -> None:
-    """0.6.0's window-layout XCTest SIGTRAPs on hosted Darwin with no window server."""
+_WINDOW_SERVER_TESTS = (
+    "testRouterWindowContentUsesNonObscuredLayoutGuide",
+    "testTrackedStatusMenuRefreshProjectsAndRebuildsAuthAttention",
+    "testUpdateDetailsKeepUsableContentHeightWhenHostedWithoutShowing",
+    "testUpdateWindowCentersUsingItsFinalContentSizeWithoutShowing",
+    "testAvailableMenuItemDispatchesNativeActionToUpdateWindowCallback",
+    "testUnconfiguredDesktopIsDiscoverableAndOpensItsConfiguration",
+    "testCurrentMenuKeepsManualCheckBeforeOpenAppAndNoReleaseMarker",
+    "testReleaseChangesDoNotRebuildTrackedMenuOrChangeRoutingHealth",
+)
+
+
+def test_package_skips_xctests_that_need_a_window_server() -> None:
+    """A _nixbld builder has no GUI session; AppKit window creation traps there."""
     package = expect_instance(
         parse_nix_expr(
             (REPO_ROOT / "packages/baseten-switch/default.nix").read_text(
@@ -147,14 +159,10 @@ def test_package_skips_headed_swift_layout_guide_check() -> None:
         for command in command_texts(shell, "env")
         if "/usr/bin/swift test" in command
     }
-    assert any(
-        "--skip testUnusableSecondaryReceiptRetainsRecoveryGate" in command
-        for command in swift_tests
-    )
-    assert any(
-        command.endswith("--skip testRouterWindowContentUsesNonObscuredLayoutGuide")
-        for command in swift_tests
-    )
+    assert len(swift_tests) == 1
+    (command,) = swift_tests
+    assert "--skip testUnusableSecondaryReceiptRetainsRecoveryGate" in command
+    assert command.endswith(" ".join(f"--skip {name}" for name in _WINDOW_SERVER_TESTS))
 
 
 def test_package_does_not_launch_the_swift_testing_helper() -> None:
@@ -244,27 +252,8 @@ def test_package_applies_the_reviewed_nix_integration_patch() -> None:
 
     assert_nix_ast_equal(
         expect_binding(arguments.values, "patches").value,
-        "[ ./nix-managed.patch ./raw-telemetry-test-clock.patch"
-        " ./status-item-appkit-test-setup.patch"
-        " ./system-cli-runner-pipe-ownership.patch ]",
+        "[ ./nix-managed.patch ./raw-telemetry-test-clock.patch ]",
     )
-
-
-def test_status_item_tests_initialize_appkit_before_asking_for_an_item() -> None:
-    """Hosted Nix builds abort in CGSConnectionByID without NSApplication."""
-    patch = (
-        REPO_ROOT / "packages/baseten-switch/status-item-appkit-test-setup.patch"
-    ).read_text(encoding="utf-8")
-    for test_class in ("RuntimeCoordinationTests", "UpdatePresentationTests"):
-        header = f"final class {test_class}: XCTestCase {{\n"
-        assert header in patch
-        set_up = patch.split(header, 1)[1].split("\n+    }\n", 1)[0]
-        assert "+    override class func setUp() {" in set_up
-        assert "+        if Thread.isMainThread {" in set_up
-        assert "+            DispatchQueue.main.sync(execute: openAppKit)" in set_up
-        assert "+                _ = NSApplication.shared" in set_up
-        assert "--skip" not in set_up
-    assert "+import AppKit\n" in patch
 
 
 def test_package_embeds_the_exact_cli_used_by_the_copied_app() -> None:

@@ -174,30 +174,34 @@ OpenChamber keeps the 1.x upgrade patch.
 
 Baseten Switch participates in bulk updates. The 0.6.0 hold followed
 headless macos-15 Swift SIGTRAP failures and is lifted, and the 0.5.1
-check-phase exception is gone. The check still skips two headless XCTest
-cases (`testUnusableSecondaryReceiptRetainsRecoveryGate` and
-`testRouterWindowContentUsesNonObscuredLayoutGuide`) and passes
+check-phase exception is gone. The check skips
+`testUnusableSecondaryReceiptRetainsRecoveryGate` and passes
 `--disable-swift-testing`. The suite has no Swift Testing tests;
 `swiftpm-testing-helper` can SIGTRAP on teardown while XCTest is still
-running (Update 41616086680, attempt 2). The status-item tests create
-`NSApplication` on the main thread in setUp, because SkyLight aborts in
-`CGSConnectionByID` without it.
+running (Update 41616086680, attempt 2).
 
-A separate SIGTRAP (signal 5, "System trap", on a `_pthread_wqthread`, at
-shared-cache page offset 0x077c) failed every Update from 41616086680
-through 42994094303. It never came from the test it interrupted. It always
-followed `testSystemRunnerMarksTimeoutBeforeTerminatingProcess` and landed
-in the next test to open a file: TrafficTests' first fixture read or
-`testUnsupportedStatusFallsBackWithoutRepeatedProbe`. On timeout,
-`SystemCLIRunner` cleared its pipes' `readabilityHandler`s, which cancel a
-dispatch read source asynchronously, and then closed the read handles. The
-next `open()` reused a descriptor that libdispatch still watched, and
-libdispatch trapped. The package patch drains each pipe with one blocking
-reader that alone closes the descriptor after EOF, and the suite now
-times out a process and then reuses descriptors in a dedicated test.
-Earlier patches that moved fixture reads and menu images to the main
-thread only changed which test the trap interrupted, so they were removed.
-The remaining limits do not place the current release on hold.
+Darwin Nix builds run as a `_nixbld` user, which has no GUI session, and
+AppKit cannot create windows or status items there. Without
+`NSApplication`, `NSStatusBar` aborts in `CGSConnectionByID` (Update
+41275217088). `NSWindow.init` reaches WindowManagement's
+`-[WMClientWindowManager _createXPCConnection]`, whose
+`xpc_connection_set_target_uid` call traps in `_xpc_api_misuse`: SIGTRAP at
+shared-cache page offset 0x077c. Once `NSApplication.shared` exists, the
+same trap fires on a GCD worker a few hundred milliseconds to seconds
+later. The Swift backtrace then shows only `_pthread_wqthread`, because it
+omits system frames. That deferred trap failed every Update from
+41616086680 through 43110633449, in whichever test was running. Patches
+that moved image reads to the main thread, or that rewrote
+`SystemCLIRunner`'s pipe handling, only changed which test it interrupted.
+
+Hosted probes from PR update prepare for Update 43110633449 settled the
+cause. The trap reproduced as `_nixbld1` with and without the
+`SystemCLIRunner` tests. Without the `NSApplication` setup it moved into
+`NSWindow.init`. That isolated window test trapped as `_nixbld1` (crash
+report frame `_xpc_api_misuse`) and passed as root and as the console
+user. The check therefore skips the eight window and status-item cases,
+which need a GUI session, and no test creates `NSApplication`. The
+remaining limits do not place the current release on hold.
 
 Hosted Darwin validation builds native `root-closures` in continuation
 shards. Run 36672202468 showed why one job cannot do that work. After a
