@@ -43,7 +43,36 @@
           else
             prev.betterdisplay
         ) "BetterDisplay.app";
-        code-cursor = withManagedMacApp (final.mkSourceOverride "code-cursor" prev.code-cursor) "Cursor.app";
+        # Cursor 3.30 keeps @vscode/ripgrep as a JS resolver and ships the
+        # binary at @cursor/ripgrep-<platform>-<arch>/bin/rg. Nixpkgs still
+        # chmods or replaces @vscode/ripgrep/bin/rg, the path selected by
+        # capping vscodeVersion below 1.122. Older pins still have that file.
+        code-cursor = withManagedMacApp (
+          (final.mkSourceOverride "code-cursor" prev.code-cursor).overrideAttrs
+            (old: {
+              postPatch =
+                if prev.stdenv.hostPlatform.isDarwin then
+                  final.replaceStringsExact
+                    [ "chmod +x Contents/Resources/app/node_modules/@vscode/ripgrep/bin/rg" ]
+                    [
+                      ''
+                        bash ${./code-cursor/chmod-bundled-ripgrep.sh}
+                      ''
+                    ]
+                    (old.postPatch or "")
+                else
+                  final.replaceStringsExact
+                    [ "rm resources/app/node_modules/@vscode/ripgrep/bin/rg" ]
+                    [
+                      ''
+                        bash ${./code-cursor/chmod-bundled-ripgrep.sh} --link-to ${prev.ripgrep}/bin/rg
+                        mkdir -p resources/app/node_modules/@vscode/ripgrep/bin
+                        rm -f resources/app/node_modules/@vscode/ripgrep/bin/rg
+                      ''
+                    ]
+                    (old.postPatch or "");
+            })
+        ) "Cursor.app";
         commander = withManagedMacApp (final.callPackage ../packages/commander {
           selfSource = sources.commander;
         }) "Commander.app";
