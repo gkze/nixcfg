@@ -40,6 +40,18 @@ if TYPE_CHECKING:
     from lib.update.events import UpdateEvent
 
 
+_HOOKS_COMMAND = (
+    "nix",
+    "develop",
+    "--no-write-lock-file",
+    "--command",
+    "prek",
+    "run",
+    "--files",
+)
+# Fixers rewrite on the first pass; the second proves the result is stable.
+_HOOK_PASSES = 2
+
 _PACKAGING_ROOTS = frozenset({"packages", "overlays"})
 _ALLOWED_EXACT = frozenset({
     Path("flake.nix"),
@@ -357,8 +369,13 @@ def repair_agent_prompt(evidence: Path) -> str:
         "or contact anyone. Regenerate outputs through their generators. Add "
         "a focused package or planner regression test when behavior changes. "
         "This is one bounded repair attempt; explain an unfixable "
-        "infrastructure or credential failure instead of masking it. The "
-        "caller will independently rerun quality and native build gates."
+        "infrastructure or credential failure instead of masking it. Before "
+        f"finishing, run `{' '.join(_HOOKS_COMMAND)} <changed files>` until it "
+        "passes, and keep fixtures and tests valid for the formatted bytes "
+        "(store exact upstream text, including trailing blank lines, inside "
+        "JSON fixtures). The caller applies those hooks to your changes, rejects "
+        "a proposal they still fail, and independently reruns quality and "
+        "native build gates."
     )
 
 
@@ -391,6 +408,41 @@ def agent_command(agent: RepairAgent, evidence: Path) -> list[str]:
             ]
 
 
+async def apply_repository_hooks(
+    root: Path, evidence: Path, paths: tuple[Path, ...]
+) -> None:
+    """Let the repository's fixers own the proposal's bytes, then require clean hooks.
+
+    The first pass may rewrite files (end of file, whitespace, formatters).
+    The second pass must succeed without changes, so the exported proposal
+    already satisfies the quality gate's ``prek run -a``. Formatting happens
+    before any build, so no build evidence predates it.
+    """
+    files = [str(path) for path in paths if (root / path).is_file()]
+    if not files:
+        return
+    log_path = evidence / "repair-hooks.log"
+    with log_path.open("w") as log:
+
+        async def emit(event: UpdateEvent) -> None:
+            if event.kind is UpdateEventKind.LINE and event.message:
+                log.write(event.message + "\n")
+                log.flush()
+
+        for _ in range(_HOOK_PASSES):
+            result = await run_command(
+                [*_HOOKS_COMMAND, *files],
+                options=RunCommandOptions(
+                    source="repair-hooks", allow_failure=True, command_timeout=1800
+                ),
+                emit=emit,
+            )
+            if not result.returncode:
+                return
+    msg = f"Repair proposal fails repository hooks; see {log_path}"
+    raise RuntimeError(msg)
+
+
 async def repair_in_workspace(
     workspace: IsolatedUpdateWorkspace, evidence: Path, agent: RepairAgent
 ) -> tuple[Path, ...]:
@@ -414,6 +466,9 @@ async def repair_in_workspace(
         if result.returncode:
             msg = f"Repair agent failed with exit code {result.returncode}; see {evidence}"
             raise RuntimeError(msg)
+    await apply_repository_hooks(
+        workspace.root, evidence, repair_paths(workspace.changed_paths())
+    )
     paths = repair_paths(workspace.changed_paths())
     reject_unsafe_skips(workspace.root, workspace.baseline_content, paths)
     workspace.validate_changes(paths)

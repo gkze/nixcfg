@@ -16,6 +16,30 @@ from lib.update.cli_options import RepairAgent, UpdateOptions
 from lib.update.events import CommandResult, UpdateEvent, UpdateEventKind
 from lib.update.persistence import UpdateWorkspaceError
 
+# Stands in for `prek run --files`: like fix-end-of-file, it rewrites a file
+# with extra trailing newlines and exits 1 when it changed anything.
+_EOF_FIXER = """
+import sys
+from pathlib import Path
+changed = False
+for name in sys.argv[1:]:
+    path = Path(name)
+    data = path.read_bytes()
+    fixed = data.rstrip(b"\\n") + b"\\n" if data.strip() else b""
+    if fixed != data:
+        path.write_bytes(fixed)
+        changed = True
+raise SystemExit(int(changed))
+"""
+
+
+@pytest.fixture(autouse=True)
+def repository_hooks(monkeypatch) -> tuple[str, ...]:
+    """Replace the devshell hook command with a real, deterministic fixer process."""
+    command = (sys.executable, "-c", _EOF_FIXER)
+    monkeypatch.setattr(repair, "_HOOKS_COMMAND", command)
+    return command
+
 
 @pytest.fixture
 def repair_root(tmp_path: Path) -> Path:
@@ -445,6 +469,76 @@ def test_failed_agent_never_exports_a_proposal(
     assert not (tmp_path / "repair.patch").exists()
 
 
+def _propose_writing(
+    repair_root: Path, tmp_path: Path, monkeypatch, files: dict[str, str]
+) -> Path:
+    """Run a real agent process that writes *files*, and return the proposal."""
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    (evidence / "failure.log").write_text("anchor drifted\n")
+    program = (
+        "import json, sys; from pathlib import Path\n"
+        "for name, text in json.loads(sys.argv[1]).items():\n"
+        "    Path(name).write_text(text)\n"
+    )
+    monkeypatch.setattr(
+        repair,
+        "agent_command",
+        lambda _agent, _evidence: [sys.executable, "-c", program, json.dumps(files)],
+    )
+    output = tmp_path / "repair.patch"
+    repair.propose_repair(
+        repair_root, evidence=evidence, output=output, agent=RepairAgent.CODEX
+    )
+    return output
+
+
+@pytest.mark.parametrize("trailing", ["\n", "\n\n\n"])
+def test_proposal_exports_bytes_the_repository_hooks_accept(
+    repair_root: Path, tmp_path: Path, monkeypatch, trailing: str
+) -> None:
+    """Update 43110633449's proposal added a blank line at EOF and failed quality."""
+    output = _propose_writing(
+        repair_root,
+        tmp_path,
+        monkeypatch,
+        {"packages/example/fixture.txt": f"anchor{trailing}"},
+    )
+    staged = tmp_path / "staged"
+    init_update_workspace_repo(staged, tracked_files={".root": ""})
+    git(staged, "apply", str(output))
+    assert (staged / "packages/example/fixture.txt").read_text() == "anchor\n"
+    assert (tmp_path / "evidence/repair-hooks.log").exists()
+    assert (repair_root / "packages/example/fixture.txt").exists() is False
+
+
+def test_proposal_that_still_fails_the_hooks_is_never_exported(
+    repair_root: Path, tmp_path: Path, monkeypatch
+) -> None:
+    """A lint failure no fixer resolves leaves no proposal for quality to reject."""
+    monkeypatch.setattr(
+        repair,
+        "_HOOKS_COMMAND",
+        (sys.executable, "-c", "print('lint failed'); raise SystemExit(1)"),
+    )
+    with pytest.raises(RuntimeError, match="fails repository hooks"):
+        _propose_writing(
+            repair_root,
+            tmp_path,
+            monkeypatch,
+            {"packages/example/updater.py": "# repaired\n"},
+        )
+    assert not (tmp_path / "repair.patch").exists()
+    log = (tmp_path / "evidence/repair-hooks.log").read_text()
+    assert log.count("lint failed") == repair._HOOK_PASSES
+
+
+def test_repair_agent_prompt_names_the_hooks_the_caller_applies() -> None:
+    """The agent can run the same hook command before it finishes."""
+    prompt = repair.repair_agent_prompt(Path("/tmp/evidence"))
+    assert " ".join(repair._HOOKS_COMMAND) in prompt
+
+
 @pytest.mark.parametrize(
     "invalid", ["evidence-inside", "output-inside", "empty", "absent"]
 )
@@ -473,6 +567,7 @@ def repair_commands(repair_root, tmp_path, monkeypatch) -> dict[str, int | bool]
         "quality_calls": 0,
         "drift": False,
         "agent_calls": 0,
+        "hook_calls": 0,
     }
     monkeypatch.setattr(repair, "default_run_log_root", lambda: tmp_path / "state/runs")
 
@@ -486,7 +581,9 @@ def repair_commands(repair_root, tmp_path, monkeypatch) -> dict[str, int | bool]
     async def command(args, *, options, emit):
         code = 0
         lines = [UpdateEvent(source="test", kind=UpdateEventKind.COMMAND_START)]
-        if args[0] == sys.executable:
+        if tuple(args[: len(repair._HOOKS_COMMAND)]) == repair._HOOKS_COMMAND:
+            state["hook_calls"] += 1
+        elif args[0] == sys.executable:
             state["attempts"] += 1
             opts = json.loads(args[-1])
             assert opts["repair"] is None
@@ -579,6 +676,7 @@ def test_local_repair_is_bounded_and_promotes_only_checked_results(
     assert status == int(failed)
     assert repair_commands["attempts"] == (1 if mode == "already-works" else 2)
     assert repair_commands["agent_calls"] == (0 if mode == "already-works" else 1)
+    assert repair_commands["hook_calls"] == repair_commands["agent_calls"]
     promoted = not failed and mode != "check"
     assert (repair_root / "packages/example/sources.json").read_text() == (
         "updated\n" if promoted else "baseline\n"
