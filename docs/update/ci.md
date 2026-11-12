@@ -591,8 +591,12 @@ repair attempt. The agent works in an isolated checkout. The agent can change
 packaging under `packages/` and `overlays/`, plus `flake.nix`, `flake.lock`,
 and planner/selection coherence in `lib/update/planner.py` (with
 `lib/tests/test_update_planner.py`). CI rejects changes outside that scope. CI,
-acceptance-gate, and persistence changes are outside that scope. The agent
-job receives no write credentials. It uploads the checked patch and its
+acceptance-gate, and persistence changes are outside that scope. After the
+agent exits, `prek run --files` runs on its changed files in the devshell.
+The first pass lets fixers such as `fix-end-of-file` rewrite them, and a
+second pass must succeed unchanged, or no proposal is exported (Update
+43110633449's proposal failed quality on an extra blank line at end of
+file). The agent job receives no write credentials. It uploads the checked patch and its
 tree/digest receipt as the `repair` artifact. `start-repair` re-runs the path
 and check-skip policy on that patch (`nixcfg ci update check-repair`) and
 verifies the approved tree before it commits it. The follow-up dispatch uses
