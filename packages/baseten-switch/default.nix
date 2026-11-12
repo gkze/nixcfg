@@ -126,15 +126,16 @@ let
       # teardown while XCTest kept running, and SwiftPM failed the build.
       # `--disable-swift-testing` stops that helper.
       #
-      # Darwin Nix builds run as a _nixbld user under the system-domain
-      # nix-daemon, which has no window-server session. AppKit traps
-      # (SIGTRAP at shared-cache page offset 0x077c) when such a process
-      # creates a window or status item: synchronously in NSWindow.init, or
-      # on a GCD worker soon after NSApplication.shared exists. That trap
-      # failed every Update from 41616086680 through 43110633449, and hosted
-      # probes as _nixbld1 reproduced it with or without the SystemCLIRunner
-      # tests. The skipped window and status-item cases need a headed
-      # session; no test here creates NSApplication.
+      # Darwin Nix builds run as a _nixbld user, which has no GUI session.
+      # Creating a window there reaches WindowManagement's
+      # -[WMClientWindowManager _createXPCConnection], whose
+      # xpc_connection_set_target_uid call fails in _xpc_api_misuse: SIGTRAP
+      # at shared-cache page offset 0x077c. It is synchronous in NSWindow.init
+      # and lands on a GCD worker soon after NSApplication.shared exists. It
+      # failed every Update from 41616086680 through 43110633449. Hosted
+      # probes trapped as _nixbld1 and passed as root and as the console
+      # user. The skipped window and status-item cases need a GUI session;
+      # no test here creates NSApplication.
       (
         cd "$repo_root/mac/BasetenSwitch"
         env \

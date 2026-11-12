@@ -132,7 +132,7 @@ _WINDOW_SERVER_TESTS = (
 
 
 def test_package_skips_xctests_that_need_a_window_server() -> None:
-    """AppKit SIGTRAPs creating windows or status items with no window server."""
+    """A _nixbld builder has no GUI session; AppKit window creation traps there."""
     package = expect_instance(
         parse_nix_expr(
             (REPO_ROOT / "packages/baseten-switch/default.nix").read_text(

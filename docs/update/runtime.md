@@ -180,23 +180,28 @@ check-phase exception is gone. The check skips
 `swiftpm-testing-helper` can SIGTRAP on teardown while XCTest is still
 running (Update 41616086680, attempt 2).
 
-Darwin Nix builds run as a `_nixbld` user under the system-domain
-nix-daemon, which has no window-server session. AppKit cannot work there.
-Without `NSApplication`, `NSStatusBar` aborts in `CGSConnectionByID`
-(Update 41275217088). `NSWindow.init` traps with SIGTRAP at shared-cache
-page offset 0x077c. Once `NSApplication.shared` exists, the same trap
-fires on a GCD worker a few hundred milliseconds to seconds later, and the
-backtrace shows only `_pthread_wqthread` because system frames are
-omitted. That deferred trap failed every Update from 41616086680 through
-43110633449, in whichever test was running. Patches that moved image reads
-to the main thread, or that rewrote `SystemCLIRunner`'s pipe handling, only
-changed which test it interrupted. Hosted probes as `_nixbld1` (PR update
-prepare for Update 43110633449) trapped with and without the
-`SystemCLIRunner` tests, and trapped in `NSWindow.init` once the
-`NSApplication` setup was removed. The check therefore skips the eight
-window and status-item cases, which need a headed session, and no test
-creates `NSApplication`. The remaining limits do not place the current
-release on hold.
+Darwin Nix builds run as a `_nixbld` user, which has no GUI session, and
+AppKit cannot create windows or status items there. Without
+`NSApplication`, `NSStatusBar` aborts in `CGSConnectionByID` (Update
+41275217088). `NSWindow.init` reaches WindowManagement's
+`-[WMClientWindowManager _createXPCConnection]`, whose
+`xpc_connection_set_target_uid` call traps in `_xpc_api_misuse`: SIGTRAP at
+shared-cache page offset 0x077c. Once `NSApplication.shared` exists, the
+same trap fires on a GCD worker a few hundred milliseconds to seconds
+later. The Swift backtrace then shows only `_pthread_wqthread`, because it
+omits system frames. That deferred trap failed every Update from
+41616086680 through 43110633449, in whichever test was running. Patches
+that moved image reads to the main thread, or that rewrote
+`SystemCLIRunner`'s pipe handling, only changed which test it interrupted.
+
+Hosted probes from PR update prepare for Update 43110633449 settled the
+cause. The trap reproduced as `_nixbld1` with and without the
+`SystemCLIRunner` tests. Without the `NSApplication` setup it moved into
+`NSWindow.init`. That isolated window test trapped as `_nixbld1` (crash
+report frame `_xpc_api_misuse`) and passed as root and as the console
+user. The check therefore skips the eight window and status-item cases,
+which need a GUI session, and no test creates `NSApplication`. The
+remaining limits do not place the current release on hold.
 
 Hosted Darwin validation builds native `root-closures` in continuation
 shards. Run 36672202468 showed why one job cannot do that work. After a
