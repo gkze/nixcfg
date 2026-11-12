@@ -30,6 +30,14 @@ def test_openai_cli_runs_upstream_checks() -> None:
     assert "doCheck" not in binding_map(_override_attrs().values)
 
 
+def test_openai_cli_bounds_its_test_binary_above_the_hosted_darwin_runtime() -> None:
+    """1.52.0's `cmd/openai` binary took 636s on macos-15, past Go's 10m default."""
+    assert_nix_ast_equal(
+        expect_binding(_override_attrs().values, "checkFlags").value,
+        '(old.checkFlags or [ ]) ++ [ "-timeout=30m" ]',
+    )
+
+
 def test_openai_cli_check_support_covers_native_darwin_tests() -> None:
     """The PTY and metadata tests need the tools and patches the sandbox lacks."""
     attrs = _override_attrs()
