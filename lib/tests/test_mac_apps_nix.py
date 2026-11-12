@@ -2949,29 +2949,86 @@ def test_mac_apps_helper_stays_runnable_as_a_standalone_store_copy(
     assert result.returncode == 0, result.stderr
 
 
+def _chmod_ignoring_rsync(path: Path) -> Path:
+    """Return an rsync that copies archived modes and drops ``--chmod``."""
+    script = path / "rsync"
+    script.write_text(
+        "#!/bin/sh\n"
+        "set -eu\n"
+        'while [ "$#" -gt 2 ]; do shift; done\n'
+        "src=${1%/}\n"
+        'mkdir -p "$2"\n'
+        'cp -a "$src/." "$2/"\n',
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return script
+
+
 @pytest.mark.parametrize("writable", [True, False])
+@pytest.mark.parametrize("rsync_ignores_chmod", [False, True])
 def test_copy_permissions_preserve_source_and_limit_write_access(
     tmp_path: Path,
     writable: bool,
+    rsync_ignores_chmod: bool,
 ) -> None:
     """Writable copies allow their owner to update without granting public write."""
     source = _fake_app_bundle(tmp_path / "source")
     source_file = source / "Contents" / "Info.plist"
-    source_file.chmod(0o444)
+    source_file.chmod(0o444 if writable else 0o666)
+    executable = source / "Contents" / "MacOS" / "Focus"
+    executable.parent.mkdir()
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
     destination = tmp_path / "Applications" / source.name
     destination.mkdir(parents=True)
+    rsync_path = (
+        str(_chmod_ignoring_rsync(tmp_path)) if rsync_ignores_chmod else _rsync_path()
+    )
 
     original_umask = os.umask(0)
     try:
         mac_apps_helper._rsync_copy(
-            source, destination, rsync_path=_rsync_path(), writable=writable
+            source, destination, rsync_path=rsync_path, writable=writable
         )
     finally:
         os.umask(original_umask)
 
     copied_mode = stat.S_IMODE((destination / "Contents" / "Info.plist").stat().st_mode)
+    copied_executable = stat.S_IMODE(
+        (destination / "Contents" / "MacOS" / "Focus").stat().st_mode
+    )
     assert copied_mode == (0o644 if writable else 0o444)
-    assert stat.S_IMODE(source_file.stat().st_mode) == 0o444
+    assert copied_executable == (0o755 if writable else 0o555)
+    assert stat.S_IMODE(source_file.stat().st_mode) == (0o444 if writable else 0o666)
+    assert stat.S_IMODE(executable.stat().st_mode) == 0o755
+
+
+def test_apply_copy_permissions_does_not_follow_symlinks(tmp_path: Path) -> None:
+    """A copied symlink must not change the mode of a file outside the bundle."""
+    root = tmp_path / "Focus.app"
+    contents = root / "Contents"
+    contents.mkdir(parents=True)
+    info = contents / "Info.plist"
+    info.write_text("plist", encoding="utf-8")
+    info.chmod(0o444)
+    outside = tmp_path / "outside"
+    outside.write_text("secret", encoding="utf-8")
+    outside.chmod(0o444)
+    (contents / "alias").symlink_to(outside)
+    linked = tmp_path / "linked"
+    linked.mkdir()
+    secret = linked / "secret"
+    secret.write_text("nested", encoding="utf-8")
+    secret.chmod(0o444)
+    (root / "linked").symlink_to(linked, target_is_directory=True)
+
+    mac_apps_helper._apply_copy_permissions(root, writable=True)
+
+    assert stat.S_IMODE(info.stat().st_mode) == 0o644
+    assert stat.S_IMODE(outside.stat().st_mode) == 0o444
+    assert stat.S_IMODE(secret.stat().st_mode) == 0o444
+    assert (contents / "alias").is_symlink()
 
 
 @pytest.mark.parametrize("writable", [True, False])

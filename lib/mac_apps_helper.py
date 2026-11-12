@@ -66,6 +66,12 @@ APPLICATION_TRANSACTION_PREFIX = ".nixcfg-app-activation-"
 APPLICATION_JOURNAL_NAME = "journal.json"
 APPLICATION_JOURNAL_VERSION = 1
 MAX_FILE_MODE = 0o7777
+# Owner write for a writable copy; every write bit for a read-only copy.
+# ``--chmod=u+w`` and ``--chmod=-w`` request the same modes from rsync. GNU
+# rsync applies them, which keeps a dry run in agreement with the copied tree.
+# macOS openrsync accepts ``--chmod`` and leaves the source mode unchanged, so
+# the helper sets these bits itself after the copy.
+_COPY_WRITE_BITS = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
 APPLICATION_ACTIVE_PHASES = {"prepared", "publishing"}
 APPLICATION_FINISHED_PHASES = {"committed", "recovered"}
 MANIFEST_FIELD_SEPARATOR = "\t"
@@ -629,6 +635,27 @@ def _rsync_flags(*, writable: bool) -> list[str]:
     ]
 
 
+def _apply_copy_permissions(root: Path, *, writable: bool) -> None:
+    """Set copy modes without depending on rsync implementing ``--chmod``.
+
+    A writable copy gains owner write and no other write bit. A read-only copy
+    loses every write bit. Executable bits stay as the archive recorded them.
+    Symlinks keep their targets' modes: openrsync and GNU rsync both leave
+    symlink permissions alone, and following one could change a file outside
+    the bundle.
+    """
+    for directory, _dirnames, filenames in os.walk(root, followlinks=False):
+        current = Path(directory)
+        paths = [current, *(current / name for name in filenames)]
+        for path in paths:
+            if path.is_symlink():
+                continue
+            mode = stat.S_IMODE(path.stat().st_mode)
+            updated = mode | stat.S_IWUSR if writable else mode & ~_COPY_WRITE_BITS
+            if updated != mode:
+                path.chmod(updated)
+
+
 def _rsync_copy(src: Path, dst: Path, *, rsync_path: str, writable: bool) -> None:
     result = subprocess.run(  # noqa: S603
         [rsync_path, *_rsync_flags(writable=writable), f"{src}/", str(dst)],
@@ -636,6 +663,7 @@ def _rsync_copy(src: Path, dst: Path, *, rsync_path: str, writable: bool) -> Non
     )
     if result.returncode != 0:
         raise SystemExit(result.returncode)
+    _apply_copy_permissions(dst, writable=writable)
 
 
 def _bundle_trees_match(
