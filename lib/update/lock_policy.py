@@ -18,8 +18,6 @@ an explicit :class:`RollbackUnavailable` reason instead of a silent no-op, so
 the caller can fall back to the whole-file revert and report why.
 """
 
-from __future__ import annotations
-
 import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
