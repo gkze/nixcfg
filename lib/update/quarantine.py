@@ -120,9 +120,9 @@ class QuarantineHold(BaseModel):
 
     ``paths`` are the repository-relative files of failed and withheld
     packages, plus ``flake.nix`` and ``flake.lock`` when those files were
-    reverted whole. ``inputs`` are flake inputs whose root edge and lock node
-    were rolled back. A ref declared as an attribute set is one of those
-    inputs: the fold also restores that declaration, so other pins stay.
+    reverted whole.     ``inputs`` are flake inputs whose root edge, lock node, and dependency
+    closure were rolled back. A ref declared as an attribute set is one of
+    those inputs: the fold also restores that declaration, so other pins stay.
     Whole-file flake paths are only for a ref whose declaration cannot be
     restored on its own.
 

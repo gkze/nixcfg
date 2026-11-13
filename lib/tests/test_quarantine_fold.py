@@ -397,6 +397,162 @@ def test_fold_restores_one_ref_and_keeps_unrelated_crate_artifacts(
     assert merged.quarantine_hold == hold
 
 
+def _graph_lock(
+    *,
+    worktrunk_rev: str,
+    crane_rev: str,
+    codex_rev: str,
+) -> str:
+    """Return a lock where worktrunk and codex share one crane node."""
+    nodes: dict[str, object] = {
+        "root": {"inputs": {"codex": "codex", "worktrunk": "worktrunk"}},
+        "worktrunk": {
+            "inputs": {"crane": "crane", "nixpkgs": ["nixpkgs"]},
+            "locked": {
+                "lastModified": 1,
+                "narHash": "sha256-worktrunk",
+                "owner": "o",
+                "repo": "worktrunk",
+                "rev": worktrunk_rev,
+                "type": "github",
+            },
+            "original": {
+                "owner": "o",
+                "ref": "v1",
+                "repo": "worktrunk",
+                "type": "github",
+            },
+        },
+        "codex": {
+            "inputs": {"crane": "crane"},
+            "locked": {
+                "lastModified": 1,
+                "narHash": "sha256-codex",
+                "owner": "o",
+                "repo": "codex",
+                "rev": codex_rev,
+                "type": "github",
+            },
+            "original": {"owner": "o", "repo": "codex", "type": "github"},
+        },
+        "crane": {
+            "locked": {
+                "lastModified": 1,
+                "narHash": "sha256-crane",
+                "owner": "o",
+                "repo": "crane",
+                "rev": crane_rev,
+                "type": "github",
+            },
+            "original": {"owner": "o", "repo": "crane", "type": "github"},
+        },
+    }
+    return (
+        json.dumps(
+            {"nodes": nodes, "root": "root", "version": 7}, indent=2, sort_keys=True
+        )
+        + "\n"
+    )
+
+
+def test_fold_copies_a_shared_dependency_instead_of_reverting_other_pins(
+    tmp_path: Path,
+) -> None:
+    """A quarantined flake keeps its baseline deps without moving another pin.
+
+    worktrunk and codex share the crane node. Restoring worktrunk copies the
+    baseline crane aside, so codex stays on the candidate crane and zed's
+    crate2nix artifacts stay with the zed pin.
+    """
+    root = tmp_path / "repo"
+    baseline_nix = _input_flake(desktop="refs/tags/v0.80.0", codex="v1").replace(
+        "github-desktop", "worktrunk"
+    )
+    pinned_nix = _input_flake(desktop="refs/tags/v0.81.0", codex="v2").replace(
+        "github-desktop", "worktrunk"
+    )
+    init_update_workspace_repo(
+        root,
+        tracked_files={
+            "flake.nix": baseline_nix,
+            "flake.lock": _graph_lock(
+                worktrunk_rev="a" * 40, crane_rev="c" * 40, codex_rev="b" * 40
+            ),
+        },
+    )
+    pinned = {
+        "flake.nix": pinned_nix,
+        "flake.lock": _graph_lock(
+            worktrunk_rev="d" * 40, crane_rev="e" * 40, codex_rev="f" * 40
+        ),
+        "packages/zed-editor-nightly/Cargo.nix": "zed 1.30.0\n",
+    }
+    hold = QuarantineHold(inputs=("worktrunk",))
+    darwin = _candidate(
+        root, pinned, systems=_DARWIN, quarantined=("worktrunk",), hold=hold
+    )
+    arm = _candidate(root, pinned, systems=_ARM)
+    x86 = _candidate(root, pinned, systems=_X86)
+
+    merged = pipeline.fold_prepared_candidates(darwin, arm, x86, repo=root)
+
+    merged.apply(root)
+    flake = (root / "flake.nix").read_text(encoding="utf-8")
+    lock = json.loads((root / "flake.lock").read_text(encoding="utf-8"))
+    assert input_declaration_text(flake, "worktrunk") == input_declaration_text(
+        baseline_nix, "worktrunk"
+    )
+    assert input_declaration_text(flake, "codex") == input_declaration_text(
+        pinned_nix, "codex"
+    )
+    nodes = lock["nodes"]
+    assert nodes["worktrunk"]["locked"]["rev"] == "a" * 40
+    assert nodes["worktrunk"]["inputs"]["crane"] == "crane_baseline"
+    assert nodes["worktrunk"]["inputs"]["nixpkgs"] == ["nixpkgs"]
+    assert nodes["crane_baseline"]["locked"]["rev"] == "c" * 40
+    assert nodes["codex"]["locked"]["rev"] == "f" * 40
+    assert nodes["crane"]["locked"]["rev"] == "e" * 40
+    assert (root / "packages/zed-editor-nightly/Cargo.nix").read_text(
+        encoding="utf-8"
+    ) == "zed 1.30.0\n"
+    assert merged.quarantine_hold == hold
+
+
+def test_fold_reverts_flake_files_when_the_lock_graph_cannot_be_restored(
+    tmp_path: Path,
+) -> None:
+    """An unreadable lock does not splice a declaration onto the candidate pin."""
+    root = tmp_path / "repo"
+    baseline_nix = _input_flake(desktop="refs/tags/v0.80.0", codex="v1")
+    init_update_workspace_repo(
+        root,
+        tracked_files={
+            "flake.nix": baseline_nix,
+            "flake.lock": _lock(**_BASE_REVS),
+        },
+    )
+    pinned = {
+        "flake.nix": _input_flake(desktop="refs/tags/v0.81.0", codex="v2"),
+        "flake.lock": "{",
+        "packages/zed-editor-nightly/Cargo.nix": "zed 1.30.0\n",
+    }
+    hold = QuarantineHold(inputs=("github-desktop",))
+    darwin = _candidate(
+        root, pinned, systems=_DARWIN, quarantined=("github-desktop",), hold=hold
+    )
+    arm = _candidate(root, pinned, systems=_ARM)
+    x86 = _candidate(root, pinned, systems=_X86)
+
+    merged = pipeline.fold_prepared_candidates(darwin, arm, x86, repo=root)
+
+    merged.apply(root)
+    assert (root / "flake.nix").read_text(encoding="utf-8") == baseline_nix
+    assert _locked_revs(root) == _BASE_REVS
+    assert (root / "packages/zed-editor-nightly/Cargo.nix").read_text(
+        encoding="utf-8"
+    ) == "zed 1.30.0\n"
+
+
 def test_fold_carries_a_whole_flake_revert_to_every_platform(
     tmp_path: Path,
 ) -> None:
@@ -469,6 +625,45 @@ def test_same_platform_fold_keeps_each_shards_lock_rollback(tmp_path: Path) -> N
 
 def _blob(content: str) -> pipeline._IndexBlob:
     return pipeline._IndexBlob("100644", content.encode())
+
+
+def test_held_lock_refuses_a_partial_or_unreadable_rollback() -> None:
+    """Splicing declarations requires every named input to roll back."""
+    base_lock = _blob(_lock(**_BASE_REVS))
+    same = {"flake.lock": base_lock}
+    assert pipeline._held_lock_matches_inputs(
+        same, same, QuarantineHold(inputs=("opencode",))
+    )
+    assert not pipeline._held_lock_matches_inputs(
+        {"flake.lock": pipeline._IndexBlob("120000", b"flake.lock")},
+        same,
+        QuarantineHold(inputs=("opencode",)),
+    )
+    broken = {"flake.lock": _blob("{"), "flake.nix": _blob("inputs: bumped\n")}
+    base = {"flake.lock": base_lock, "flake.nix": _blob("inputs: pinned\n")}
+    held = pipeline._held_index_files(
+        broken, base, QuarantineHold(inputs=("opencode",))
+    )
+    assert held["flake.lock"] == base_lock
+    assert held["flake.nix"].content == b"inputs: pinned\n"
+    pipeline._restore_held_input_declarations({}, {}, ())
+
+
+def test_held_lock_drops_a_rollback_that_skips_a_named_input() -> None:
+    """A follows input in the hold keeps the fold on the whole-file path."""
+    baseline = json.loads(_lock(tool="a" * 40, alias="b" * 40))
+    baseline["nodes"]["root"]["inputs"]["alias"] = ["tool"]
+    base_text = json.dumps(baseline, indent=2, sort_keys=True) + "\n"
+    current = _blob(_lock(tool="c" * 40, alias="d" * 40))
+    base_lock = _blob(base_text)
+    held = pipeline._held_index_files(
+        {"flake.lock": current, "flake.nix": _blob("inputs: bumped\n")},
+        {"flake.lock": base_lock, "flake.nix": _blob("inputs: pinned\n")},
+        QuarantineHold(inputs=("alias", "tool")),
+    )
+
+    assert held["flake.lock"] == base_lock
+    assert held["flake.nix"].content == b"inputs: pinned\n"
 
 
 def test_held_index_files_restores_created_paths_and_leaves_unexplained_locks() -> None:

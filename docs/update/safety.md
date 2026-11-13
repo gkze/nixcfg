@@ -221,9 +221,11 @@ flowchart TD
    prepare records its hold on the candidate: the files it restored for
    failed and withheld packages, the inputs whose lock nodes it rolled back,
    and both flake files only when a ref declaration cannot be restored on its
-   own. A ref declared as an attribute set is restored in place so other pins,
-   including a crate2nix source pin and the artifacts generated for it, stay
-   together. Scratch writes restored only as cleanup are not held. Both native
+   own. A ref declared as an attribute set is restored in place, with the lock
+   nodes its flake reaches. A dependency node another pin still uses is copied
+   aside, so that pin keeps the candidate revision and a crate2nix source pin
+   stays with the artifacts generated for it. Scratch writes restored only as
+   cleanup are not held. Both native
    folds restore the union of holds in
    every candidate before the 3-way merge, so another platform's bump of a
    quarantined package cannot win against a restore that equals the

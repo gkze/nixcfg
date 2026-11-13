@@ -172,8 +172,10 @@ A package quarantined on one platform is held on every platform. Each
 candidate records its hold: the files of its failed and withheld packages,
 the inputs whose lock nodes it rolled back, and both flake files only when a
 ref declaration cannot be restored on its own. A ref declared as an attribute
-set is restored in place, in ``flake.nix`` and ``flake.lock``, so other pins
-and the crate2nix artifacts generated for them stay together. `prepare-darwin-merge`
+set is restored in place, in ``flake.nix`` and ``flake.lock``, including the
+lock nodes that flake reaches. A dependency node another pin still uses is
+copied aside, so other pins and the crate2nix artifacts generated for them
+stay together. `prepare-darwin-merge`
 and `prepare-merge` restore the union of those holds in every candidate,
 rolling the inputs back with the same lock policy and renderer and splicing
 the same declarations, before the 3-way merge. Without the hold, a restored file equals

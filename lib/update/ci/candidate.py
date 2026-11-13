@@ -131,7 +131,12 @@ from lib.update.cli_options import RepairAgent, UpdateOptions
 from lib.update.derivation_validation import root_closure_check_attr
 from lib.update.flake_inputs import input_declaration_text, restore_input_declaration
 from lib.update.io import atomic_write_text
-from lib.update.lock_policy import LockRollback, render_lock, rollback_input_locks
+from lib.update.lock_policy import (
+    LockRollback,
+    RollbackUnavailable,
+    render_lock,
+    rollback_input_locks,
+)
 from lib.update.nix import get_current_nix_platform
 from lib.update.paths import get_repo_root
 from lib.update.persistence import IsolatedUpdateWorkspace, planned_update_paths
@@ -696,20 +701,51 @@ def _held_index_files(
             held.pop(path, None)
         else:
             held[path] = blob
+    if _held_lock_matches_inputs(held, base, hold):
+        _restore_held_input_declarations(held, base, hold.inputs)
+    elif hold.inputs:
+        for path in ("flake.nix", "flake.lock"):
+            blob = base.get(path)
+            if blob is not None:
+                held[path] = blob
+    return held
+
+
+def _held_lock_matches_inputs(
+    held: dict[str, _IndexBlob],
+    base: dict[str, _IndexBlob],
+    hold: QuarantineHold,
+) -> bool:
+    """Roll ``hold.inputs`` back, and report whether every one of them moved.
+
+    A partial rollback is not applied. Splicing those declarations while the
+    lock still describes the candidate would split the pin from its source.
+    """
+    if not hold.inputs:
+        return False
     lock = held.get("flake.lock")
     base_lock = base.get("flake.lock")
-    if hold.inputs and lock is not None and base_lock is not None and lock != base_lock:
+    if lock is None or base_lock is None or lock.mode == "120000":
+        return False
+    if lock == base_lock:
+        return True
+    try:
         rollback = rollback_input_locks(
             FlakeLock.model_validate_json(base_lock.content),
             FlakeLock.model_validate_json(lock.content),
             frozenset(hold.inputs),
         )
-        if isinstance(rollback, LockRollback):
-            held["flake.lock"] = _IndexBlob(
-                lock.mode, render_lock(rollback.lock).encode()
-            )
-    _restore_held_input_declarations(held, base, hold.inputs)
-    return held
+    except ValidationError:
+        return False
+    if isinstance(rollback, LockRollback) and frozenset(hold.inputs) <= frozenset(
+        rollback.inputs
+    ):
+        held["flake.lock"] = _IndexBlob(lock.mode, render_lock(rollback.lock).encode())
+        return True
+    return (
+        isinstance(rollback, RollbackUnavailable)
+        and rollback.reason == "failed inputs already match the baseline lock"
+    )
 
 
 def _restore_held_input_declarations(
