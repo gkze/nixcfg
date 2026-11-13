@@ -193,7 +193,17 @@ _DEVICE_FAULT_EXCERPT_LINES = 50
 # The same drv rebuilds bit-identical off the hosted VM. The faulted slot
 # failed, slot 0 sibling-stopped and publish failed coverage. Warmup slots
 # are explicit work units like prepare shards, so they hand off the same way.
-_DEVICE_FAULT_RETRY_SCOPES = frozenset({"rust-warmup", "cascade-warmup"})
+# 43344701312 validate-darwin-roots (darwin-argus): 563366 kernel
+# "(IOStorageFamily) disk2s7: I/O error." lines at 14:08, then substituting
+# rust-docs failed "clearing flags of path ...: No such file or directory"
+# and the daemon died; all three in-job retries hit the dead socket. The
+# shard failed and sibling-stopped the three healthy roots. A planned root
+# shard is fixed by its matrix entry, so it hands off the same way too.
+_DEVICE_FAULT_RETRY_SCOPES = frozenset({
+    "rust-warmup",
+    "cascade-warmup",
+    "closure-shard",
+})
 _DEVICE_FAULT_RETRY_ENV = "NIXCFG_DEVICE_FAULT_RETRY"
 _DEVICE_FAULT_ARTIFACT_SUFFIX = "-device-fault"
 _ARTIFACT_PAGE_SIZE = 100
@@ -1752,10 +1762,10 @@ def _finish_native_stage(
 
     A sibling stop already blocked publish. Prefetch receipts still upload so
     the next attempt can substitute them. A device-fault retry stays reserved
-    for a prepare shard or warmup slot that finished on a faulted disk with
-    no sibling failure. A warmup retry that faults again fails. A prepare
-    device check that times out keeps the updater's outcome and publishes
-    nothing; a warmup slot's still fails.
+    for a prepare shard, warmup slot or root shard that finished on a faulted
+    disk with no sibling failure. A validate retry that faults again fails. A
+    prepare device check that times out keeps the updater's outcome and
+    publishes nothing; a validate slot's still fails.
     """
     if not _sibling_stop_recorded(artifacts) and (
         summary := _failure_summary(artifacts / "result.json")
@@ -1774,8 +1784,8 @@ def _finish_native_stage(
         try:
             faults = hosted_device_faults()
         except HostedDeviceQueryTimeoutError as error:
-            # A warmup slot exists to publish; withholding would only move its
-            # failure to a later --max-jobs 0 consumer.
+            # A warmup slot or root shard exists to publish; withholding would
+            # only move its failure to a later --max-jobs 0 consumer.
             if stage != "prepare":
                 raise
             _withhold_unverified_runner(artifacts, error, log)
@@ -1799,9 +1809,9 @@ def _finish_native_stage(
 def _hands_off_device_faults(stage: str) -> bool:
     """Return whether a fresh-VM retry job can redo this stage's exact work.
 
-    Prepare shards and the rust/cascade warmup slots have one. Canary,
-    package, root and closure validation do not, so a fault there still
-    fails the job.
+    Prepare shards, the rust/cascade warmup slots and the planned root
+    shards have one. Canary, package and aggregate closure validation do
+    not, so a fault there still fails the job.
     """
     if stage == "prepare":
         return True
@@ -1874,11 +1884,11 @@ def _hand_off_device_fault(faults: list[str], returncode: int) -> int:
 
 
 def _fail_device_fault_retry(faults: list[str], returncode: int) -> int:
-    """Fail a warmup retry whose fresh VM faulted too; there is no third attempt."""
+    """Fail a validate retry whose fresh VM faulted too; there is no third attempt."""
     sys.stdout.write(
         "::error title=Hosted block device faulted on retry::"
         f"{len(faults)} kernel I/O errors on the fresh-VM retry; "
-        "this warmup slot has no result\n"
+        "this slot has no result\n"
     )
     sys.stdout.flush()
     return returncode or 1
@@ -1976,6 +1986,57 @@ def device_fault_slots() -> None:
     ]
     sys.stdout.write(f"Device-faulted slots for {prefix}*: {faulted}\n")
     _outputs(slots=json.dumps(faulted, separators=(",", ":")))
+
+
+def _planned_closure_shards() -> tuple[str, list[dict[str, str]]]:
+    """Return the artifact prefix and planned shards ``device-fault-shards`` inspects.
+
+    The shards are ``plan-darwin-closures``' matrix entries, so a retry cell
+    reruns one with exactly the inputs its first attempt had.
+    """
+    prefix = os.environ.get("NIXCFG_FAULT_ARTIFACT_PREFIX", "").strip()
+    try:
+        matrix = json.loads(os.environ.get("NIXCFG_FAULT_MATRIX", ""))
+    except json.JSONDecodeError:
+        matrix = None
+    include = matrix.get("include") if isinstance(matrix, dict) else None
+    if (
+        not prefix
+        or not isinstance(include, list)
+        or not include
+        or not all(
+            isinstance(entry, dict)
+            and set(entry) == {"shard", "roots", "system"}
+            and all(isinstance(value, str) and value for value in entry.values())
+            for entry in include
+        )
+    ):
+        msg = (
+            "device-fault-shards requires NIXCFG_FAULT_ARTIFACT_PREFIX and a "
+            "NIXCFG_FAULT_MATRIX of shard/roots/system entries"
+        )
+        raise RuntimeError(msg)
+    return prefix, cast("list[dict[str, str]]", include)
+
+
+def device_fault_shards() -> None:
+    """Emit the planned root shards whose first attempt handed off a device fault.
+
+    Root shards are named by the plan, not numbered, so the faulted entries
+    are emitted whole as a ``strategy.matrix.include`` list. An answer that
+    cannot be read fails this job, and the consumers then do not run.
+    """
+    prefix, shards = _planned_closure_shards()
+    names = run_artifact_names()
+    faulted = [
+        entry
+        for entry in shards
+        if f"{prefix}{entry['shard']}{_DEVICE_FAULT_ARTIFACT_SUFFIX}" in names
+    ]
+    sys.stdout.write(
+        f"Device-faulted shards for {prefix}*: {[entry['shard'] for entry in faulted]}\n"
+    )
+    _outputs(shards=json.dumps(faulted, separators=(",", ":")))
 
 
 def _candidate_identity() -> dict[str, str]:
@@ -3396,6 +3457,7 @@ def main(stage: str) -> int:
         "record-storage": record_named_storage,
         "dump-storage-fault": dump_hosted_storage_fault,
         "device-fault-slots": device_fault_slots,
+        "device-fault-shards": device_fault_shards,
         "require-cachix-daemon": require_cachix_daemon,
         "bootstrap": bootstrap,
         "quality": quality,

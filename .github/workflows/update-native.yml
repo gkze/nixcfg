@@ -72,7 +72,7 @@ on:
         default: ""
         type: string
       device_fault_retry:
-        description: Fresh-VM rerun of a device-faulted warmup slot; a second fault fails
+        description: Fresh-VM rerun of a device-faulted warmup or root cell; a second fault fails
         default: false
         type: boolean
     outputs:
