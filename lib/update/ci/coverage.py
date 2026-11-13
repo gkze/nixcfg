@@ -67,19 +67,22 @@ _REQUIRED_JOBS = (
     "validate-darwin-cascade-warmup-faults",
     "validate-darwin-packages",
     "validate-darwin-roots",
+    "validate-darwin-roots-faults",
     "validate-darwin-closures",
 )
-# A warmup -retry only runs for slots whose first attempt handed off a
-# device fault, so a clean stripe skips it. Its result is still mandatory.
+# A warmup or root -retry only runs for cells whose first attempt handed off
+# a device fault, so a clean matrix skips it. Its result is still mandatory.
 _RETRY_JOBS = (
     "validate-darwin-warm-rust-retry",
     "validate-darwin-cascade-warmup-retry",
+    "validate-darwin-roots-retry",
 )
 _RETRY_RESULTS = frozenset({"success", "skipped"})
 _DEVICE_FAULT_SUFFIX = "-device-fault"
 _RETRIED_FAULT_ARTIFACTS = (
     "validate-aarch64-darwin-rust-warmup-",
     "validate-aarch64-darwin-cascade-warmup-",
+    "validate-aarch64-darwin-closure-shard-",
 )
 _PACKAGE_REPORTS = (
     ("validate-aarch64-linux", "aarch64-linux"),
@@ -150,7 +153,7 @@ def parse_job_results(raw: str) -> dict[str, str]:
 def require_required_jobs(results: Mapping[str, str]) -> None:
     """Fail if a required validator was skipped, cancelled, or failed.
 
-    A warmup retry may be skipped (no slot faulted) but nothing else.
+    A warmup or root retry may be skipped (nothing faulted) but nothing else.
     """
     missing = [name for name in required_coverage_jobs() if name not in results]
     if missing:
@@ -171,9 +174,9 @@ def require_required_jobs(results: Mapping[str, str]) -> None:
 
 
 def require_device_fault_retries(evidence: Path) -> None:
-    """Fail unless every device-faulted warmup slot has a clean retry artifact.
+    """Fail unless every device-faulted warmup slot or root shard has a clean retry.
 
-    The faulted slot's own artifact keeps a ``-device-fault`` name, and the
+    The faulted cell's own artifact keeps a ``-device-fault`` name, and the
     fresh-VM retry uploads the clean name. A faulted slot with no clean
     counterpart was never redone, whatever the job results say.
     """
@@ -189,7 +192,7 @@ def require_device_fault_retries(evidence: Path) -> None:
         and not (evidence / path.name.removesuffix(_DEVICE_FAULT_SUFFIX)).is_dir()
     )
     if unretried:
-        msg = f"device-faulted warmup slots have no retry evidence: {', '.join(unretried)}"
+        msg = f"device-faulted Darwin cells have no retry evidence: {', '.join(unretried)}"
         raise CoverageError(msg)
 
 
@@ -451,13 +454,19 @@ def realized_darwin_root_store_paths(evidence: Path) -> dict[str, str]:
     ``qd427pyva2w…-darwin-system`` while macos-15 realized
     ``3jid4n7w…-darwin-system``. Flush published the Darwin path; a
     Linux-eval phantom 404'd the canary and skipped closures.
+
+    A ``-device-fault`` artifact is a quarantined runner's attempt. Its flush
+    published nothing, and its fresh-VM retry owns the shard's evidence.
     """
     if not evidence.is_dir():
         msg = f"coverage evidence is not a directory: {evidence}"
         raise CoverageError(msg)
     paths: dict[str, str] = {}
     for receipt_path in sorted(
-        path for path in evidence.rglob("shard-receipt.json") if path.is_file()
+        path
+        for path in evidence.rglob("shard-receipt.json")
+        if path.is_file()
+        and not path.relative_to(evidence).parts[0].endswith(_DEVICE_FAULT_SUFFIX)
     ):
         receipt = load_shard_receipt(receipt_path)
         if not receipt.system.endswith("-darwin") or receipt.failures:

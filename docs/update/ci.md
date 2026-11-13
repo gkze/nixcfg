@@ -46,7 +46,8 @@ flowchart TD
   CF --> PKG[validate-darwin-packages]
   CF --> ROOTS[validate-darwin-roots: planned shards]
   DEPS --> ROOTS
-  ROOTS --> CLOS[validate-darwin-closures]
+  ROOTS --> RRF[validate-darwin-roots-faults and -retry]
+  RRF --> CLOS[validate-darwin-closures]
   DEPS --> CLOS
   VA --> PUB[publish: coverage, certify, signed PR]
   VX --> PUB
@@ -57,7 +58,8 @@ flowchart TD
 ```
 
 `publish` also needs `prepare-merge`, `plan-darwin-closures`, both warmups
-with their `-faults` and `-retry` jobs, and `validate-darwin-roots`. `repair` needs every job above it, so it can
+with their `-faults` and `-retry` jobs, and `validate-darwin-roots` with its
+`-faults` and `-retry` jobs. `repair` needs every job above it, so it can
 collect each failure. `canary-slots` reads `.github/update-kick` on a push or
 the canary inputs on a dispatch. A canary dispatch runs the prepare/merge and
 plan producers followed by the requested canary jobs; full validation and
@@ -122,8 +124,8 @@ A completed real failure of a required sibling stops the jobs that can no
 longer reach publish. `lib/update/sibling_failfast.py` owns that decision.
 The watched conclusions are `failure`, `timed_out`, and `startup_failure`.
 `cancelled` and `skipped` do not stop anyone. A device-faulted Darwin prepare
-or warmup slot still completes successfully so a fresh VM can retry it. A
-warmup `-retry` cell watches its own stripe group. The stop exits the
+shard, warmup slot, or root shard still completes successfully so a fresh VM
+can retry it. A warmup or root `-retry` cell watches its own matrix's group. The stop exits the
 updater process and leaves the Cachix flush in place. GitHub
 `strategy.fail-fast` stays off because cancellation skips that flush.
 
@@ -548,7 +550,33 @@ bit-identical off the hosted VM.
   also fails when a warmup `-device-fault` artifact has no clean artifact
   from its retry.
 
-Canary, package, root-shard, and closure validation have no retry job. They
+The planned `validate-darwin-roots` shards hand off the same way. Run
+43344701312 needed this. The `darwin-argus` VM logged 563366 kernel
+`disk2s7` I/O errors within one minute. Substituting `rust-docs` then failed
+with `clearing flags of path ...: No such file or directory`, and the Nix
+daemon died. The shard's three in-job store-fault retries each hit the dead
+daemon socket, so the shard failed and sibling-stopped three healthy roots.
+Neither restarting the daemon nor `nix store verify --repair` makes that
+store trustworthy again, because paths written during the fault stay
+registered with bad bytes. A fresh VM can redo the shard exactly.
+
+- A root shard's work is its `plan-darwin-closures` matrix entry. A faulted
+  shard quarantines its runner and succeeds with `device_fault=true`, so it
+  does not sibling-stop the other roots. Its evidence uploads as
+  `validate-aarch64-darwin-closure-shard-<shard>-device-fault`.
+- `validate-darwin-roots-faults` lists this run's artifacts and emits the
+  faulted matrix entries whole, because root shards are named, not numbered.
+- `validate-darwin-roots-retry` reruns those entries once each, with
+  `device_fault_retry: true`, after the whole roots matrix finishes. A
+  device fault on the retry fails that shard.
+- `validate-darwin-closures`, certify, and coverage require roots and
+  `-faults` to succeed, and `-retry` to succeed or be skipped. Coverage reads
+  shard receipts only from clean artifact names.
+
+A root shard's kernel-log query that runs past its budget fails the shard,
+as it does for a warmup slot: the shard exists to publish its paths.
+
+Canary, package, and aggregate closure validation have no retry job. They
 do not query the kernel log, and a fault there still fails the job.
 
 ### Validation failures and timeouts

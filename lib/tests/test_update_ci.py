@@ -2640,6 +2640,96 @@ def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
     _assert_coverage_and_publish(workflow_jobs)
 
 
+def test_device_faulted_root_shard_reruns_once_on_a_fresh_vm() -> None:
+    """43344701312: argus's VM faulted and its failure stopped three healthy roots.
+
+    The shard's hand-off artifact names it; -faults reads the planned entry
+    back and -retry reruns exactly that entry after the whole roots matrix.
+    """
+    workflow = yaml.load(
+        (ROOT / ".github/workflows/update.yml").read_text(), Loader=yaml.BaseLoader
+    )
+    jobs = workflow["jobs"]
+    roots, faults, retry = (
+        jobs["validate-darwin-roots"],
+        jobs["validate-darwin-roots-faults"],
+        jobs["validate-darwin-roots-retry"],
+    )
+    assert set(faults["needs"]) == {"plan-darwin-closures", "validate-darwin-roots"}
+    assert " ".join(faults["if"].split()) == (
+        "always() && !cancelled() && needs.validate-darwin-roots.result == 'success'"
+    )
+    assert faults["runs-on"] == "ubuntu-24.04"
+    assert faults["outputs"]["shards"] == "${{ steps.faults.outputs.shards }}"
+    checkout, step = faults["steps"]
+    assert checkout["uses"].startswith("actions/checkout@")
+    assert checkout["with"] == {
+        "ref": "${{ github.event.inputs.repair_commit || github.sha }}",
+        "persist-credentials": "false",
+    }
+    assert step["id"] == "faults"
+    assert step["shell"] == "python"
+    assert step["env"] == {
+        "NIXCFG_ACTIONS_TOKEN": "${{ github.token }}",
+        "NIXCFG_FAULT_ARTIFACT_PREFIX": (
+            f"validate-{roots['with']['system']}-{roots['with']['scope']}-"
+        ),
+        "NIXCFG_FAULT_MATRIX": (
+            "${{ needs.plan-darwin-closures.outputs.darwin_closure_shards }}"
+        ),
+        "NIXCFG_CI_STAGE": "device-fault-shards",
+    }
+    assert roots["strategy"]["matrix"] == (
+        "${{ fromJSON(needs.plan-darwin-closures.outputs.darwin_closure_shards) }}"
+    )
+    assert set(retry["needs"]) == {
+        "validate-darwin-roots",
+        "validate-darwin-roots-faults",
+    }
+    assert " ".join(retry["if"].split()) == (
+        "always() && !cancelled() && "
+        "needs.validate-darwin-roots-faults.result == 'success' && "
+        "needs.validate-darwin-roots-faults.outputs.shards != '[]'"
+    )
+    assert retry["strategy"] == {
+        "fail-fast": "false",
+        "matrix": {
+            "include": (
+                "${{ fromJSON(needs.validate-darwin-roots-faults.outputs.shards) }}"
+            )
+        },
+    }
+    assert retry["uses"] == roots["uses"]
+    assert retry["with"] == {**roots["with"], "device_fault_retry": "true"}
+    assert retry["secrets"] == "inherit"
+    consumers = {
+        "validate-darwin-closures": jobs["validate-darwin-closures"]["if"],
+        "publish certify": next(
+            item
+            for item in jobs["publish"]["steps"]
+            if item.get("name") == "Certify and check final tree"
+        )["if"],
+    }
+    for name, condition in consumers.items():
+        flat = " ".join(condition.split())
+        assert _requires_warmup("validate-darwin-roots", flat), name
+    for name in (
+        "validate-darwin-roots",
+        "validate-darwin-roots-faults",
+        "validate-darwin-roots-retry",
+    ):
+        assert name in jobs["validate-darwin-closures"]["needs"]
+        assert name in jobs["publish"]["needs"]
+        assert name in jobs["repair"]["needs"]
+    results = next(
+        item
+        for item in jobs["publish"]["steps"]
+        if "NIXCFG_JOB_RESULTS" in item.get("env", {})
+    )["env"]["NIXCFG_JOB_RESULTS"].replace(" ", "")
+    for name in ("validate-darwin-roots-faults", "validate-darwin-roots-retry"):
+        assert f"{name}=${{{{needs.{name}.result}}}}" in results
+
+
 def _assert_linux_builder_cache_canary(workflow_jobs: dict) -> None:
     """39006154683: path-info the VM and one Darwin root before closures."""
     closures = workflow_jobs["validate-darwin-closures"]
@@ -2648,10 +2738,12 @@ def _assert_linux_builder_cache_canary(workflow_jobs: dict) -> None:
         "cache-darwin-linux-deps-arm",
         "cache-darwin-linux-deps-x86",
         "validate-darwin-roots",
+        "validate-darwin-roots-faults",
+        "validate-darwin-roots-retry",
     }
     closures_if = " ".join(closures["if"].split())
     assert "always() && !cancelled()" in closures_if
-    assert "needs.validate-darwin-roots.result == 'success'" in closures_if
+    assert _requires_warmup("validate-darwin-roots", closures_if)
     assert "canary-darwin-cache" not in workflow_jobs
     assert closures["with"]["scope"] == "closures"
     assert "closure_yield" not in closures["with"]
@@ -2703,6 +2795,8 @@ def _assert_coverage_and_publish(workflow_jobs: dict) -> None:
         "validate-darwin-cascade-warmup-retry",
         "validate-darwin-packages",
         "validate-darwin-roots",
+        "validate-darwin-roots-faults",
+        "validate-darwin-roots-retry",
         "validate-darwin-closures",
     }
     evidence = next(
@@ -2741,6 +2835,7 @@ def _assert_coverage_and_publish(workflow_jobs: dict) -> None:
         assert f"needs.{name}.result == 'success'" in certify_if
     assert _requires_warmup("validate-darwin-warm-rust", certify_if)
     assert _requires_warmup("validate-darwin-cascade-warmup", certify_if)
+    assert _requires_warmup("validate-darwin-roots", certify_if)
     publish_if = " ".join(publish["if"].split())
     assert "always() && !cancelled()" in publish_if
     assert "closure_complete" not in publish_if
@@ -5742,16 +5837,20 @@ def _finish_faulted_validate(
     return result, artifacts, output
 
 
-@pytest.mark.parametrize("scope", ["rust-warmup", "cascade-warmup"])
+@pytest.mark.parametrize("scope", ["rust-warmup", "cascade-warmup", "closure-shard"])
 @pytest.mark.parametrize("returncode", [0, 1])
-def test_faulted_warmup_slot_hands_off_to_a_fresh_vm(
+def test_faulted_validate_cell_hands_off_to_a_fresh_vm(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     scope: str,
     returncode: int,
 ) -> None:
-    """41339729368 cascade-warmup 3: bsdtar EIO after 110892 kernel I/O errors."""
+    """41339729368 cascade-warmup 3: bsdtar EIO after 110892 kernel I/O errors.
+
+    43344701312 darwin-argus: the root shard failed after 563366 kernel I/O
+    errors and sibling-stopped the healthy roots instead of handing off.
+    """
     result, artifacts, output = _finish_faulted_validate(
         tmp_path, monkeypatch, returncode, NIXCFG_VALIDATE_SCOPE=scope
     )
@@ -5763,11 +5862,13 @@ def test_faulted_warmup_slot_hands_off_to_a_fresh_vm(
     assert "result is discarded" in out
 
 
+@pytest.mark.parametrize("scope", ["cascade-warmup", "closure-shard"])
 @pytest.mark.parametrize("returncode", [0, 9])
-def test_device_fault_on_a_warmup_retry_fails_the_slot(
+def test_device_fault_on_a_validate_retry_fails_the_cell(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    scope: str,
     returncode: int,
 ) -> None:
     """The fresh-VM retry is the last attempt; a second fault has no result."""
@@ -5775,7 +5876,7 @@ def test_device_fault_on_a_warmup_retry_fails_the_slot(
         tmp_path,
         monkeypatch,
         returncode,
-        NIXCFG_VALIDATE_SCOPE="cascade-warmup",
+        NIXCFG_VALIDATE_SCOPE=scope,
         NIXCFG_DEVICE_FAULT_RETRY="true",
     )
     assert result == (returncode or 1)
@@ -5791,14 +5892,14 @@ def test_device_fault_on_a_warmup_retry_fails_the_slot(
     [
         {"NIXCFG_VALIDATE_SCOPE": "rust-warmup", "NIXCFG_CANARY": "true"},
         {"NIXCFG_VALIDATE_SCOPE": "packages"},
-        {"NIXCFG_VALIDATE_SCOPE": "closure-shard"},
+        {"NIXCFG_VALIDATE_SCOPE": "closures"},
         {"NIXCFG_VALIDATE_SCOPE": "cascade-canary"},
     ],
 )
 def test_validation_without_a_retry_job_keeps_its_result(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env: dict[str, str]
 ) -> None:
-    """Canary, packages and root shards have no fresh-VM rerun to hand off to."""
+    """Canary, packages and aggregate closures have no fresh-VM rerun to hand off to."""
 
     def unexpected() -> list[str]:
         raise AssertionError("this scope must not query device faults")
@@ -5988,6 +6089,105 @@ def test_device_fault_slots_requires_its_inputs(
     monkeypatch.setattr(jobs.urllib.request, "urlopen", unexpected)
     with pytest.raises(RuntimeError, match=match):
         jobs.device_fault_slots()
+
+
+_ROOT_SHARDS = [
+    {"shard": "darwin-argus", "roots": "darwin-argus", "system": "aarch64-darwin"},
+    {
+        "shard": "darwin-zeus+home-george",
+        "roots": "darwin-zeus home-george",
+        "system": "aarch64-darwin",
+    },
+]
+
+
+def _root_fault_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    output = _artifact_env(monkeypatch, tmp_path)
+    monkeypatch.delenv("NIXCFG_FAULT_SLOTS")
+    monkeypatch.setenv(
+        "NIXCFG_FAULT_ARTIFACT_PREFIX", "validate-aarch64-darwin-closure-shard-"
+    )
+    monkeypatch.setenv("NIXCFG_FAULT_MATRIX", json.dumps({"include": _ROOT_SHARDS}))
+    return output
+
+
+@pytest.mark.parametrize(
+    ("artifacts", "expected"),
+    [
+        (
+            [
+                "validate-aarch64-darwin-closure-shard-darwin-argus-device-fault",
+                "validate-aarch64-darwin-closure-shard-darwin-zeus+home-george",
+                "validate-aarch64-darwin-cascade-warmup-cascade-1-device-fault",
+            ],
+            [_ROOT_SHARDS[0]],
+        ),
+        (
+            [
+                "validate-aarch64-darwin-closure-shard-darwin-argus",
+                "validate-aarch64-darwin-closure-shard-darwin-zeus+home-george"
+                "-device-fault",
+            ],
+            [_ROOT_SHARDS[1]],
+        ),
+        (["validate-aarch64-darwin-closure-shard-darwin-argus"], []),
+    ],
+)
+def test_device_fault_shards_emits_the_faulted_planned_entries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    artifacts: list[str],
+    expected: list[dict[str, str]],
+) -> None:
+    """43344701312 uploaded ...-darwin-argus-device-fault; only argus reruns.
+
+    The entry is emitted whole so the retry cell's roots match the plan,
+    including a packed shard whose name is not its root list.
+    """
+    output = _root_fault_env(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        jobs.urllib.request,
+        "urlopen",
+        lambda _request, timeout: _ArtifactPage({
+            "total_count": len(artifacts),
+            "artifacts": [{"name": name} for name in artifacts],
+        }),
+    )
+    jobs.device_fault_shards()
+    name, _, value = output.read_text().strip().partition("=")
+    assert name == "shards"
+    assert json.loads(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("NIXCFG_FAULT_ARTIFACT_PREFIX", " "),
+        ("NIXCFG_FAULT_MATRIX", ""),
+        ("NIXCFG_FAULT_MATRIX", "not json"),
+        ("NIXCFG_FAULT_MATRIX", "[]"),
+        ("NIXCFG_FAULT_MATRIX", '{"include": []}'),
+        ("NIXCFG_FAULT_MATRIX", '{"include": ["darwin-argus"]}'),
+        ("NIXCFG_FAULT_MATRIX", '{"include": [{"shard": "darwin-argus"}]}'),
+        (
+            "NIXCFG_FAULT_MATRIX",
+            '{"include": [{"shard": "", "roots": "a", "system": "aarch64-darwin"}]}',
+        ),
+    ],
+)
+def test_device_fault_shards_requires_a_planned_matrix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    """A malformed plan must not read as a clean roots matrix."""
+    _root_fault_env(monkeypatch, tmp_path)
+    monkeypatch.setenv(name, value)
+
+    def unexpected(_request, timeout: float) -> _ArtifactPage:
+        raise AssertionError("inputs are checked before any request")
+
+    monkeypatch.setattr(jobs.urllib.request, "urlopen", unexpected)
+    with pytest.raises(RuntimeError, match="requires NIXCFG_FAULT_ARTIFACT_PREFIX"):
+        jobs.device_fault_shards()
 
 
 def test_quarantine_tolerates_a_missing_or_exited_cachix_daemon(

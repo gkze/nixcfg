@@ -148,10 +148,11 @@ def test_assert_update_coverage_accepts_a_complete_run(tmp_path: Path) -> None:
 
 
 def test_warmup_retry_may_be_skipped_but_must_report_a_result() -> None:
-    """A clean stripe skips -retry; a faulted slot needs a successful retry."""
+    """A clean matrix skips -retry; a faulted cell needs a successful retry."""
     for retry in (
         "validate-darwin-warm-rust-retry",
         "validate-darwin-cascade-warmup-retry",
+        "validate-darwin-roots-retry",
     ):
         require_required_jobs({**_jobs(), retry: "skipped"})
         for result in ("failure", "cancelled", ""):
@@ -164,6 +165,7 @@ def test_warmup_retry_may_be_skipped_but_must_report_a_result() -> None:
     for detector in (
         "validate-darwin-warm-rust-faults",
         "validate-darwin-cascade-warmup-faults",
+        "validate-darwin-roots-faults",
     ):
         with pytest.raises(CoverageError, match=f"{detector}=skipped"):
             require_required_jobs({**_jobs(), detector: "skipped"})
@@ -184,6 +186,40 @@ def test_device_faulted_warmup_slot_needs_clean_retry_evidence(tmp_path: Path) -
         require_device_fault_retries(tmp_path)
     (tmp_path / faulted).mkdir()
     require_device_fault_retries(tmp_path)
+    root = "validate-aarch64-darwin-closure-shard-darwin-argus"
+    (tmp_path / f"{root}-device-fault").mkdir()
+    with pytest.raises(CoverageError, match=f"no retry evidence: {root}-device-fault$"):
+        require_device_fault_retries(tmp_path)
+    (tmp_path / root).mkdir()
+    require_device_fault_retries(tmp_path)
+
+
+def test_realized_root_paths_ignore_a_faulted_shard_attempt(tmp_path: Path) -> None:
+    """43344701312: argus's quarantined attempt uploaded a receipt, not paths.
+
+    Its packed-shard shape would otherwise fail the realized-path count.
+    """
+    manifest = _manifest()
+    shards = plan_darwin_closure_shards(manifest)
+    _write_shards(tmp_path, shards)
+    expected = realized_darwin_root_store_paths(tmp_path)
+    faulted = (
+        tmp_path / "validate-aarch64-darwin-closure-shard-darwin-argus-device-fault"
+    )
+    faulted.mkdir()
+    (faulted / "shard-receipt.json").write_text(
+        ClosureShardReceipt(
+            tree="tree",
+            system="aarch64-darwin",
+            shard="darwin-argus+home-george",
+            roots=("darwin-argus", "home-george"),
+        ).model_dump_json()
+    )
+    assert realized_darwin_root_store_paths(tmp_path) == expected
+    clean = tmp_path / "validate-aarch64-darwin-closure-shard-darwin-argus-packed"
+    faulted.rename(clean)
+    with pytest.raises(CoverageError, match="realized 0 store paths"):
+        realized_darwin_root_store_paths(tmp_path)
 
 
 def test_assert_update_coverage_rejects_an_unretried_faulted_slot(

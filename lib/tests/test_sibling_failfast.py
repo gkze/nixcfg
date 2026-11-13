@@ -223,18 +223,23 @@ def test_matrix_cell_failure_stops_that_matrix_only() -> None:
     [
         ("rust", "validate-darwin-warm-rust-retry (3) / native"),
         ("cascade", "validate-darwin-cascade-warmup-retry (3) / native"),
+        (
+            "roots",
+            "validate-darwin-roots-retry "
+            "(darwin-argus, darwin-argus, aarch64-darwin) / native",
+        ),
     ],
 )
 def test_warmup_retry_failure_stops_its_own_stripe_group(
     group: str, retry: str
 ) -> None:
-    """A device-fault retry cell is part of its stripe, not a longer job id."""
+    """A device-fault retry cell is part of its matrix, not a longer job id."""
     failed = _job(retry)
     assert sibling_stop(group, [failed]) == SiblingStop(
         group=group, job=retry, conclusion="failure", failed_step=""
     )
-    other = "cascade" if group == "rust" else "rust"
-    assert sibling_stop(other, [failed]) is None
+    for other in {"rust", "cascade", "roots"} - {group}:
+        assert sibling_stop(other, [failed]) is None
     assert sibling_stop(group, [_job(f"{retry.partition(' (')[0]}-faults")]) is None
 
 

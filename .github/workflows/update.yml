@@ -970,6 +970,64 @@ jobs:
       closure_roots: ${{ matrix.roots }}
       shard: ${{ matrix.shard }}
     secrets: inherit
+  # 43344701312: darwin-argus's VM logged 563366 kernel disk2s7 I/O errors,
+  # a substitution then failed and the Nix daemon died. The shard failed and
+  # sibling-stopped three healthy roots. A root shard now hands a device
+  # fault off like a warmup slot: -faults reads the faulted shards back from
+  # their -device-fault artifact names and -retry reruns each planned entry
+  # once on a fresh VM, after the whole matrix. A retry that faults again
+  # fails. Consumers need roots, -faults and a successful or skipped -retry.
+  validate-darwin-roots-faults:
+    needs:
+      - plan-darwin-closures
+      - validate-darwin-roots
+    if: |-
+      always() && !cancelled() &&
+      needs.validate-darwin-roots.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      shards: ${{ steps.faults.outputs.shards }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.inputs.repair_commit || github.sha }}
+          persist-credentials: false
+      - name: List device-faulted shards
+        id: faults
+        env:
+          NIXCFG_ACTIONS_TOKEN: ${{ github.token }}
+          NIXCFG_FAULT_ARTIFACT_PREFIX: validate-aarch64-darwin-closure-shard-
+          NIXCFG_FAULT_MATRIX: ${{ needs.plan-darwin-closures.outputs.darwin_closure_shards }}
+          NIXCFG_CI_STAGE: device-fault-shards
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+  validate-darwin-roots-retry:
+    needs:
+      - validate-darwin-roots
+      - validate-darwin-roots-faults
+    if: |-
+      always() && !cancelled() &&
+      needs.validate-darwin-roots-faults.result == 'success' &&
+      needs.validate-darwin-roots-faults.outputs.shards != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.validate-darwin-roots-faults.outputs.shards) }}
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      previous: prepare-x86_64-linux
+      scope: closure-shard
+      closure_budget_seconds: "18000"
+      closure_roots: ${{ matrix.roots }}
+      shard: ${{ matrix.shard }}
+      device_fault_retry: true
+    secrets: inherit
   # 39006154683: linux-deps substituted nixos-disk-image from gkze
   # (no post-build hook) and Darwin closures --max-jobs 0 then spent
   # 5h after 50 wbb. Path-info the recached VM and one Darwin root
@@ -982,12 +1040,17 @@ jobs:
       - cache-darwin-linux-deps-arm
       - cache-darwin-linux-deps-x86
       - validate-darwin-roots
+      - validate-darwin-roots-faults
+      - validate-darwin-roots-retry
     if: |-
       always() && !cancelled() &&
       needs.prepare-merge.result == 'success' &&
       needs.cache-darwin-linux-deps-arm.result == 'success' &&
       needs.cache-darwin-linux-deps-x86.result == 'success' &&
-      needs.validate-darwin-roots.result == 'success'
+      needs.validate-darwin-roots.result == 'success' &&
+      needs.validate-darwin-roots-faults.result == 'success' &&
+      (needs.validate-darwin-roots-retry.result == 'success' ||
+      needs.validate-darwin-roots-retry.result == 'skipped')
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -1017,6 +1080,8 @@ jobs:
       - validate-darwin-cascade-warmup-retry
       - validate-darwin-packages
       - validate-darwin-roots
+      - validate-darwin-roots-faults
+      - validate-darwin-roots-retry
       - validate-darwin-closures
     if: |-
       always() && !cancelled() &&
@@ -1069,6 +1134,8 @@ jobs:
             validate-darwin-cascade-warmup-retry=${{needs.validate-darwin-cascade-warmup-retry.result}}
             validate-darwin-packages=${{ needs.validate-darwin-packages.result }}
             validate-darwin-roots=${{ needs.validate-darwin-roots.result }}
+            validate-darwin-roots-faults=${{ needs.validate-darwin-roots-faults.result }}
+            validate-darwin-roots-retry=${{ needs.validate-darwin-roots-retry.result }}
             validate-darwin-closures=${{ needs.validate-darwin-closures.result }}
         run: |
           import runpy
@@ -1101,6 +1168,9 @@ jobs:
           needs.validate-darwin-cascade-warmup-retry.result == 'skipped') &&
           needs.validate-darwin-packages.result == 'success' &&
           needs.validate-darwin-roots.result == 'success' &&
+          needs.validate-darwin-roots-faults.result == 'success' &&
+          (needs.validate-darwin-roots-retry.result == 'success' ||
+          needs.validate-darwin-roots-retry.result == 'skipped') &&
           needs.validate-darwin-closures.result == 'success'
         env:
           NIXCFG_RUNTIME: ${{ steps.runtime.outputs.runtime }}
@@ -1175,6 +1245,8 @@ jobs:
       - validate-darwin-packages
       - plan-darwin-closures
       - validate-darwin-roots
+      - validate-darwin-roots-faults
+      - validate-darwin-roots-retry
       - validate-darwin-closures
       - publish
     if: |-

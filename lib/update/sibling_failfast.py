@@ -11,7 +11,8 @@ drop store paths the next attempt should substitute. This policy waits until a
 sibling job has **completed** with ``failure``, ``timed_out``, or
 ``startup_failure``, then the still-running job exits on its own. Flush still
 runs. ``cancelled`` and ``skipped`` are not that signal: a device-faulted
-Darwin prepare or warmup slot completes successfully and a fresh VM retries it.
+Darwin prepare shard, warmup slot or root shard completes successfully and a
+fresh VM retries it.
 
 A green run still builds every closure. The stop only abandons work that can
 no longer reach publish. A per-package updater or build failure is quarantined
@@ -64,8 +65,8 @@ _API_VERSION = "2022-11-28"
 # plan (38137325241 was a runner SIGTERM, and plan is the shard matrix).
 # ``canary-rust`` is not ``rust``: a canary failure must not fail-close the
 # 5-wide stripe. Prebuild and cascade-canary are absent on purpose. A
-# warmup ``-retry`` reruns device-faulted slots after the stripe, so its
-# cells only watch each other and the already-completed stripe.
+# warmup or root ``-retry`` reruns device-faulted cells after its matrix, so
+# its cells only watch each other and the already-completed matrix.
 _GROUPS: dict[str, frozenset[str]] = {
     "prepare": frozenset({
         "prepare-darwin",
@@ -84,7 +85,7 @@ _GROUPS: dict[str, frozenset[str]] = {
         "validate-darwin-cascade-warmup",
         "validate-darwin-cascade-warmup-retry",
     }),
-    "roots": frozenset({"validate-darwin-roots"}),
+    "roots": frozenset({"validate-darwin-roots", "validate-darwin-roots-retry"}),
 }
 
 
