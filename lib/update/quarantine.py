@@ -119,9 +119,12 @@ class QuarantineHold(BaseModel):
     """Baseline state one preparation restored for its quarantined packages.
 
     ``paths`` are the repository-relative files of failed and withheld
-    packages, plus ``flake.nix`` and ``flake.lock`` when the flake files were
-    reverted whole. ``inputs`` are lock-only flake inputs whose root edge and
-    node were rolled back to the baseline lock.
+    packages, plus ``flake.nix`` and ``flake.lock`` when those files were
+    reverted whole.     ``inputs`` are flake inputs whose root edge, lock node, and dependency
+    closure were rolled back. A ref declared as an attribute set is one of
+    those inputs: the fold also restores that declaration, so other pins stay.
+    Whole-file flake paths are only for a ref whose declaration cannot be
+    restored on its own.
 
     A package quarantined on one platform cannot promote on another: its
     hashes would be missing for the platform that failed. Folding native

@@ -33,6 +33,7 @@ from lib.update.derivation_validation import (
     DerivationValidationFailure,
 )
 from lib.update.events import UpdateEvent
+from lib.update.flake_inputs import input_declaration_text
 from lib.update.lock_policy import RollbackUnavailable
 from lib.update.persistence import UpdateValidationSnapshot
 from lib.update.quarantine import QuarantineHold
@@ -279,6 +280,401 @@ def test_failed_input_backed_target_reverts_flake_files(
         "other": "flake inputs reverted after tool-src failed",
     }
     assert payload["success"] is False
+
+
+_BASE_NIX = """{
+  inputs = {
+    github-desktop = {
+      type = "git";
+      url = "https://github.com/desktop/desktop.git";
+      ref = "refs/tags/release-3.6.6";
+      flake = false;
+    };
+    codex = {
+      url = "github:openai/codex/rust-v0.165.0";
+      flake = false;
+    };
+  };
+  outputs = { self, ... }: { };
+}
+"""
+
+_PINNED_NIX = """{
+  inputs = {
+    github-desktop = {
+      type = "git";
+      url = "https://github.com/desktop/desktop.git";
+      ref = "refs/tags/release-3.6.10";
+      flake = false;
+    };
+    codex = {
+      url = "github:openai/codex/rust-v0.167.2";
+      flake = false;
+    };
+  };
+  outputs = { self, ... }: { };
+}
+"""
+
+
+def _nodes_lock(**revs: str) -> str:
+    """Return a flake.lock whose root edges name the given revisions."""
+    nodes: dict[str, object] = {
+        "root": {"inputs": {name: name for name in sorted(revs)}},
+    }
+    for name, rev in revs.items():
+        nodes[name] = {
+            "locked": {
+                "type": "github",
+                "owner": "o",
+                "repo": name,
+                "rev": rev,
+                "narHash": "sha256-x",
+            },
+            "original": {"type": "github", "owner": "o", "repo": name, "ref": "v1"},
+        }
+    return (
+        json.dumps(
+            {"nodes": nodes, "root": "root", "version": 7}, indent=2, sort_keys=True
+        )
+        + "\n"
+    )
+
+
+def _locked_node_revs(root: Path) -> dict[str, str]:
+    lock = json.loads((root / "flake.lock").read_text(encoding="utf-8"))
+    return {
+        name: node["locked"]["rev"]
+        for name, node in lock["nodes"].items()
+        if name != "root"
+    }
+
+
+class _BaselineFiles:
+    """Workspace whose baseline files are the last-good pin, not the candidate."""
+
+    def __init__(
+        self,
+        root: Path,
+        files: dict[str, str],
+        *,
+        raw: dict[str, bytes] | None = None,
+    ) -> None:
+        self.root = root
+        self.restored: list[Path] = []
+        self._files = {name: text.encode() for name, text in files.items()}
+        if raw is not None:
+            self._files.update(raw)
+
+    def baseline_content(self, path: object) -> bytes | None:
+        return self._files.get(Path(str(path)).as_posix())
+
+    def restore_baseline(self, paths: object) -> tuple[Path, ...]:
+        self.restored.extend(Path(str(path)) for path in cast("list[object]", paths))
+        return tuple(self.restored)
+
+
+def test_withhold_restores_one_ref_and_keeps_crate_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Update 43221231963: one ref failure must not detach other crate pins.
+
+    github-desktop's declaration is an attribute set, so withholding it
+    restores that declaration and its lock node. codex and zed keep the pin,
+    including the crate2nix artifacts generated for zed 1.30.0. A whole-file
+    flake revert left those artifacts describing a source the lock no longer
+    pinned.
+    """
+    monkeypatch.chdir(tmp_path)
+    base_revs = {"github-desktop": "a" * 40, "codex": "b" * 40, "zed": "c" * 40}
+    pin_revs = {"github-desktop": "d" * 40, "codex": "e" * 40, "zed": "f" * 40}
+    (tmp_path / "flake.nix").write_text(_PINNED_NIX, encoding="utf-8")
+    (tmp_path / "flake.lock").write_text(_nodes_lock(**pin_revs), encoding="utf-8")
+    cargo = tmp_path / "packages/zed-editor-nightly/Cargo.nix"
+    manifest = tmp_path / "packages/zed-editor-nightly/crate-sources.json"
+    cargo.parent.mkdir(parents=True)
+    cargo.write_text("zed 1.30.0\n", encoding="utf-8")
+    manifest.write_text('{"version": "1.30.0"}\n', encoding="utf-8")
+    for name in ("desktop", "codex-cli", "zed-editor-nightly"):
+        _source_path(name).parent.mkdir(parents=True, exist_ok=True)
+        _source_path(name).write_text(f"{name} pinned\n", encoding="utf-8")
+
+    class _Desktop(Updater):
+        input_name = "github-desktop"
+
+    class _Codex(Updater):
+        input_name = "codex"
+
+    class _Zed(Updater):
+        input_name = "zed"
+
+    def _planned(names: list[str], _updaters: object) -> tuple[Path, ...]:
+        paths = [_source_path(name) for name in names]
+        if "zed-editor-nightly" in names:
+            paths.extend((cargo, manifest))
+        return tuple(paths)
+
+    outcome = _RunOutcome()
+    outcome.summary.accumulate({
+        "github-desktop": "updated",
+        "desktop": "error",
+        "codex-cli": "updated",
+        "zed-editor-nightly": "updated",
+    })
+    outcome.written_paths = (
+        _source_path("desktop"),
+        _source_path("codex-cli"),
+        _source_path("zed-editor-nightly"),
+        cargo,
+        manifest,
+        tmp_path / "flake.nix",
+        tmp_path / "flake.lock",
+    )
+    monkeypatch.setattr("lib.update.persistence.planned_update_paths", _planned)
+    monkeypatch.setattr("lib.update.flake.invalidate_flake_lock", lambda: None)
+    monkeypatch.setattr(
+        "lib.update.cli._failed_targets_touched_flake", lambda *_args: ("desktop",)
+    )
+    workspace = _BaselineFiles(
+        tmp_path,
+        {"flake.nix": _BASE_NIX, "flake.lock": _nodes_lock(**base_revs)},
+    )
+    _withhold_failed_clusters(
+        cast("Any", workspace),
+        make_run_plan(
+            source_names=("desktop", "codex-cli", "zed-editor-nightly"),
+            ref_inputs=(
+                FlakeInputRef(
+                    "github-desktop",
+                    "desktop",
+                    "desktop",
+                    "refs/tags/release-3.6.6",
+                    "git",
+                ),
+            ),
+            do_input_refresh=True,
+        ),
+        outcome,
+        {
+            "desktop": _Desktop,
+            "codex-cli": _Codex,
+            "zed-editor-nightly": _Zed,
+        },
+        OutputOptions(),
+        None,
+    )
+
+    flake = (tmp_path / "flake.nix").read_text(encoding="utf-8")
+
+    assert input_declaration_text(flake, "github-desktop") == input_declaration_text(
+        _BASE_NIX, "github-desktop"
+    )
+    assert input_declaration_text(flake, "codex") == input_declaration_text(
+        _PINNED_NIX, "codex"
+    )
+    assert _locked_node_revs(tmp_path) == {
+        **pin_revs,
+        "github-desktop": base_revs["github-desktop"],
+    }
+    assert cargo.read_text(encoding="utf-8") == "zed 1.30.0\n"
+    assert manifest.read_text(encoding="utf-8") == '{"version": "1.30.0"}\n'
+    assert outcome.quarantine_hold.inputs == ("github-desktop",)
+    assert "flake.nix" not in outcome.quarantine_hold.paths
+    assert "flake.lock" not in outcome.quarantine_hold.paths
+    assert Path("packages/zed-editor-nightly/Cargo.nix") not in workspace.restored
+    assert Path("packages/desktop/sources.json") in workspace.restored
+    assert outcome.summary.updated == ["codex-cli", "zed-editor-nightly"]
+    assert outcome.dropped == {"github-desktop": "coupled to failed target desktop"}
+
+
+def test_withhold_restores_a_ref_whose_lock_already_matches(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A moved ref declaration is restored even when its lock node did not move."""
+    monkeypatch.chdir(tmp_path)
+    baseline_lock = _nodes_lock(**{"github-desktop": "a" * 40})
+    bumped_nix = _BASE_NIX.replace(
+        'ref = "refs/tags/release-3.6.6";',
+        'ref = "refs/tags/release-3.6.10";',
+        1,
+    )
+    (tmp_path / "flake.nix").write_text(bumped_nix, encoding="utf-8")
+    (tmp_path / "flake.lock").write_text(baseline_lock, encoding="utf-8")
+
+    class _Desktop(Updater):
+        input_name = "github-desktop"
+
+    outcome = _RunOutcome()
+    outcome.summary.accumulate({"desktop": "error"})
+    outcome.written_paths = (tmp_path / "flake.nix", tmp_path / "flake.lock")
+    monkeypatch.setattr("lib.update.persistence.planned_update_paths", _planned_paths)
+    monkeypatch.setattr("lib.update.flake.invalidate_flake_lock", lambda: None)
+    monkeypatch.setattr(
+        "lib.update.cli._failed_targets_touched_flake", lambda *_args: ("desktop",)
+    )
+    workspace = _BaselineFiles(
+        tmp_path,
+        {"flake.nix": _BASE_NIX, "flake.lock": baseline_lock},
+    )
+    _withhold_failed_clusters(
+        cast("Any", workspace),
+        make_run_plan(
+            source_names=("desktop",),
+            ref_inputs=(
+                FlakeInputRef(
+                    "github-desktop",
+                    "desktop",
+                    "desktop",
+                    "refs/tags/release-3.6.6",
+                    "git",
+                ),
+            ),
+        ),
+        outcome,
+        {"desktop": _Desktop},
+        OutputOptions(),
+        None,
+    )
+
+    assert (tmp_path / "flake.nix").read_text(encoding="utf-8") == _BASE_NIX
+    assert (tmp_path / "flake.lock").read_text(encoding="utf-8") == baseline_lock
+    assert outcome.quarantine_hold.inputs == ("github-desktop",)
+    assert "flake.nix" not in outcome.quarantine_hold.paths
+
+
+def test_withhold_rolls_a_ref_lock_without_rewriting_an_unchanged_declaration(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A lock-only move of an attrset ref restores the node and leaves the text."""
+    monkeypatch.chdir(tmp_path)
+    base_rev = "a" * 40
+    (tmp_path / "flake.nix").write_text(_BASE_NIX, encoding="utf-8")
+    (tmp_path / "flake.lock").write_text(
+        _nodes_lock(**{"github-desktop": "d" * 40}), encoding="utf-8"
+    )
+
+    class _Desktop(Updater):
+        input_name = "github-desktop"
+
+    outcome = _RunOutcome()
+    outcome.summary.accumulate({"desktop": "error"})
+    outcome.written_paths = (tmp_path / "flake.nix", tmp_path / "flake.lock")
+    monkeypatch.setattr("lib.update.persistence.planned_update_paths", _planned_paths)
+    monkeypatch.setattr("lib.update.flake.invalidate_flake_lock", lambda: None)
+    monkeypatch.setattr(
+        "lib.update.cli._failed_targets_touched_flake", lambda *_args: ("desktop",)
+    )
+    _withhold_failed_clusters(
+        cast(
+            "Any",
+            _BaselineFiles(
+                tmp_path,
+                {
+                    "flake.nix": _BASE_NIX,
+                    "flake.lock": _nodes_lock(**{"github-desktop": base_rev}),
+                },
+            ),
+        ),
+        make_run_plan(
+            source_names=("desktop",),
+            ref_inputs=(
+                FlakeInputRef(
+                    "github-desktop",
+                    "desktop",
+                    "desktop",
+                    "refs/tags/release-3.6.6",
+                    "git",
+                ),
+            ),
+        ),
+        outcome,
+        {"desktop": _Desktop},
+        OutputOptions(),
+        None,
+    )
+
+    assert (tmp_path / "flake.nix").read_text(encoding="utf-8") == _BASE_NIX
+    assert _locked_node_revs(tmp_path) == {"github-desktop": base_rev}
+    assert outcome.quarantine_hold.inputs == ("github-desktop",)
+    assert "flake.lock" not in outcome.quarantine_hold.paths
+
+
+_URL_NIX = """{
+  inputs.github-desktop.url = "github:desktop/desktop/release-3.6.10";
+  outputs = { self, ... }: { };
+}
+"""
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["unreadable-lock", "undecodable-nix", "url-declaration", "follows-ref"],
+)
+def test_withhold_reverts_both_flake_files_when_one_ref_cannot_be_restored(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    case: str,
+) -> None:
+    """A ref that cannot be restored in place still takes the whole-file path."""
+    monkeypatch.chdir(tmp_path)
+    base_lock = _nodes_lock(**{"github-desktop": "a" * 40, "codex": "b" * 40})
+    pin_lock = _nodes_lock(**{"github-desktop": "d" * 40, "codex": "b" * 40})
+    if case == "follows-ref":
+        parsed = json.loads(base_lock)
+        parsed["nodes"]["root"]["inputs"]["codex"] = ["github-desktop"]
+        base_lock = json.dumps(parsed, indent=2, sort_keys=True) + "\n"
+        parsed = json.loads(pin_lock)
+        parsed["nodes"]["root"]["inputs"]["codex"] = ["github-desktop"]
+        pin_lock = json.dumps(parsed, indent=2, sort_keys=True) + "\n"
+    nix = _URL_NIX if case == "url-declaration" else _PINNED_NIX
+    (tmp_path / "flake.nix").write_text(nix, encoding="utf-8")
+    (tmp_path / "flake.lock").write_text(
+        "{" if case == "unreadable-lock" else pin_lock, encoding="utf-8"
+    )
+
+    class _Desktop(Updater):
+        input_name = "github-desktop"
+        additional_input_names = ("codex",) if case == "follows-ref" else ()
+
+    outcome = _RunOutcome()
+    outcome.summary.accumulate({"desktop": "error"})
+    outcome.written_paths = (tmp_path / "flake.nix", tmp_path / "flake.lock")
+    monkeypatch.setattr("lib.update.persistence.planned_update_paths", _planned_paths)
+    monkeypatch.setattr("lib.update.flake.invalidate_flake_lock", lambda: None)
+    monkeypatch.setattr(
+        "lib.update.cli._failed_targets_touched_flake", lambda *_args: ("desktop",)
+    )
+    raw = {"flake.nix": b"\xff"} if case == "undecodable-nix" else None
+    workspace = _BaselineFiles(
+        tmp_path,
+        {"flake.nix": _BASE_NIX, "flake.lock": base_lock},
+        raw=raw,
+    )
+    refs = [
+        FlakeInputRef(
+            "github-desktop", "desktop", "desktop", "refs/tags/release-3.6.6", "git"
+        )
+    ]
+    if case == "follows-ref":
+        refs.append(
+            FlakeInputRef("codex", "openai", "codex", "rust-v0.165.0", "github")
+        )
+    _withhold_failed_clusters(
+        cast("Any", workspace),
+        make_run_plan(source_names=("desktop",), ref_inputs=tuple(refs)),
+        outcome,
+        {"desktop": _Desktop},
+        OutputOptions(),
+        None,
+    )
+
+    assert (tmp_path / "flake.nix").read_text(encoding="utf-8") == nix
+    assert outcome.quarantine_hold.inputs == ()
+    assert {"flake.nix", "flake.lock"} <= set(outcome.quarantine_hold.paths)
+    assert {Path("flake.nix"), Path("flake.lock")} <= set(workspace.restored)
 
 
 def test_failed_lock_only_input_rolls_back_and_promotes_the_rest(

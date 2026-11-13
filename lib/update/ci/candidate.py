@@ -129,8 +129,14 @@ from lib.update.ci.warmup import (
 )
 from lib.update.cli_options import RepairAgent, UpdateOptions
 from lib.update.derivation_validation import root_closure_check_attr
+from lib.update.flake_inputs import input_declaration_text, restore_input_declaration
 from lib.update.io import atomic_write_text
-from lib.update.lock_policy import LockRollback, render_lock, rollback_input_locks
+from lib.update.lock_policy import (
+    LockRollback,
+    RollbackUnavailable,
+    render_lock,
+    rollback_input_locks,
+)
 from lib.update.nix import get_current_nix_platform
 from lib.update.paths import get_repo_root
 from lib.update.persistence import IsolatedUpdateWorkspace, planned_update_paths
@@ -695,18 +701,94 @@ def _held_index_files(
             held.pop(path, None)
         else:
             held[path] = blob
+    if _held_lock_matches_inputs(held, base, hold):
+        _restore_held_input_declarations(held, base, hold.inputs)
+    elif hold.inputs:
+        for path in ("flake.nix", "flake.lock"):
+            blob = base.get(path)
+            if blob is not None:
+                held[path] = blob
+    return held
+
+
+def _held_lock_matches_inputs(
+    held: dict[str, _IndexBlob],
+    base: dict[str, _IndexBlob],
+    hold: QuarantineHold,
+) -> bool:
+    """Roll ``hold.inputs`` back, and report whether every one of them moved.
+
+    A partial rollback is not applied. Splicing those declarations while the
+    lock still describes the candidate would split the pin from its source.
+    """
+    if not hold.inputs:
+        return False
     lock = held.get("flake.lock")
     base_lock = base.get("flake.lock")
-    if not hold.inputs or lock is None or base_lock is None or lock == base_lock:
-        return held
-    rollback = rollback_input_locks(
-        FlakeLock.model_validate_json(base_lock.content),
-        FlakeLock.model_validate_json(lock.content),
-        frozenset(hold.inputs),
-    )
-    if isinstance(rollback, LockRollback):
+    if lock is None or base_lock is None or lock.mode == "120000":
+        return False
+    if lock == base_lock:
+        return True
+    try:
+        rollback = rollback_input_locks(
+            FlakeLock.model_validate_json(base_lock.content),
+            FlakeLock.model_validate_json(lock.content),
+            frozenset(hold.inputs),
+        )
+    except ValidationError:
+        return False
+    if isinstance(rollback, LockRollback) and frozenset(hold.inputs) <= frozenset(
+        rollback.inputs
+    ):
         held["flake.lock"] = _IndexBlob(lock.mode, render_lock(rollback.lock).encode())
-    return held
+        return True
+    return (
+        isinstance(rollback, RollbackUnavailable)
+        and rollback.reason == "failed inputs already match the baseline lock"
+    )
+
+
+def _restore_held_input_declarations(
+    held: dict[str, _IndexBlob],
+    base: dict[str, _IndexBlob],
+    inputs: tuple[str, ...],
+) -> None:
+    """Splice baseline attrsets for *inputs* back into the candidate flake.
+
+    A whole-file ``flake.nix`` hold already restored the baseline text. This
+    only edits a candidate that still carries other inputs' pin bumps, so a
+    quarantined ref does not take those bumps — or the crate2nix artifacts
+    bound to them — back to the baseline with it.
+    """
+    if not inputs:
+        return
+    current = held.get("flake.nix")
+    baseline = base.get("flake.nix")
+    if (
+        current is None
+        or baseline is None
+        or current.mode == "120000"
+        or baseline.mode == "120000"
+    ):
+        return
+    try:
+        text = current.content.decode()
+        base_text = baseline.content.decode()
+    except UnicodeError:
+        return
+    for name in inputs:
+        try:
+            if (
+                input_declaration_text(text, name) is None
+                or input_declaration_text(base_text, name) is None
+            ):
+                continue
+            text = restore_input_declaration(text, base_text, name)
+        except ValueError:
+            return
+    updated = text.encode()
+    if updated != current.content:
+        held["flake.nix"] = _IndexBlob(current.mode, updated)
 
 
 def _merged_index_files(
