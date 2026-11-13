@@ -267,7 +267,7 @@ def test_copilot_registry_exports_only_on_arm64_darwin() -> None:
     }
 
 
-_AUTOMATION_ENUM_SPAN = b"latest.jsonagentsmission_control_internal"
+_AUTOMATION_ENUM_SPAN = b"latest.jsoncreate_issue_comment"
 
 
 def test_copilot_patch_disables_acquisition_and_staged_install() -> None:
