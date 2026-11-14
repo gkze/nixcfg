@@ -93,6 +93,13 @@ use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};
 use tauri::Listener;
 """
 
+_BUZZ_SETUP_APP_HANDLE = "            let app_handle = app.handle().clone();\n"
+# Buzz 0.5.30 (dece76e7) records partial installer downloads here. The call
+# does not touch Keychain. Update 43567587437 failed because the reviewed
+# setup item still expected the macOS block to follow the handle clone.
+_BUZZ_INSTALLER_RECOVERY_CALL = (
+    "            recover_new_app_installer_downloads(&app_handle);\n"
+)
 _BUZZ_SETUP_UPSTREAM = """        .setup(move |app| {
             let app_handle = app.handle().clone();
             #[cfg(target_os = "macos")]
@@ -1253,6 +1260,52 @@ def _replace_exact_source_span(
     return text.replace(before, after, 1)
 
 
+def _setup_with_installer_recovery(text: str) -> str:
+    """Return *text* with Buzz 0.5.30's installer recovery before macOS setup."""
+    return text.replace(
+        _BUZZ_SETUP_APP_HANDLE,
+        _BUZZ_SETUP_APP_HANDLE + _BUZZ_INSTALLER_RECOVERY_CALL,
+        1,
+    )
+
+
+def _patch_pre_ui_keychain_setup(source: str) -> str:
+    """Insert the pre-UI Keychain lock immediately before the macOS setup block.
+
+    The lock covers secret reads. ``recover_new_app_installer_downloads``
+    only records partial installer files, so when that call is present the
+    lock stays after it. The previous shape stays valid while sources.json
+    still pins Buzz 0.5.28.
+    """
+    shapes = (
+        (
+            _setup_with_installer_recovery(_BUZZ_SETUP_UPSTREAM),
+            _setup_with_installer_recovery(_BUZZ_SETUP_KEYCHAIN_GUARDED),
+        ),
+        (_BUZZ_SETUP_UPSTREAM, _BUZZ_SETUP_KEYCHAIN_GUARDED),
+    )
+    masked = mask_rust_non_code(source)
+    hits = [pair for pair in shapes if masked.count(mask_rust_non_code(pair[0])) == 1]
+    if len(hits) != 1:
+        counts = ", ".join(
+            str(masked.count(mask_rust_non_code(before))) for before, _after in shapes
+        )
+        message = (
+            "Buzz pre-UI Keychain interaction scope: expected exactly 1 "
+            f"reviewed item, found {counts}"
+        )
+        raise RuntimePolicyPatchError(message)
+    before, after = hits[0]
+    return _replace_reviewed_rust_item(
+        source,
+        before,
+        after,
+        context="Buzz pre-UI Keychain interaction scope",
+        allow_file_inner_attributes=True,
+        expected_delimiters=("{",),
+    )
+
+
 def _patch_buzz_app_source(source: str) -> str:
     if not source.startswith(_BUZZ_APP_INNER_ATTRIBUTE):
         message = "Buzz app recursion-limit attribute drifted"
@@ -1264,14 +1317,7 @@ def _patch_buzz_app_source(source: str) -> str:
         context="Buzz pre-UI Keychain interaction import",
         allow_file_inner_attributes=True,
     )
-    patched = _replace_reviewed_rust_item(
-        patched,
-        _BUZZ_SETUP_UPSTREAM,
-        _BUZZ_SETUP_KEYCHAIN_GUARDED,
-        context="Buzz pre-UI Keychain interaction scope",
-        allow_file_inner_attributes=True,
-        expected_delimiters=("{",),
-    )
+    patched = _patch_pre_ui_keychain_setup(patched)
     patched = _replace_reviewed_rust_item(
         patched,
         _BUZZ_BACKFILL_UPSTREAM,
