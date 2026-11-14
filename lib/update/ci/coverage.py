@@ -7,8 +7,8 @@ unpushed root fails the run.
 
 ``plan-shards`` evaluates root ``outPath``s once and writes
 ``root-out-paths.json``. Darwin host Cachix queries use each shard's
-``realized-root-paths.json`` (native eval + flush), not the Linux
-planner hashes. Coverage never re-evaluates Darwin out paths.
+``realized-root-paths.json`` (the validating build's outputs), not the
+Linux planner hashes. Coverage never re-evaluates Darwin out paths.
 """
 
 import json

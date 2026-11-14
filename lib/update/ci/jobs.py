@@ -109,10 +109,11 @@ _STORE_PATH_RE = re.compile(r"/nix/store/[0-9a-z]{32}-[^\s]+")
 # locally, then `cachix daemon stop` returned 0. assert-coverage still
 # 404'd those paths on gkze.cachix.org. The post-build-hook queue did
 # not publish the thin wrapper. Flush `cachix push`es this receipt.
-# 38934724529: `nix path-info <installable>` recorded a stale
-# darwin-system / home-manager-generation already on Cachix
-# ("Nothing to push") while coverage's `eval .outPath` was the
-# newly built wrapper. Remember must use the same eval as coverage.
+# The receipt is the validating `nix build`'s output. 38934724529:
+# `nix path-info <installable>` recorded a stale path already on Cachix.
+# 43531986200: `nix eval --option allow-import-from-derivation false
+# .outPath` recorded l0y1sjsx-home-manager-generation, which that build
+# never realized; the daemon had pushed z8fblck-home-manager-generation.
 _REALIZED_ROOT_PATHS_NAME = "realized-root-paths.json"
 _REPAIR_RECEIPT_NAME = "repair-receipt.json"
 _LINUX_BUILDER_OUTPUT = "nixos-disk-image"
@@ -2804,33 +2805,65 @@ def _terminate_cachix_daemon(log: TextIO) -> None:
         _write_diagnostic(log, f"cannot signal Cachix daemon pid={pid}: {error}")
 
 
-def _eval_installable_out_path(
-    installable: str,
+def _printed_store_paths(stdout: str) -> tuple[str, ...]:
+    """Return store paths printed one per line, ignoring other stdout."""
+    return tuple(
+        line.strip()
+        for line in stdout.splitlines()
+        if _STORE_PATH_RE.fullmatch(line.strip())
+    )
+
+
+def _realized_installable_out_paths(
+    installables: tuple[str, ...],
     *,
     run: Callable[..., object],
-) -> str:
-    """Return ``installable.outPath`` — the same query ``assert-coverage`` uses.
+) -> tuple[str, ...]:
+    """Return the outputs the validating root ``nix build`` realizes.
 
-    38934724529: ``nix path-info`` on the flake installable printed a
-    substituted ``home-manager-generation`` or a stale ``darwin-system``
-    already on Cachix. Coverage then 404'd the check's eval'd outPath.
+    43531986200 home-george built
+    ``p9qfa2l4…-home-manager-generation.drv`` and the daemon pushed
+    ``z8fblck…-home-manager-generation``. Flush then required
+    ``l0y1sjsx…-home-manager-generation`` from ``nix eval --option
+    allow-import-from-derivation false .outPath``. That path was not in
+    the store. ``nix derivation show`` on the same runner, with
+    import-from-derivation disabled, instantiated a third output
+    (``arck7db9…``). The receipt repeats that build. The flags are the
+    root-build branch of ``_validation_args`` (``--no-update-lock-file
+    --no-link --keep-going --fallback``), copied here so this module
+    stays free of the derivation-validation import, plus
+    ``--print-out-paths``. Import-from-derivation stays at Nix's
+    default. ``nix path-info`` on the installable is not a substitute:
+    38934724529 returned a stale path already on Cachix.
     """
     result = run(
         "nix",
-        "eval",
-        "--raw",
-        "--no-write-lock-file",
-        *NO_IMPORT_FROM_DERIVATION_ARGS,
-        f"{installable}.outPath",
+        "build",
+        "--no-update-lock-file",
+        "--no-link",
+        "--keep-going",
+        "--fallback",
+        "--print-out-paths",
+        *installables,
         check=False,
         capture=True,
     )
-    path = str(getattr(result, "stdout", "")).strip()
-    if int(getattr(result, "returncode", 1)) or not path.startswith("/nix/store/"):
-        detail = str(getattr(result, "stderr", "")).strip() or "nix eval failed"
-        msg = f"could not resolve realized root out paths for {installable}: {detail}"
+    returncode = int(getattr(result, "returncode", 1))
+    detail = str(getattr(result, "stderr", "")).strip()
+    if returncode:
+        msg = (
+            "could not resolve realized root outputs "
+            f"returncode={returncode} stderr={detail}"
+        )
         raise CachixFlushError(msg)
-    return path
+    paths = _printed_store_paths(str(getattr(result, "stdout", "")))
+    if len(paths) != len(installables):
+        msg = (
+            "nix build --print-out-paths returned "
+            f"{len(paths)} outputs for {len(installables)} root installables"
+        )
+        raise CachixFlushError(msg)
+    return paths
 
 
 def drv_output_store_paths(
@@ -2898,7 +2931,7 @@ def remember_realized_installable_paths(
     *,
     run: Callable[..., object] | None = None,
 ) -> tuple[str, ...]:
-    """Record realized installable out paths so flush can ``cachix push`` them.
+    """Record the validating build's outputs so flush can ``cachix push`` them.
 
     38821223775 argus built ``darwin-system-26.11.57a3171`` at 05:31:46
     and finished validate at 05:31:51. Daemon stop returned 0 ten seconds
@@ -2906,15 +2939,13 @@ def remember_realized_installable_paths(
     ``/nix/store/98bwk8gpzhmr12navdg9knjscv09k2nm-darwin-system-26.11.57a3171``.
 
     38934724529 recorded ``nix path-info`` results that were already on
-    Cachix (``Nothing to push``) instead of each check's ``.outPath``.
+    Cachix (``Nothing to push``). 43531986200 recorded an
+    import-from-derivation-disabled ``.outPath`` the build never realized.
     """
     if not installables:
         return ()
     runner = _run if run is None else run
-    paths = tuple(
-        _eval_installable_out_path(installable, run=runner)
-        for installable in installables
-    )
+    paths = _realized_installable_out_paths(installables, run=runner)
     artifacts = _temp() / "update-artifacts"
     artifacts.mkdir(parents=True, exist_ok=True)
     (artifacts / _REALIZED_ROOT_PATHS_NAME).write_text(
@@ -3227,8 +3258,12 @@ def flush_cachix() -> None:
       ``realized-root-paths.json``.
     - Stale path-info (38934724529): flush pushed a substituted
       ``darwin-system`` / ``home-manager-generation`` already on Cachix
-      (``Nothing to push``). Receipts must be each check's ``.outPath``,
-      and flush fail-closes unless ``nix path-info --store`` sees them.
+      (``Nothing to push``). Receipts are the validating build's outputs.
+    - Eval outPath (43531986200): an import-from-derivation-disabled
+      ``nix eval .outPath`` recorded ``l0y1sjsx-home-manager-generation``,
+      which was not the output of the ``p9qfa2l4`` derivation the shard
+      built and the daemon pushed (``z8fblck``). Flush still fail-closes
+      unless ``nix path-info --store`` sees the recorded path.
     - Substituted linux-builder (39006154683): cache-root-deps copied
       ``nixos-disk-image`` from gkze, so the hook uploaded nothing.
       Flush ``cachix push``es those outputs and ``cachix pin``s them

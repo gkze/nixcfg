@@ -2188,11 +2188,12 @@ def _remember_successful_root_paths(
     closure_roots: tuple[str, ...] | None,
     failures: tuple[object, ...],
 ) -> None:
-    """Record realized Darwin-root out paths so flush can ``cachix push`` them.
+    """Record the Darwin-root outputs the validating build realized.
 
     38821223775 built ``darwin-system-26.11.57a3171`` wrappers, then
     ``cachix daemon stop`` returned 0 without publishing those tops.
-    Linux jobs only realize those roots' native deps.
+    Linux jobs only realize those roots' native deps. The recorded path
+    is that build's output, not a separate ``.outPath`` eval.
     """
     if failures or not system.endswith("-darwin"):
         # Linux validate-all realizes Darwin-root *deps*, not
