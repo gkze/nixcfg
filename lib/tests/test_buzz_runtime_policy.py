@@ -1246,6 +1246,89 @@ def test_buzz_source_patch_guards_every_pre_ui_keychain_load(tmp_path: Path) -> 
     assert app_path.read_text(encoding="utf-8") == (_BUZZ_APP_PRE_UI_KEYCHAIN_GUARDED)
 
 
+def _with_installer_recovery(source: str) -> str:
+    clone = _patcher()._BUZZ_SETUP_APP_HANDLE
+    call = _patcher()._BUZZ_INSTALLER_RECOVERY_CALL
+    assert source.count(clone) == 1
+    return source.replace(clone, f"{clone}{call}", 1)
+
+
+def test_buzz_source_patch_keeps_keychain_lock_after_installer_recovery(
+    tmp_path: Path,
+) -> None:
+    """43567587437: Buzz 0.5.30 recovers installer downloads before macOS setup.
+
+    The reviewed setup item expected the macOS block to follow the handle
+    clone, so the patch found zero matches and cascade warmup failed. The
+    recovery call does not touch Keychain, and the lock stays after it.
+    """
+    _write_buzz_source(tmp_path)
+    app_path = tmp_path / _BUZZ_APP
+    app_path.write_text(
+        _with_installer_recovery(_BUZZ_APP_UPSTREAM),
+        encoding="utf-8",
+    )
+
+    _patcher().patch_buzz_source(tmp_path)
+
+    patched = app_path.read_text(encoding="utf-8")
+    assert patched == _with_installer_recovery(_BUZZ_APP_PRE_UI_KEYCHAIN_GUARDED)
+    recovery = patched.index("recover_new_app_installer_downloads")
+    lock = patched.index("_pre_ui_keychain_interaction_lock")
+    macos = patched.index('#[cfg(target_os = "macos")]\n            {')
+    assert recovery < lock < macos
+
+
+def test_buzz_source_patch_rejects_ambiguous_pre_ui_setup_shapes(
+    tmp_path: Path,
+) -> None:
+    """A tree that contains both reviewed setup shapes is not patched."""
+    entrypoint = _write_buzz_source(tmp_path)
+    app_path = tmp_path / _BUZZ_APP
+    both = _BUZZ_APP_UPSTREAM + _patcher()._setup_with_installer_recovery(
+        _patcher()._BUZZ_SETUP_UPSTREAM
+    )
+    app_path.write_text(both, encoding="utf-8")
+
+    with pytest.raises(
+        _patcher().RuntimePolicyPatchError,
+        match=(
+            "Buzz pre-UI Keychain interaction scope: expected exactly 1 "
+            "reviewed item, found 1, 1"
+        ),
+    ):
+        _patcher().patch_buzz_source(tmp_path)
+
+    assert entrypoint.read_text(encoding="utf-8") == _BUZZ_UPSTREAM
+    assert app_path.read_text(encoding="utf-8") == both
+
+
+def test_buzz_source_patch_rejects_missing_pre_ui_setup_shape(
+    tmp_path: Path,
+) -> None:
+    """Neither the 0.5.28 nor the 0.5.30 setup shape leaves sources untouched."""
+    entrypoint = _write_buzz_source(tmp_path)
+    app_path = tmp_path / _BUZZ_APP
+    missing = _BUZZ_APP_UPSTREAM.replace(
+        _patcher()._BUZZ_SETUP_UPSTREAM,
+        "        .setup(move |app| {\n",
+        1,
+    )
+    app_path.write_text(missing, encoding="utf-8")
+
+    with pytest.raises(
+        _patcher().RuntimePolicyPatchError,
+        match=(
+            "Buzz pre-UI Keychain interaction scope: expected exactly 1 "
+            "reviewed item, found 0, 0"
+        ),
+    ):
+        _patcher().patch_buzz_source(tmp_path)
+
+    assert entrypoint.read_text(encoding="utf-8") == _BUZZ_UPSTREAM
+    assert app_path.read_text(encoding="utf-8") == missing
+
+
 def test_buzz_source_patch_adds_explicit_readonly_keyring_retry(
     tmp_path: Path,
 ) -> None:
