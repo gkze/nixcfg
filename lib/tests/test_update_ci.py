@@ -1206,17 +1206,19 @@ def test_remember_realized_installable_paths_writes_receipt(
     installable = "path:/tmp/repo#checks.aarch64-darwin.root-closure-darwin-argus"
 
     def run(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        assert args[:7] == (
+        assert args == (
             "nix",
-            "eval",
-            "--raw",
-            "--no-write-lock-file",
-            "--option",
-            "allow-import-from-derivation",
-            "false",
+            "build",
+            "--no-update-lock-file",
+            "--no-link",
+            "--keep-going",
+            "--fallback",
+            "--print-out-paths",
+            installable,
         )
-        assert args[7:] == (f"{installable}.outPath",)
-        return subprocess.CompletedProcess(args, 0, stdout=f"{store}\n", stderr="")
+        return subprocess.CompletedProcess(
+            args, 0, stdout=f"not a store path\n{store}\n", stderr=""
+        )
 
     monkeypatch.setattr(jobs, "_run", run)
     assert jobs.remember_realized_installable_paths((installable,)) == (store,)
@@ -1248,7 +1250,7 @@ def test_load_realized_root_paths_fails_closed_on_invalid_receipt(
         jobs.load_realized_root_paths()
 
 
-def test_remember_realized_installable_paths_fails_closed_on_eval(
+def test_remember_realized_installable_paths_fails_closed_on_build(
     native_job, monkeypatch
 ) -> None:
     env, _checkout = native_job
@@ -1262,6 +1264,19 @@ def test_remember_realized_installable_paths_fails_closed_on_eval(
     with pytest.raises(jobs.CachixFlushError, match="could not resolve"):
         jobs.remember_realized_installable_paths((
             "path:/tmp/repo#checks.aarch64-darwin.root-closures",
+        ))
+    other = "/nix/store/z8fblck53q1grnh4hkbxllvawykc3mbd-home-manager-generation"
+    extra = "/nix/store/l0y1sjsxp7gy047894b1xkh6ml72w4q0-home-manager-generation"
+
+    def too_many(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args, 0, stdout=f"{other}\n{extra}\n", stderr=""
+        )
+
+    monkeypatch.setattr(jobs, "_run", too_many)
+    with pytest.raises(jobs.CachixFlushError, match="2 outputs for 1"):
+        jobs.remember_realized_installable_paths((
+            "path:/tmp/repo#checks.aarch64-darwin.root-closure-home-george",
         ))
 
 
@@ -1383,43 +1398,56 @@ def test_flush_cachix_fails_closed_when_realized_root_push_fails(
         jobs.main("flush-cachix")
 
 
-def test_remember_records_eval_outpath_not_stale_path_info(
+def test_remember_records_built_output_not_eval_or_stale_path_info(
     native_job, monkeypatch
 ) -> None:
-    """38934724529: path-info returned a stale darwin-system already on Cachix."""
+    """43531986200: eval .outPath was not the home-manager generation that was built.
+
+    The shard built ``p9qfa2l4-home-manager-generation.drv`` and the daemon
+    pushed ``z8fblck-home-manager-generation``. ``nix eval`` with
+    import-from-derivation disabled recorded ``l0y1sjsx``, which was missing
+    locally. 38934724529: ``nix path-info`` on the installable returned a
+    stale path already on Cachix. The receipt is ``nix build --print-out-paths``.
+    """
     env, _checkout = native_job
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     stale = "/nix/store/g20bg0xk1g28fh8r4imhpa3v6s6ngifv-darwin-system-26.11.57a3171"
-    wanted = "/nix/store/5a5dpbxqyvvhpnrhs4p3a0f4i48dn3ia-darwin-system-26.11.57a3171"
-    installable = "path:/tmp/snap#checks.aarch64-darwin.root-closure-darwin-rocinante"
+    phantom = "/nix/store/l0y1sjsxp7gy047894b1xkh6ml72w4q0-home-manager-generation"
+    realized = "/nix/store/z8fblck53q1grnh4hkbxllvawykc3mbd-home-manager-generation"
+    installable = "path:/tmp/snap#checks.aarch64-darwin.root-closure-home-george"
     seen: list[tuple[str, ...]] = []
 
     def run(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         seen.append(args)
         if args[:2] == ("nix", "path-info"):
             return subprocess.CompletedProcess(args, 0, stdout=f"{stale}\n", stderr="")
-        assert args[:7] == (
+        if args[:2] == ("nix", "eval"):
+            return subprocess.CompletedProcess(
+                args, 0, stdout=f"{phantom}\n", stderr=""
+            )
+        assert args == (
             "nix",
-            "eval",
-            "--raw",
-            "--no-write-lock-file",
-            "--option",
-            "allow-import-from-derivation",
-            "false",
+            "build",
+            "--no-update-lock-file",
+            "--no-link",
+            "--keep-going",
+            "--fallback",
+            "--print-out-paths",
+            installable,
         )
-        assert args[7:] == (f"{installable}.outPath",)
-        return subprocess.CompletedProcess(args, 0, stdout=f"{wanted}\n", stderr="")
+        assert "allow-import-from-derivation" not in args
+        return subprocess.CompletedProcess(args, 0, stdout=f"{realized}\n", stderr="")
 
     monkeypatch.setattr(jobs, "_run", run)
-    assert jobs.remember_realized_installable_paths((installable,)) == (wanted,)
-    assert all(args[:2] != ("nix", "path-info") for args in seen)
+    assert jobs.remember_realized_installable_paths((installable,)) == (realized,)
+    assert [args[:2] for args in seen] == [("nix", "build")]
     payload = json.loads(
         (
             Path(env["RUNNER_TEMP"]) / "update-artifacts" / "realized-root-paths.json"
         ).read_text()
     )
-    assert payload["storePaths"] == [wanted]
+    assert payload["storePaths"] == [realized]
 
 
 def test_flush_fails_closed_when_nothing_to_push_but_remote_misses(

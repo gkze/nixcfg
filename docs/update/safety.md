@@ -90,12 +90,18 @@ flowchart TD
    boolean keeps the installable. Smoke builds and every other declared
    validation stay required.
    (`DerivationValidation.requires_export_ready`)
-1. **Evaluations disable import-from-derivation.** Every candidate evaluation
-   therefore cannot execute downstream build code during probing, including
-   root manifests, shard planning, coverage out paths, and realized-root
-   receipts. The dependency-free `nix_policy.NO_IMPORT_FROM_DERIVATION_ARGS`
-   tuple is shared by derivation validation, prepared probes, fingerprints,
-   crate2nix generators, source discovery, shard planning, coverage, and CI.
+1. **Evaluations disable import-from-derivation.** Candidate probes cannot
+   execute downstream build code, including root manifests, shard planning,
+   and the planner's coverage out paths. The dependency-free
+   `nix_policy.NO_IMPORT_FROM_DERIVATION_ARGS` tuple is shared by derivation
+   validation's eval mode, prepared probes, fingerprints, crate2nix
+   generators, source discovery, shard planning, coverage, and CI bootstrap.
+   The validating root build does not pass that option. A realized-root
+   receipt repeats that build (`nix build --no-update-lock-file --no-link --keep-going --fallback --print-out-paths`), not a later
+   import-from-derivation-disabled `nix eval .outPath`. Update 43531986200
+   recorded `l0y1sjsx-home-manager-generation` from that eval; the build
+   realized `p9qfa2l4-home-manager-generation.drv` and the daemon pushed
+   `z8fblck-home-manager-generation`, which was not the eval path.
 1. **Batch keys stay conservative.** Only explicit local attribute paths
    from one immutable snapshot batch together. Any other path validates
    individually. (`derivation_validation._batch_key`)
