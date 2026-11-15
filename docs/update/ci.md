@@ -174,7 +174,7 @@ A package quarantined on one platform is held on every platform. Each
 candidate records its hold: the files of its failed and withheld packages,
 the inputs whose lock nodes it rolled back, and both flake files only when a
 ref declaration cannot be restored on its own. A ref declared as an attribute
-set is restored in place, in ``flake.nix`` and ``flake.lock``, including the
+set is restored in place, in `flake.nix` and `flake.lock`, including the
 lock nodes that flake reaches. A dependency node another pin still uses is
 copied aside, so other pins and the crate2nix artifacts generated for them
 stay together. `prepare-darwin-merge`
@@ -501,8 +501,7 @@ decides a job's result. Read the failed step instead.
 - cachix-action logs "Cachix Daemon not started. Skipping push" after
   `flush-cachix` has stopped the daemon and cleared `CACHIX_DAEMON_DIR`. The
   flush output above it records what was pushed. If that clear is skipped
-  after a successful stop, the post hook instead fails with `cachix failed
-  exit code 1` on the closed socket. That line is the hook, not the flush
+  after a successful stop, the post hook instead fails with `cachix failed exit code 1` on the closed socket. That line is the hook, not the flush
   error; the flush step's stderr is the cause.
 
 ### Hosted block-device faults
