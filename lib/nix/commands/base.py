@@ -12,6 +12,8 @@ import importlib
 import os
 import re
 import shlex
+import signal
+import subprocess
 import sys
 from collections import deque
 from contextlib import suppress
@@ -321,8 +323,54 @@ async def _finish_stream_cleanup(
         raise cancelled
 
 
+def _child_pids(listing: str) -> dict[int, tuple[int, ...]]:
+    """Map each parent pid to the children named in a ``ps`` listing."""
+    children: dict[int, list[int]] = {}
+    for line in listing.splitlines():
+        try:
+            pid_text, parent_text = line.split()
+        except ValueError:
+            continue
+        if not pid_text.isdigit() or not parent_text.isdigit():
+            continue
+        children.setdefault(int(parent_text), []).append(int(pid_text))
+    return {parent: tuple(pids) for parent, pids in children.items()}
+
+
+def _descendant_pids(pid: int) -> tuple[int, ...]:
+    """Return every process under *pid*, nearest children last.
+
+    A command timeout kills the direct child. 43695499090's first zon2nix
+    attempt hit its 1200s budget and left ``zig`` reparented to init; the
+    retry then fetched the same cache while that compiler was still alive.
+    """
+    try:
+        listing = subprocess.run(
+            ["/bin/ps", "-ax", "-o", "pid=", "-o", "ppid="],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except OSError, subprocess.TimeoutExpired:
+        return ()
+    children = _child_pids(listing.stdout)
+    found: list[int] = []
+    pending = list(children.get(pid, ()))
+    while pending:
+        current = pending.pop()
+        found.append(current)
+        pending.extend(children.get(current, ()))
+    return tuple(found)
+
+
 async def _stop_process(proc: asyncio.subprocess.Process) -> None:
-    """Stop and reap a child, including the race where it has already exited."""
+    """Stop and reap a child, including grandchildren and an already-exited race."""
+    pid = getattr(proc, "pid", None)
+    if isinstance(pid, int) and pid > 1:
+        for child in reversed(_descendant_pids(pid)):
+            with suppress(ProcessLookupError):
+                os.kill(child, signal.SIGKILL)
     with suppress(ProcessLookupError):
         proc.kill()
     await proc.wait()
