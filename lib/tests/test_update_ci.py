@@ -1912,6 +1912,73 @@ def test_pin_delete_failure_omits_the_response_body(monkeypatch) -> None:
         jobs._delete_cachix_pin("darwin-argus", _budget())
 
 
+def test_forbidden_pin_delete_warns_and_pin_still_fails_closed(
+    native_job, monkeypatch
+) -> None:
+    """43667571490: a Write token's 403 must not skip or pass a pin.
+
+    Pin pruning is housekeeping. ``cachix pin`` still fail-closes, and the
+    delete response body stays out of the log.
+    """
+    env, checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    monkeypatch.setenv("RUNNER_ARCH", "ARM64")
+    monkeypatch.setenv("RUNNER_OS", "Linux")
+    monkeypatch.setenv("CACHIX_AUTH_TOKEN", "test-token")
+    image = "/nix/store/wy15yizd3i7z6bmg3llr43a2pflg9yyb-nixos-disk-image"
+    name = "linux-builder-aarch64-linux"
+    log = StringIO()
+    calls = _stub_pin_catalog(
+        monkeypatch,
+        [{"name": name, "keep": {"tag": "Days", "contents": 14}}],
+        delete_status=403,
+    )
+    jobs._pin_linux_builder_paths((image,), log, _budget())
+    text = log.getvalue()
+    assert ("DELETE", name) in calls
+    assert f"warning: could not delete Cachix pin {name} status=403" in text
+    assert "Admin token" in text
+    assert "deleted historical" not in text
+    assert "pin-response-body" not in text
+    pinned = json.loads(Path(env["TEST_CACHE_LOG"]).read_text())
+    assert pinned[:4] == ["pin", jobs._BINARY_CACHE, name, image]
+    assert pinned[-2:] == ["--keep-revisions", "1"]
+
+    monkeypatch.setenv("TEST_CACHE_PIN_EXIT", "1")
+    monkeypatch.setenv("TEST_CACHE_PIN_STDERR", "connection reset")
+    _stub_pin_catalog(
+        monkeypatch,
+        [{"name": name, "keep": {"tag": "Days", "contents": 14}}],
+        delete_status=403,
+    )
+    with pytest.raises(jobs.CachixFlushError, match="cachix pin of linux-builder"):
+        jobs._pin_linux_builder_paths((image,), StringIO(), _budget())
+
+    legacy = "darwin-system-qaj6kyaf"
+    home = "home-generation-vijljmrs"
+    calls = _stub_pin_catalog(
+        monkeypatch,
+        [{"name": legacy}, {"name": home}],
+        delete_status=403,
+    )
+    legacy_log = StringIO()
+    jobs._delete_legacy_darwin_pins(legacy_log, _budget())
+    legacy_text = legacy_log.getvalue()
+    assert legacy_text.count("status=403") == 2
+    assert "deleted legacy" not in legacy_text
+    assert "pin-response-body" not in legacy_text
+    assert ("DELETE", legacy) in calls
+    assert ("DELETE", home) in calls
+
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "darwin-argus")
+    store = "/nix/store/qaj6kyaffl1bpj6x411pbwdbk29gv22r-darwin-system-26.11.b2f8c5c"
+    _stub_pin_catalog(monkeypatch, [{"name": legacy}], delete_status=403)
+    with pytest.raises(jobs.CachixFlushError, match="cachix pin of darwin-argus"):
+        jobs._pin_realized_darwin_roots((store,), StringIO(), _budget())
+
+
 def test_pin_list_rejects_malformed_payloads(monkeypatch) -> None:
     payloads = (
         (503, b"", "status=503"),
