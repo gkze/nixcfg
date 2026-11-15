@@ -289,11 +289,20 @@ independent overrides.
 
 Prefetches append store paths to an invocation-local JSONL receipt that stays
 with the job artifacts. Publication validates and deduplicates these paths
-without a scan of the runner's store. The Cachix flush proof separates trusted
-write validation from fork pull requests: trusted events require the unique
-path and post-failure flush proof, while fork jobs only run `nix store ping`
-against `gkze` with no Cachix secret. The aggregate `proof` check requires the
-appropriate branch's success and never uses `pull_request_target`.
+without a scan of the runner's store.
+
+The Cachix client does not time out a stalled upload. Prepare's publication
+of those receipts therefore uses the same 1200-second bound as flush, three
+times. A push that is still silent fails that attempt and retries, and the
+third failure fails the job. Update 43695499090 prepare-darwin-1 finished
+hashing, then sat on `zen.macos-universal.dmg` until the 360-minute job cap
+because that publication had no bound.
+
+The Cachix flush proof separates trusted write validation from fork pull
+requests: trusted events require the unique path and post-failure flush proof,
+while fork jobs only run `nix store ping` against `gkze` with no Cachix
+secret. The aggregate `proof` check requires the appropriate branch's success
+and never uses `pull_request_target`.
 
 Every job that passes an explicit `cachix-token` input to `update-runtime`
 ends with `flush-cachix`; read-only `repair` and `start-repair` do not. That

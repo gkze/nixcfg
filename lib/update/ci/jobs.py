@@ -83,6 +83,9 @@ _CACHIX_STOP_TIMEOUT_SECONDS_ENV = "NIXCFG_CACHIX_STOP_TIMEOUT_SECONDS"
 # The longest healthy flush in 25 Update runs was 405s (39375722862
 # plan-darwin-closures pushing 1727 FODs). Retries resume: cachix push skips
 # whatever an earlier attempt already uploaded.
+# 43695499090 prepare-darwin-1: the updater finished, then this same client
+# printed ``Pushing ...-zen.macos-universal.dmg`` and never returned.
+# The prepare hand-off had no timeout, so the 6h job cap was the only stop.
 _CACHIX_PUSH_TIMEOUT_SECONDS = 1200.0
 _CACHIX_PUSH_ATTEMPTS = 3
 _CACHIX_PUSH_CHUNK = 1000
@@ -1384,41 +1387,83 @@ def _wait_for_diagnostics(
     return process.wait()
 
 
+def _prefetch_publication_limit(timeout: float | None) -> tuple[float, int]:
+    """Return one attempt's timeout and how many times to push.
+
+    Flush passes the time left in its budget and must not multiply that
+    budget. Prepare omits *timeout*; that path is the one 43695499090 left
+    unbounded, so it uses the flush client's bound and retries.
+    """
+    if timeout is None:
+        return _CACHIX_PUSH_TIMEOUT_SECONDS, _CACHIX_PUSH_ATTEMPTS
+    return timeout, 1
+
+
+_PREFETCH_PUSH_NAME_LIMIT = 8
+
+
+def _prefetch_push_names(paths: list[str]) -> str:
+    """Name a short push in the timeout diagnostic; keep a long one countable."""
+    names = [Path(path).name for path in paths]
+    if len(names) <= _PREFETCH_PUSH_NAME_LIMIT:
+        return ", ".join(names)
+    return f"{len(names)} paths, last {names[-1]}"
+
+
+def _stop_prefetch_push(
+    process: subprocess.Popen[str] | subprocess.Popen[bytes],
+) -> None:
+    """Kill a wedged ``cachix push`` and the workers in its own session."""
+    if process.poll() is not None:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except OSError:
+        process.kill()
+    try:
+        process.wait(timeout=_SIBLING_STOP_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
 def _push_prefetched_paths(
     paths: list[str],
     log: TextIO,
     artifacts: Path,
-    timeout: float | None = None,
+    timeout: float,
 ) -> None:
     """Publish raw imports while retaining liveness evidence for quiet Cachix uploads.
 
-    A *timeout* kills a stalled push (see ``_CACHIX_STOP_TIMEOUT_SECONDS``)
-    and reports it as ``_TIMEOUT_RETURNCODE``.
+    *timeout* kills a stalled push. The push runs in its own session so the
+    kill reaches upload workers and does not signal the updater. A stall
+    reports ``_TIMEOUT_RETURNCODE``.
     """
     args = ["cachix", "push", _BINARY_CACHE, *paths]
     started = time.monotonic()
+    names = _prefetch_push_names(paths)
     _write_diagnostic(
         log,
         f"Publishing {len(paths)} prefetched paths cache={_BINARY_CACHE} "
         f"artifacts={artifacts}",
     )
-    with subprocess.Popen(args) as process:  # noqa: S603 -- fixed Cachix invocation.
+    with subprocess.Popen(  # noqa: S603 -- fixed Cachix invocation.
+        args, start_new_session=True
+    ) as process:
         while True:
-            wait = _HEARTBEAT_INTERVAL_SECONDS
-            if timeout is not None:
-                remaining = timeout - (time.monotonic() - started)
-                if remaining <= 0:
-                    process.kill()
-                    process.wait()
-                    _write_diagnostic(
-                        log,
-                        f"Cachix publication timed out pid={process.pid} "
-                        f"after {timeout:.0f}s paths={len(paths)}",
-                    )
-                    raise subprocess.CalledProcessError(_TIMEOUT_RETURNCODE, args)
-                wait = min(wait, remaining)
+            remaining = timeout - (time.monotonic() - started)
+            if remaining <= 0:
+                _stop_prefetch_push(process)
+                _write_diagnostic(
+                    log,
+                    f"Cachix publication timed out pid={process.pid} "
+                    f"after {timeout:.0f}s paths={len(paths)} ({names})",
+                )
+                raise subprocess.CalledProcessError(_TIMEOUT_RETURNCODE, args)
             try:
-                returncode = process.wait(timeout=wait)
+                returncode = process.wait(
+                    timeout=min(_HEARTBEAT_INTERVAL_SECONDS, remaining)
+                )
             except subprocess.TimeoutExpired:
                 _write_diagnostic(
                     log,
@@ -1522,18 +1567,31 @@ def _publish_prefetched_receipts(
     _write_diagnostic(log, f"Collected {len(paths)} prefetched store paths")
     if not paths:
         return returncode
-    try:
-        _push_prefetched_paths(paths, log, artifacts, timeout)
-    except subprocess.CalledProcessError as error:
-        if returncode:
+    limit, attempts = _prefetch_publication_limit(timeout)
+    attempt = 1
+    while True:
+        try:
+            _push_prefetched_paths(paths, log, artifacts, limit)
+        except subprocess.CalledProcessError as error:
             _write_diagnostic(
                 log,
-                "Prefetch publication failed after updater failure; "
-                f"retaining updater status cache_exit={error.returncode}",
+                "Cachix prefetch publication "
+                f"attempt {attempt}/{attempts} failed "
+                f"returncode={error.returncode} paths={len(paths)} "
+                f"({_prefetch_push_names(paths)})",
             )
+            if attempt >= attempts:
+                if returncode:
+                    _write_diagnostic(
+                        log,
+                        "Prefetch publication failed after updater failure; "
+                        f"retaining updater status cache_exit={error.returncode}",
+                    )
+                    return returncode
+                raise
+            attempt += 1
+        else:
             return returncode
-        raise
-    return returncode
 
 
 def _merge_candidate_args(artifacts: Path) -> list[str]:

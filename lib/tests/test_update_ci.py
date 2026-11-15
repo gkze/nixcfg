@@ -85,7 +85,10 @@ def native_job(tmp_path: Path) -> tuple[dict[str, str], Path]:
         "    with Path(os.environ['TEST_CACHE_LOG'] + 'l').open('a') as calls:\n"
         "        calls.write(json.dumps(args) + '\\n')\n"
         "    if seconds := os.environ.get('TEST_CACHE_SLEEP_SECONDS'):\n"
-        "        time.sleep(float(seconds))\n"
+        "        slow = os.environ.get('TEST_CACHE_SLOW_PUSHES')\n"
+        "        prior = Path(os.environ['TEST_CACHE_LOG'] + 'l').read_text().count('\\n')\n"
+        "        if slow is None or prior <= int(slow):\n"
+        "            time.sleep(float(seconds))\n"
         "    if args[:2] == ['daemon', 'stop']:\n"
         "        if seconds := os.environ.get('TEST_CACHE_STOP_SLEEP_SECONDS'):\n"
         "            time.sleep(float(seconds))\n"
@@ -434,6 +437,142 @@ def test_native_job_heartbeats_while_publishing_prefetched_paths(
     stderr_log = (artifacts / "stderr.log").read_text()
     assert "Cachix publication still running pid=" in captured.err
     assert "Cachix publication still running pid=" in stderr_log
+
+
+def test_prefetch_publication_retries_a_wedged_push_then_fails(
+    native_job, monkeypatch
+) -> None:
+    """43695499090: prepare's push of zen.macos-universal.dmg had no timeout.
+
+    The updater had already exited 0. ``cachix push`` printed the DMG and
+    then only heartbeats until the 360-minute job cap. A wedged push now
+    fails that attempt, retries, and fails the job with the path named.
+    """
+    env, checkout = native_job
+    zen = "/nix/store/p1bcqm37b1bsv0gidqr8039djpb9zrra-zen.macos-universal.dmg"
+    monkeypatch.setattr(jobs, "_CACHIX_PUSH_TIMEOUT_SECONDS", 0.4)
+    monkeypatch.setattr(jobs, "_CACHIX_PUSH_ATTEMPTS", 2)
+    monkeypatch.setattr(jobs, "_HEARTBEAT_INTERVAL_SECONDS", 0.05)
+    for key, value in (
+        env
+        | {
+            "TEST_PREFETCH_RECEIPTS": json.dumps({"storePath": zen}) + "\n",
+            "TEST_CACHE_SLEEP_SECONDS": "30",
+        }
+    ).items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    started = time.monotonic()
+    with pytest.raises(subprocess.CalledProcessError) as error:
+        jobs.native("prepare")
+    assert error.value.returncode == jobs._TIMEOUT_RETURNCODE
+    assert time.monotonic() - started < 10
+    log = (Path(env["RUNNER_TEMP"]) / "update-artifacts" / "stderr.log").read_text()
+    assert log.count("Cachix publication timed out") == 2
+    assert "zen.macos-universal.dmg" in log
+    assert "attempt 2/2 failed" in log
+    assert "returncode=124" in log
+
+
+def test_prefetch_publication_resumes_after_one_wedged_attempt(
+    native_job, monkeypatch
+) -> None:
+    """A killed push is retried; cachix skips paths the first attempt finished."""
+    env, checkout = native_job
+    monkeypatch.setattr(jobs, "_CACHIX_PUSH_TIMEOUT_SECONDS", 0.4)
+    monkeypatch.setattr(jobs, "_CACHIX_PUSH_ATTEMPTS", 2)
+    monkeypatch.setattr(jobs, "_HEARTBEAT_INTERVAL_SECONDS", 0.05)
+    for key, value in (
+        env
+        | {
+            "TEST_PREFETCH_RECEIPTS": '{"storePath": "/nix/store/resume.zip"}\n',
+            "TEST_CACHE_SLEEP_SECONDS": "30",
+            "TEST_CACHE_SLOW_PUSHES": "1",
+        }
+    ).items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    assert jobs.native("prepare") == 0
+    calls = _cachix_calls(env)
+    assert calls == [["push", "gkze", "/nix/store/resume.zip"]] * 2
+    log = (Path(env["RUNNER_TEMP"]) / "update-artifacts" / "stderr.log").read_text()
+    assert "attempt 1/2 failed" in log
+    assert "attempt 2/2 failed" not in log
+
+
+def test_prefetch_push_names_keep_a_long_publication_countable() -> None:
+    """28 receipts must not dump every basename into the timeout line."""
+    names = [f"/nix/store/{index:032x}-file-{index}" for index in range(9)]
+    assert jobs._prefetch_push_names(names[:2]) == (
+        "00000000000000000000000000000000-file-0, "
+        "00000000000000000000000000000001-file-1"
+    )
+    assert jobs._prefetch_push_names(names) == (
+        "9 paths, last 00000000000000000000000000000008-file-8"
+    )
+
+
+def test_stop_prefetch_push_leaves_a_finished_process_alone() -> None:
+    process = subprocess.Popen([sys.executable, "-c", "pass"], start_new_session=True)
+    process.wait()
+    jobs._stop_prefetch_push(process)
+    assert process.returncode == 0
+
+
+def test_stop_prefetch_push_kills_when_the_session_signal_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``killpg`` can lose the race after the child has already exited."""
+
+    def refuse_group(_pid: int, _sig: int) -> None:
+        raise OSError("not a process group")
+
+    monkeypatch.setattr(jobs.os, "killpg", refuse_group)
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        start_new_session=True,
+    )
+    try:
+        jobs._stop_prefetch_push(process)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+    assert process.returncode is not None
+    assert process.returncode != 0
+
+
+class _SurvivingPush:
+    """A push whose session signal does not reap it on the first wait."""
+
+    def __init__(self) -> None:
+        self.pid = 424242
+        self.kills = 0
+        self.waits = 0
+        self._code: int | None = None
+
+    def poll(self) -> int | None:
+        return self._code
+
+    def kill(self) -> None:
+        self.kills += 1
+        self._code = -signal.SIGKILL
+
+    def wait(self, timeout: float | None = None) -> int:
+        self.waits += 1
+        if self.waits == 1:
+            raise subprocess.TimeoutExpired(["cachix"], timeout or 0)
+        return -signal.SIGKILL
+
+
+def test_stop_prefetch_push_kills_again_when_the_session_does_not_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(jobs.os, "killpg", lambda _pid, _sig: None)
+    process = _SurvivingPush()
+    jobs._stop_prefetch_push(process)  # type: ignore[arg-type]
+    assert process.kills == 1
+    assert process.waits == 2
 
 
 def test_failure_summary_names_failed_sources(tmp_path: Path) -> None:
@@ -5028,6 +5167,21 @@ def test_usual_linux_host_and_darwin_keep_the_32_gib_min_free() -> None:
 def test_linux_min_free_never_drops_below_its_floor() -> None:
     min_free, _ = jobs.nix_gc_thresholds(4 * 1024 * 1024 * 1024, "linux")
     assert min_free == jobs._LINUX_MIN_FREE_FLOOR_BYTES
+
+
+def test_nix_gc_thresholds_skip_step_output_without_github_output(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Repair quality sets GITHUB_OUTPUT, so the unset branch needs a direct call."""
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+
+    def forbid_outputs(**_kwargs: str) -> None:
+        raise AssertionError("step outputs require GITHUB_OUTPUT")
+
+    monkeypatch.setattr(jobs, "_outputs", forbid_outputs)
+    jobs._emit_nix_gc_thresholds(jobs._NIX_MIN_FREE_BYTES)
+    assert "Nix GC thresholds: min-free=" in capsys.readouterr().out
+    assert "GITHUB_OUTPUT" not in os.environ
 
 
 def test_measured_linux_peak_growth_fits_the_linux_reservation() -> None:

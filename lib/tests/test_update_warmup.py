@@ -63,9 +63,11 @@ from lib.update.ci.warmup import (
     extension_host_family_warmup_outputs,
     filter_cascade_realize_drvs,
     force_local_dry_run_builds,
+    foreign_input_gate,
     gitbutler_family_package_outputs,
     gitbutler_family_slot_from_package,
     gitbutler_family_warmup_outputs,
+    gkze_or_local_paths,
     import_warmup_drvs,
     intersect_missing,
     is_cascade_canary_store_path,
@@ -103,6 +105,7 @@ from lib.update.ci.warmup import (
     linux_builder_substitute_miss_reason,
     load_warmup_plan,
     locally_fetchable_source_drvs,
+    locally_valid_paths,
     nix_store_argv_has_operation,
     parse_canary_crates,
     parse_canary_slots,
@@ -3861,6 +3864,96 @@ def test_foreign_input_gate_batches_by_plan_layer() -> None:
         (high,),
         (loose,),
     )
+
+
+def test_warmup_drv_owners_skips_an_output_without_a_derivation() -> None:
+    """An unmapped path is a stripe unit, not a drv this slot owns."""
+    drv = "/nix/store/" + "e" * 32 + "-rust_owned.drv"
+    out = drv.removesuffix(".drv")
+    loose = "/nix/store/" + "f" * 32 + "-unmapped"
+    assert warmup_drv_owners(((loose, out),), {out: drv}, width=1) == {drv: 0}
+
+
+def test_foreign_input_gate_ignores_an_output_without_a_derivation() -> None:
+    drv = "/nix/store/" + "a" * 32 + "-rust_owned.drv"
+    out = drv.removesuffix(".drv")
+    loose = "/nix/store/" + "b" * 32 + "-unmapped"
+    gate = foreign_input_gate(((loose, out),), {out: drv}, 0)
+    assert gate.drv_outputs == {drv: (out,)}
+    assert gate.drv_layers == {drv: 0}
+    assert gate.owners == {drv: 1}
+
+
+def test_foreign_input_gate_fails_open_when_presence_query_fails() -> None:
+    """A store query error is a miss, not a wait that holds the slot."""
+    late, parent = (_gate_drv(name) for name in ("late", "parent"))
+
+    def present(_paths: tuple[str, ...]) -> frozenset[str]:
+        raise subprocess.SubprocessError("nix-store --check-validity failed")
+
+    clock = _FakeClock()
+    gate = _gate(
+        {parent: (late,)},
+        {late: 1, parent: 0},
+        present,
+        clock,
+        wait_seconds=0,
+    )
+    assert gate.wait((parent,)) == ((), (late,))
+    assert clock.now == 0
+
+
+def test_locally_valid_paths_keeps_only_paths_the_store_accepts() -> None:
+    present = "/nix/store/" + "c" * 32 + "-present"
+    missing = "/nix/store/" + "d" * 32 + "-missing"
+    assert locally_valid_paths(()) == frozenset()
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert args[:3] == ["nix-store", "--check-validity", "--print-invalid"]
+        invalid = missing if missing in args else ""
+        stdout = f"{invalid}\n" if invalid else ""
+        return subprocess.CompletedProcess(args, 0, stdout, "")
+
+    assert locally_valid_paths((present, missing, present), run=run) == frozenset({
+        present
+    })
+
+    def fail(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(args, 1, b"", b"no store")
+
+    assert locally_valid_paths((present,), run=fail) == frozenset()
+
+    def binary(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(args, 0, b"", b"")
+
+    assert locally_valid_paths((present,), run=binary) == frozenset({present})
+
+
+def test_gkze_or_local_paths_asks_gkze_only_for_paths_missing_locally(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    local = "/nix/store/" + "1" * 32 + "-local"
+    remote = "/nix/store/" + "2" * 32 + "-remote"
+    asked: list[tuple[tuple[str, ...], str]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        invalid = [path for path in args if path == remote]
+        return subprocess.CompletedProcess(args, 0, "\n".join(invalid), "")
+
+    def on_store(
+        paths: tuple[str, ...], store: str, **_kwargs: object
+    ) -> frozenset[str]:
+        asked.append((tuple(paths), store))
+        return frozenset(paths)
+
+    monkeypatch.setattr("lib.update.ci.warmup.paths_on_store", on_store)
+    assert gkze_or_local_paths((local,), run=run) == frozenset({local})
+    assert asked == []
+    found = gkze_or_local_paths((local, remote), run=run)
+    assert found == frozenset({local, remote})
+    assert asked == [((remote,), "https://gkze.cachix.org")]
 
 
 def test_warmup_drv_owners_matches_slot_stripes() -> None:

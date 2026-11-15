@@ -3,9 +3,13 @@
 import asyncio
 import os
 import pickle
+import signal
+import subprocess
 import sys
+import time
 import types
 from collections.abc import AsyncGenerator
+from contextlib import suppress
 
 import pytest
 
@@ -109,6 +113,7 @@ class _TimeoutProc:
         self.stderr = stderr
         self.killed = False
         self.returncode = 0
+        self.pid: int | str | None = None
 
     async def communicate(self) -> tuple[bytes, bytes]:
         await asyncio.Future()
@@ -369,6 +374,116 @@ def test_stream_process_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
         asyncio.run(_run())
 
     assert proc.killed
+
+
+def test_stream_process_timeout_kills_a_grandchild() -> None:
+    """43695499090: zon2nix's deadline killed the shell and left zig under init."""
+    script = (
+        "import os, sys, time\n"
+        "pid = os.spawnl(\n"
+        "    os.P_NOWAIT, sys.executable, sys.executable, '-c',\n"
+        "    'import time; time.sleep(120)',\n"
+        ")\n"
+        "print(pid, flush=True)\n"
+        "time.sleep(120)\n"
+    )
+    lines: list[str] = []
+
+    async def consume() -> None:
+        async for event in stream_process([PYTHON, "-c", script], command_timeout=3.0):
+            if isinstance(event, ProcessLine):
+                lines.append(event.text)
+
+    grandchild = 0
+    try:
+        with pytest.raises(TimeoutError):
+            asyncio.run(consume())
+        grandchild = int("".join(lines).strip())
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            try:
+                os.kill(grandchild, 0)
+            except ProcessLookupError:
+                return
+            time.sleep(0.05)
+        message = f"grandchild {grandchild} survived the timeout"
+        raise AssertionError(message)
+    finally:
+        if grandchild > 1:
+            with suppress(ProcessLookupError):
+                os.kill(grandchild, signal.SIGKILL)
+
+
+def test_descendant_pids_walks_the_tree_and_skips_a_failed_listing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    listing = "bogus\n20 10\n30 20\n40 x\n11 only\n"
+
+    def ps(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(["ps"], 0, listing, "")
+
+    monkeypatch.setattr(base.subprocess, "run", ps)
+    assert base._descendant_pids(10) == (20, 30)
+    assert base._descendant_pids(99) == ()
+
+    def missing(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise OSError("ps")
+
+    monkeypatch.setattr(base.subprocess, "run", missing)
+    assert base._descendant_pids(10) == ()
+
+    def slow(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(["ps"], 5)
+
+    monkeypatch.setattr(base.subprocess, "run", slow)
+    assert base._descendant_pids(10) == ()
+
+
+def test_descendant_pids_prefers_path_ps_and_keeps_darwin_bin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Linux CI has procps on PATH; a Darwin sandbox still has /bin/ps."""
+    seen: list[str] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        seen.append(args[0])
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(base.subprocess, "run", run)
+    monkeypatch.setattr(base.shutil, "which", lambda _name: "/nix/store/procps/bin/ps")
+    assert base._descendant_pids(1) == ()
+    assert seen == ["/nix/store/procps/bin/ps"]
+
+    seen.clear()
+    monkeypatch.setattr(base.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(base.Path, "is_file", lambda self: str(self) == "/bin/ps")
+    assert base._descendant_pids(1) == ()
+    assert seen == ["/bin/ps"]
+
+    seen.clear()
+    monkeypatch.setattr(base.Path, "is_file", lambda _self: False)
+    assert base._descendant_pids(1) == ()
+    assert seen == []
+
+
+def test_stop_process_ignores_a_gone_descendant_and_pid_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A child that exits between ``ps`` and the signal is already stopped."""
+
+    async def stop(pid: int | str, descendants: tuple[int, ...]) -> _TimeoutProc:
+        proc = _TimeoutProc()
+        proc.pid = pid
+        monkeypatch.setattr(base, "_descendant_pids", lambda _pid: descendants)
+        await base._stop_process(proc)
+        return proc
+
+    gone = asyncio.run(stop(4321, (999_999_999,)))
+    assert gone.killed
+    init = asyncio.run(stop(1, (999_999_999,)))
+    assert init.killed
+    named = asyncio.run(stop("not-a-pid", ()))
+    assert named.killed
 
 
 def test_stream_process_timeout_after_output_closes() -> None:

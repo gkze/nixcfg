@@ -143,7 +143,11 @@ pkgs.devshell.mkShell {
       nixcfgPkg
       pythonToolBins
     ]
-    ++ lib.optional pkgs.stdenv.hostPlatform.isLinux dconf2nix
+    ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+      dconf2nix
+      # Same ps the sandboxed pytest check needs for command-timeout cleanup.
+      procps
+    ]
     ++ pre-commit-check.enabledPackages;
 
   devshell.startup.pre-commit.text = ''

@@ -900,6 +900,28 @@ def test_mach_studio_0_1_221_locked_source_policy_closes_only_the_gate() -> None
 
 
 @pytest.mark.parametrize(
+    "payload",
+    [
+        lambda module: _locked_source_main(module).replace(
+            module._CURRENT_ENABLED_GATE, b""
+        ),
+        lambda module: _locked_source_main(module).replace(
+            module._CURRENT_ENABLED_GATE,
+            module._CURRENT_ENABLED_GATE + module._CURRENT_ENABLED_GATE,
+        ),
+    ],
+)
+def test_locked_source_policy_rejects_a_missing_or_duplicated_gate(
+    payload: Callable[[ModuleType], bytes],
+) -> None:
+    """Inventory can match while the updater gate is absent or doubled."""
+    module = _load_policy_module()
+
+    with pytest.raises(module.PatchError, match="locked-source updater gate"):
+        module.patch_main(payload(module))
+
+
+@pytest.mark.parametrize(
     "drift",
     [
         lambda p: p + b"[`pip`,`install`,`--python`",
