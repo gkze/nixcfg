@@ -244,8 +244,8 @@ flowchart TD
    publish job opens or updates one issue per package and closes it only
    when validation reports show that package was attempted and did not
    fail. The issue's original `since` is the rot clock. Seven days after
-   that stamp (`since + 7 days <= now`) the surface step fails before
-   certify, so the package cannot ride isolation for a second weekly run.
+   that stamp (`since + 1 day <= now`) the surface step fails before
+   certify, so the package cannot ride isolation for a second nightly run.
    Coverage counts quarantined installables as held. A non-quarantined
    miss still fails coverage.
    (`quarantine.plan_issue_sync`, `coverage.require_package_inventory`,

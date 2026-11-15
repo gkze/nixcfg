@@ -2455,6 +2455,39 @@ def _approved_repair_tree(patch: Path) -> str:
     return expected
 
 
+def commit_heal() -> None:
+    """Commit an approved repair onto the update branch that failed.
+
+    The commit stays on that branch. This path does not open a pull request,
+    does not start a second branch, and does not force-push.
+    """
+    branch = os.environ.get("GITHUB_REF_NAME", "")
+    if not branch.startswith("update/"):
+        msg = "Heal commits stay on the update branch that failed"
+        raise ValueError(msg)
+    patch = _temp() / "repair.patch"
+    approved_tree = _approved_repair_tree(patch)
+    _run("git", "apply", "--index", "--binary", str(patch))
+    _run(*_develop(_runtime(), "ci", "update", "check-repair"))
+    if _run("git", "write-tree", capture=True).stdout.strip() != approved_tree:
+        msg = "Applied repair does not match the approved tree"
+        raise ValueError(msg)
+    if _run("git", "diff", "--cached", "--quiet", check=False).returncode:
+        _run(
+            *_develop(
+                "git", "commit", "-S", "-m", "fix(update): repair packaging failure"
+            )
+        )
+    committed_tree = _run(
+        "git", "rev-parse", "HEAD^{tree}", capture=True
+    ).stdout.strip()
+    if committed_tree != approved_tree:
+        msg = "Committed repair does not match the approved tree"
+        raise ValueError(msg)
+    _run("gh", "auth", "setup-git")
+    _run("git", "push", "origin", "HEAD")
+
+
 def start_repair() -> None:
     """Commit the repair job's checked patch and start a fresh attempt.
 
@@ -3844,6 +3877,7 @@ def main(stage: str) -> int:
         "install-agent": install_agent,
         "repair": repair,
         "start-repair": start_repair,
+        "commit-heal": commit_heal,
         "flush-cachix": flush_cachix,
         "restore-canary-plan": restore_canary_plan,
     }

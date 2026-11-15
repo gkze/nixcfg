@@ -1,0 +1,112 @@
+---
+name: Update planner
+# One pull request per independent update. Coupled inputs and companion
+# clusters share a pull request. An open update branch is edited in place.
+on:
+  workflow_dispatch:
+    inputs:
+      security:
+        description: Space-separated security targets
+        type: string
+        default: ""
+      main_fix:
+        description: Space-separated main-fix targets
+        type: string
+        default: ""
+  schedule:
+    - cron: "23 9 * * *"
+permissions:
+  contents: write
+  pull-requests: write
+concurrency:
+  # One planner at a time so two schedules cannot open the same branch.
+  # Darwin lanes stay inside the called workflow and still run together.
+  group: nixcfg-update-planner
+  cancel-in-progress: false
+jobs:
+  discover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/update-runtime
+        id: runtime
+        with:
+          github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: List open update pull requests
+        env:
+          GH_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+        shell: python
+        run: |-
+          import json
+          import os
+          import pathlib
+          import subprocess
+
+          with pathlib.Path("open.json").open("w", encoding="utf-8") as handle:
+              subprocess.run(
+                  [
+                      "gh", "pr", "list", "--repo", os.environ["GITHUB_REPOSITORY"],
+                      "--state", "open", "--limit", "200",
+                      "--json", "number,headRefName,labels,body",
+                  ],
+                  check=True, stdout=handle,
+              )
+          listed = json.loads(pathlib.Path("open.json").read_text())
+          if len(listed) >= 200:
+              raise SystemExit("open pull request list is capped; refusing to plan")
+      - name: Plan update pull requests
+        id: plan
+        env:
+          NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
+          SECURITY: ${{ inputs.security || '' }}
+          MAIN_FIX: ${{ inputs.main_fix || '' }}
+        shell: python
+        run: |-
+          import os
+          import pathlib
+          import subprocess
+
+          command = [
+              "nix", "develop", os.environ["NIXCFG_DEVSHELL"], "--command",
+              "nixcfg", "ci", "pull-requests", "plan",
+              "--json", "plan.json", "--matrix", "matrix.json", "--open-prs", "open.json",
+          ]
+          for name in os.environ["SECURITY"].split():
+              command.extend(("--security", name))
+          for name in os.environ["MAIN_FIX"].split():
+              command.extend(("--main-fix", name))
+          subprocess.run(command, check=True)
+          matrix = pathlib.Path("matrix.json").read_text().strip()
+          with pathlib.Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as handle:
+              handle.write(f"matrix={matrix}\n")
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: update-plan
+          path: plan.json
+          retention-days: 14
+      - name: Flush Cachix daemon
+        if: always()
+        env:
+          NIXCFG_CI_STAGE: flush-cachix
+          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        shell: python
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+  prepare:
+    needs: discover
+    if: needs.discover.outputs.matrix != '[]' && needs.discover.outputs.matrix != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ${{ fromJson(needs.discover.outputs.matrix) }}
+    uses: ./.github/workflows/update-pr.yml
+    with:
+      branch: ${{ matrix.branch }}
+    secrets: inherit

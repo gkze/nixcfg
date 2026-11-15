@@ -75,6 +75,10 @@ on:
         description: Fresh-VM rerun of a device-faulted warmup or root cell; a second fault fails
         default: false
         type: boolean
+      checkout_ref:
+        description: Checkout this ref instead of the caller SHA. Empty keeps the caller SHA.
+        default: ""
+        type: string
     outputs:
       darwin_closure_shards:
         description: Generated always-run Darwin closure matrix
@@ -106,7 +110,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ github.event.inputs.repair_commit || github.sha }}
+          ref: ${{ inputs.checkout_ref || github.event.inputs.repair_commit || github.sha }}
           persist-credentials: false
       - uses: ./.github/actions/update-runtime
         id: runtime

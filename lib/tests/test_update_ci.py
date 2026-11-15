@@ -2797,8 +2797,9 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
         if str(step.get("uses", "")).startswith("actions/checkout@")
     )
     assert checkout["with"]["ref"] == (
-        "${{ github.event.inputs.repair_commit || github.sha }}"
+        "${{ inputs.checkout_ref || github.event.inputs.repair_commit || github.sha }}"
     )
+    assert "checkout_ref" in native["on"]["workflow_call"]["inputs"]
     assert step["env"]["NIXCFG_MERGE_EXTRA"].startswith("${{ inputs.previous_third")
     downloads = [
         step
@@ -3658,7 +3659,12 @@ def test_cachix_flush_is_last_step_of_every_update_runtime_cachix_job() -> None:
         "cachix-flush-proof.yml:fail-after-push",
         "cachix-flush-proof.yml:fork-read-only",
         "rebuild-bun-fixed-outputs.yml:rebuild",
+        "update-automerge.yml:merge",
         "update-native.yml:native",
+        "update-planner.yml:discover",
+        "update-pr.yml:publish",
+        "update-self-heal.yml:decide",
+        "update-self-heal.yml:push",
         "update.yml:publish",
     ]
 
@@ -7173,3 +7179,86 @@ def test_restore_canary_plan_fails_when_every_artifact_is_stale(
     with pytest.raises(RuntimeError, match="matches checked-out tree"):
         jobs.restore_canary_plan(dest=dest, run=run, expected_tree="a" * 40)
     assert not (dest / "warmup-plan.json").exists()
+
+
+def test_commit_heal_pushes_the_same_update_branch(
+    job_repository, tmp_path, monkeypatch
+) -> None:
+    """A heal commit stays on the failing update branch and does not open a PR."""
+    patch = tmp_path / "repair.patch"
+    patch.write_bytes(b"approved repair patch\n")
+    (tmp_path / "repair-receipt.json").write_text(
+        json.dumps({
+            "tree": "certified-tree",
+            "patchSha256": hashlib.sha256(patch.read_bytes()).hexdigest(),
+        })
+    )
+    monkeypatch.setenv("NIXCFG_REPAIR_TREE", "certified-tree")
+    monkeypatch.setenv("GITHUB_REF_NAME", "update/solo")
+    calls: list[tuple[str, ...]] = []
+
+    def run(*args, capture=False, check=True):
+        calls.append(args)
+        return subprocess.CompletedProcess(
+            args,
+            1 if args[:2] == ("git", "diff") else 0,
+            stdout=_published_stdout(args),
+        )
+
+    monkeypatch.setattr(jobs, "_run", run)
+    assert jobs.main("commit-heal") == 0
+    assert ("git", "push", "origin", "HEAD") in calls
+    assert not any(args[:3] == ("gh", "pr", "create") for args in calls)
+    assert not any("--force" in args for args in calls)
+    assert not any(args[:3] == ("gh", "workflow", "run") for args in calls)
+    commit = next(args for args in calls if "commit" in args)
+    assert commit[:7] == (
+        "nix",
+        "develop",
+        "/tools",
+        "--command",
+        "git",
+        "commit",
+        "-S",
+    )
+
+
+def test_commit_heal_rejects_a_branch_outside_update(
+    job_repository, monkeypatch
+) -> None:
+    monkeypatch.setenv("GITHUB_REF_NAME", "main")
+
+    def forbidden(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("a non-update branch reached git")
+
+    monkeypatch.setattr(jobs, "_run", forbidden)
+    with pytest.raises(ValueError, match="update branch"):
+        jobs.main("commit-heal")
+
+
+@pytest.mark.parametrize("mismatch", ["applied", "committed"])
+def test_commit_heal_rejects_tree_drift(
+    job_repository, tmp_path, monkeypatch, mismatch
+) -> None:
+    patch = tmp_path / "repair.patch"
+    patch.write_bytes(b"approved repair patch\n")
+    (tmp_path / "repair-receipt.json").write_text(
+        json.dumps({
+            "tree": "certified-tree",
+            "patchSha256": hashlib.sha256(patch.read_bytes()).hexdigest(),
+        })
+    )
+    monkeypatch.setenv("NIXCFG_REPAIR_TREE", "certified-tree")
+    monkeypatch.setenv("GITHUB_REF_NAME", "update/solo")
+
+    def run(*args, capture=False, check=True):
+        stdout = _published_stdout(args)
+        if mismatch == "applied" and args[:2] == ("git", "write-tree"):
+            stdout = "different-tree\n"
+        if mismatch == "committed" and args[:3] == ("git", "rev-parse", "HEAD^{tree}"):
+            stdout = "different-tree\n"
+        return subprocess.CompletedProcess(args, 0, stdout=stdout)
+
+    monkeypatch.setattr(jobs, "_run", run)
+    with pytest.raises(ValueError, match="does not match the approved tree"):
+        jobs.main("commit-heal")

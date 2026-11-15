@@ -16,6 +16,7 @@ flowchart TD
   index --> appear["appearance.md<br/>macOS appearance"]
   index --> upd["update/README.md<br/>update subsystem"]
   upd --> updci["update/ci.md<br/>hosted builders"]
+  upd --> updpr["update/pull-requests.md<br/>per-package pull requests"]
   upd --> updrt["update/runtime.md<br/>durable execution"]
   upd --> updsafe["update/safety.md<br/>safety invariants"]
   upd --> updfree["update/free-tier-ceiling.md<br/>runner time budget"]
@@ -35,6 +36,7 @@ flowchart TD
 | [appearance.md](appearance.md)                             | macOS appearance bridging for tools without paired-theme settings  |
 | [update/README.md](update/README.md)                       | Update pipeline, entry points, and promotion boundary              |
 | [update/ci.md](update/ci.md)                               | Update workflow on disposable GitHub-hosted builders               |
+| [update/pull-requests.md](update/pull-requests.md)         | Per-package update pull requests, grouping, queue, and failures    |
 | [update/runtime.md](update/runtime.md)                     | Durable execution, admission, scheduling, and observability        |
 | [update/safety.md](update/safety.md)                       | Executable safety invariants, each with its owning code and test   |
 | [update/free-tier-ceiling.md](update/free-tier-ceiling.md) | Measured Update wall clock against the free-tier runner ceiling    |

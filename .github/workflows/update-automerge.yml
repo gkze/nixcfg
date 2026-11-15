@@ -1,0 +1,130 @@
+---
+name: Update automerge
+# Squash-merge one green update pull request. The head sha is pinned.
+# Auto-merge and admin bypasses are not used.
+on:
+  check_suite:
+    types: [completed]
+permissions:
+  contents: read
+jobs:
+  merge:
+    if: |-
+      startsWith(github.event.check_suite.head_branch, 'update/') &&
+      github.event.check_suite.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.check_suite.head_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/update-runtime
+        id: runtime
+        with:
+          github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Merge the pinned head or advance a passing batch probe
+        env:
+          NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
+          GH_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          BRANCH: ${{ github.event.check_suite.head_branch }}
+          SHA: ${{ github.event.check_suite.head_sha }}
+        shell: python
+        run: |-
+          import json
+          import os
+          import pathlib
+          import subprocess
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          with pathlib.Path("pr.json").open("w", encoding="utf-8") as handle:
+              subprocess.run(
+                  [
+                      "gh", "pr", "view", "--repo", repo, os.environ["BRANCH"],
+                      "--json", "number,body,labels,title,headRefOid",
+                  ],
+                  check=True, stdout=handle,
+              )
+          with pathlib.Path("checks.json").open("w", encoding="utf-8") as handle:
+              subprocess.run(
+                  [
+                      "gh", "api", "--paginate",
+                      f"repos/{repo}/commits/{os.environ['SHA']}/check-runs",
+                  ],
+                  check=True, stdout=handle,
+              )
+          pr = json.loads(pathlib.Path("pr.json").read_text())
+          if pr["headRefOid"] != os.environ["SHA"]:
+              raise SystemExit("pull request head moved")
+          body = pathlib.Path("body.md")
+          body.write_text(pr.get("body") or "")
+          devshell = os.environ["NIXCFG_DEVSHELL"]
+          advance = subprocess.run(
+              [
+                  "nix", "develop", devshell, "--command",
+                  "nixcfg", "ci", "pull-requests", "batch-success",
+                  "--body-file", "body.md",
+              ],
+              check=True, text=True, capture_output=True,
+          ).stdout.strip()
+          repo = os.environ["GITHUB_REPOSITORY"]
+          number = str(pr["number"])
+          labels = [
+              item["name"] if isinstance(item, dict) else item for item in pr["labels"]
+          ]
+          if advance != "merge":
+              decision = json.loads(advance)
+              pathlib.Path("next-body.md").write_text(decision["body"])
+              subprocess.run(
+                  ["gh", "pr", "edit", number, "--repo", repo, "--body-file", "next-body.md",
+                   "--add-label", "bisecting"],
+                  check=True,
+              )
+              marker = json.loads(decision["marker"])
+              touches = "true" if marker.get("touchesDarwin", True) else "false"
+              subprocess.run(
+                  [
+                      "gh", "workflow", "run", "update-pr.yml", "--repo", repo,
+                      "--ref", os.environ["BRANCH"],
+                      "-f", f"branch={os.environ['BRANCH']}",
+                      "-f", "targets=" + " ".join(decision["batchTargets"]),
+                      "-f", f"priority={marker.get('priority', 'routine')}",
+                      "-f", f"touches_darwin={touches}",
+                      "-f", f"title={pr.get('title') or os.environ['BRANCH']}",
+                      "-f", f"existing_number={number}",
+                  ],
+                  check=True,
+              )
+              raise SystemExit(0)
+          considered = [label for label in labels if label != "bisecting"]
+          command = [
+              "nix", "develop", devshell, "--command",
+              "nixcfg", "ci", "pull-requests", "automerge", "checks.json",
+              "--branch", os.environ["BRANCH"],
+          ]
+          for label in considered:
+              command.extend(("--label", label))
+          allowed = subprocess.check_output(command, text=True).strip()
+          if allowed != "merge":
+              raise SystemExit(0)
+          subprocess.run(
+              [
+                  "gh", "pr", "merge", number, "--repo", repo, "--squash",
+                  "--match-head-commit", os.environ["SHA"],
+              ],
+              check=True,
+          )
+      - name: Flush Cachix daemon
+        if: always()
+        env:
+          NIXCFG_CI_STAGE: flush-cachix
+          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        shell: python
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")

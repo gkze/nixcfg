@@ -1,7 +1,7 @@
 """Quarantine keeps one package failure from stopping the rest of Update.
 
-The rot threshold is seven days because Update runs weekly, Monday 07:17 UTC.
-``since + 7 days <= now`` lets the run that first quarantines a package
+The rot threshold is one day because Update runs nightly at 07:17 UTC.
+``since + 1 day <= now`` lets the run that first quarantines a package
 publish, and fails the next scheduled run before certify. That is one grace
 publication, then a hard stop.
 """
@@ -371,11 +371,11 @@ def test_build_failures_skip_infrastructure_and_bad_names() -> None:
     assert entries[0].phase is QuarantinePhase.BUILD
 
 
-def test_rot_boundary_is_exactly_seven_days() -> None:
-    """One weekly grace publication, then the next Monday fails."""
+def test_rot_boundary_is_exactly_one_day() -> None:
+    """One nightly grace publication, then the next night fails."""
     fresh = _entry(since=NOW)
-    almost = _entry(since=NOW - timedelta(days=6, hours=23, minutes=59))
-    exact = _entry(since=NOW - timedelta(days=7))
+    almost = _entry(since=NOW - timedelta(hours=23, minutes=59))
+    exact = _entry(since=NOW - timedelta(days=1))
     open_actions, open_rotten = plan_issue_sync(
         quarantines=(fresh,),
         targets=(),
@@ -416,7 +416,7 @@ def test_rot_boundary_is_exactly_seven_days() -> None:
 
 def test_issue_plan_opens_updates_and_closes_only_proven_packages() -> None:
     demo = _entry(excerpt="still broken", since=NOW)
-    primary = _issue(3, since=NOW - timedelta(days=2))
+    primary = _issue(3, since=NOW - timedelta(hours=12))
     actions, rotten = plan_issue_sync(
         quarantines=(demo,),
         targets=(),
@@ -511,7 +511,7 @@ def test_issue_plan_opens_updates_and_closes_only_proven_packages() -> None:
 
 def test_sync_applies_the_plan_before_rot_fails_the_run() -> None:
     applied: list[str] = []
-    entry = _entry(since=NOW - timedelta(days=7))
+    entry = _entry(since=NOW - timedelta(days=1))
 
     def apply(action: IssueSyncAction) -> None:
         applied.append(action.kind)
@@ -1090,7 +1090,7 @@ def test_sync_command_fails_on_rot_and_a_truncated_search(
     tmp_path: Path,
 ) -> None:
     def fail(_evidence: Path, **_kwargs: object) -> None:
-        raise QuarantineRotError((_entry(since=NOW - timedelta(days=7)),))
+        raise QuarantineRotError((_entry(since=NOW - timedelta(days=1)),))
 
     monkeypatch.setattr(pipeline, "sync_quarantine_evidence", fail)
     result = CliRunner().invoke(
@@ -1098,7 +1098,7 @@ def test_sync_command_fails_on_rot_and_a_truncated_search(
         ["sync-quarantines", "--evidence", str(tmp_path)],
     )
     assert result.exit_code == 1
-    assert "7 days" in result.stderr
+    assert "1 day" in result.stderr
 
     def truncated(_evidence: Path, **_kwargs: object) -> None:
         raise QuarantineListTruncatedError("open quarantine issue search was truncated")

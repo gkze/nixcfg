@@ -1,7 +1,7 @@
 # Updater CI
 
-The `Update` workflow uses disposable GitHub-hosted builders. It runs weekly on
-Monday at 07:17 UTC and supports manual target selection. An empty selection
+The `Update` workflow uses disposable GitHub-hosted builders. It runs nightly at
+07:17 UTC and supports manual target selection. An empty selection
 uses the CLI's eligible inventory. Bulk holds are part of that inventory.
 Successful changes become a signed commit and a pull request. The workflow
 does not apply a system configuration.
@@ -65,7 +65,9 @@ the canary inputs on a dispatch. A canary dispatch runs the prepare/merge and
 plan producers followed by the requested canary jobs; full validation and
 publish stay skipped, so a green canary always has real current artifacts.
 
-The workflow runs weekly on Monday at 07:17 UTC. A push to `main` that changes
+The workflow runs nightly at 07:17 UTC. Per-package pull requests, their
+grouping, and the heal queue are in [pull-requests.md](pull-requests.md).
+A push to `main` that changes
 `.github/update-kick` or `lib/update/**` also starts it, so a pipeline fix can
 start Update without a kick-file bump.
 
@@ -199,11 +201,11 @@ see a write token, and that step still blanks `GITHUB_TOKEN` and `GH_TOKEN`.
 The surface step holds `issues: write` only on the publish job. It opens or
 updates one GitHub issue per package, titled `nixcfg quarantine: <package>`,
 and closes that issue when a later run updates the package cleanly. The issue
-body's original `since` is the rot clock. The threshold is 7 days, compared
-as `since + 7 days <= now`. Update is weekly, on Monday at 07:17 UTC, so the
+body's original `since` is the rot clock. The threshold is 1 day, compared
+as `since + 1 day <= now`. Update runs nightly at 07:17 UTC, so the
 run that first quarantines a package still publishes, and the next scheduled
 run fails before certify. That is one grace publication. A package cannot
-ride isolation into a second week. A truncated issue search fails closed
+ride isolation into a second night. A truncated issue search fails closed
 rather than missing a rot or closing the wrong issue.
 
 Coverage treats quarantined installables as held. A missing installable is

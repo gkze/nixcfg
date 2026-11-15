@@ -1,0 +1,361 @@
+---
+name: Update self-heal
+# A failed closure-gate on an update branch is repaired on that same branch.
+# The attempt cap and the needs-human label live in the planner decision.
+on:
+  check_suite:
+    types: [completed]
+permissions:
+  contents: read
+jobs:
+  decide:
+    if: |-
+      startsWith(github.event.check_suite.head_branch, 'update/') &&
+      github.event.check_suite.conclusion == 'failure'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: read
+    outputs:
+      action: ${{ steps.decide.outputs.action }}
+      priority: ${{ steps.decide.outputs.priority }}
+      branch: ${{ steps.decide.outputs.branch }}
+      number: ${{ steps.decide.outputs.number }}
+      targets: ${{ steps.decide.outputs.targets }}
+      touches_darwin: ${{ steps.decide.outputs.touches_darwin }}
+      title: ${{ steps.decide.outputs.title }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.check_suite.head_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/update-runtime
+        id: runtime
+        with:
+          github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Choose heal, bisect, or needs-human
+        id: decide
+        env:
+          NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
+          GH_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          BRANCH: ${{ github.event.check_suite.head_branch }}
+          SHA: ${{ github.event.check_suite.head_sha }}
+        shell: python
+        run: |-
+          import json
+          import os
+          import pathlib
+          import subprocess
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          with pathlib.Path("pr.json").open("w", encoding="utf-8") as handle:
+              subprocess.run(
+                  [
+                      "gh", "pr", "view", "--repo", repo, os.environ["BRANCH"],
+                      "--json", "number,body,labels,title",
+                  ],
+                  check=True, stdout=handle,
+              )
+          with pathlib.Path("checks.json").open("w", encoding="utf-8") as handle:
+              subprocess.run(
+                  [
+                      "gh", "api", "--paginate",
+                      f"repos/{repo}/commits/{os.environ['SHA']}/check-runs",
+                  ],
+                  check=True, stdout=handle,
+              )
+          pr = json.loads(pathlib.Path("pr.json").read_text())
+          labels = [
+              item["name"] if isinstance(item, dict) else item for item in pr["labels"]
+          ]
+          blocked = {"healing", "needs-human"}
+          out = pathlib.Path(os.environ["GITHUB_OUTPUT"])
+          if blocked & set(labels):
+              out.write_text("action=ignore\n")
+              raise SystemExit(0)
+          body = pathlib.Path("body.md")
+          body.write_text(pr.get("body") or "")
+          command = [
+              "nix", "develop", os.environ["NIXCFG_DEVSHELL"], "--command",
+              "nixcfg", "ci", "pull-requests", "failure", "checks.json",
+              "--branch", os.environ["BRANCH"], "--body-file", "body.md",
+          ]
+          for label in labels:
+              command.extend(("--label", label))
+          decision = json.loads(subprocess.check_output(command, text=True))
+          action = decision["action"]
+          marker = json.loads(decision["marker"]) if decision["marker"] else {}
+          fields = {
+              "action": action,
+              "priority": str(marker.get("priority", "routine")),
+              "branch": os.environ["BRANCH"],
+              "number": str(pr["number"]),
+              "targets": " ".join(marker.get("members", [])),
+              "touches_darwin": "true" if marker.get("touchesDarwin", True) else "false",
+              "title": pr.get("title") or os.environ["BRANCH"],
+          }
+          with out.open("a", encoding="utf-8") as handle:
+              for key, value in fields.items():
+                  handle.write(f"{key}={value}\n")
+          if action == "ignore":
+              raise SystemExit(0)
+          pathlib.Path("next-body.md").write_text(decision["body"])
+          number = str(pr["number"])
+          repo = os.environ["GITHUB_REPOSITORY"]
+          if action == "needs-human":
+              subprocess.run(
+                  ["gh", "pr", "edit", number, "--repo", repo, "--add-label", "needs-human"],
+                  check=True,
+              )
+              raise SystemExit(0)
+          subprocess.run(
+              ["gh", "pr", "edit", number, "--repo", repo, "--body-file", "next-body.md"],
+              check=True,
+          )
+          if action == "bisect":
+              subprocess.run(
+                  ["gh", "pr", "edit", number, "--repo", repo, "--add-label", "bisecting"],
+                  check=True,
+              )
+              dispatch = [
+                  "gh", "workflow", "run", "update-pr.yml", "--repo", repo,
+                  "--ref", os.environ["BRANCH"],
+                  "-f", f"branch={os.environ['BRANCH']}",
+                  "-f", "targets=" + " ".join(decision["batchTargets"]),
+                  "-f", f"priority={fields['priority']}",
+                  "-f", f"touches_darwin={fields['touches_darwin']}",
+                  "-f", f"title={fields['title']}",
+                  "-f", f"existing_number={number}",
+              ]
+              subprocess.run(dispatch, check=True)
+              for name in decision["splitTargets"]:
+                  split = f"update/{name}"
+                  subprocess.run(
+                      [
+                          "gh", "workflow", "run", "update-pr.yml", "--repo", repo,
+                          "--ref", os.environ["GITHUB_REF_NAME"],
+                          "-f", f"branch={split}",
+                          "-f", f"targets={name}",
+                          "-f", "priority=routine",
+                          "-f", "touches_darwin=true",
+                          "-f", f"title=chore(update): {name}",
+                          "-f", "existing_number=0",
+                      ],
+                      check=True,
+                  )
+              raise SystemExit(0)
+          subprocess.run(
+              ["gh", "pr", "edit", number, "--repo", repo, "--add-label", "healing"],
+              check=True,
+          )
+          ids = subprocess.check_output(
+              [
+                  "nix", "develop", os.environ["NIXCFG_DEVSHELL"], "--command",
+                  "nixcfg", "ci", "pull-requests", "gate-jobs", "checks.json",
+              ],
+              text=True,
+          ).split()
+          if not ids:
+              subprocess.run(
+                  ["gh", "pr", "edit", number, "--repo", repo, "--add-label", "needs-human"],
+                  check=True,
+              )
+              subprocess.run(
+                  ["gh", "pr", "edit", number, "--repo", repo, "--remove-label", "healing"],
+                  check=False,
+              )
+              text = out.read_text().replace("action=heal\n", "action=needs-human\n", 1)
+              out.write_text(text)
+              raise SystemExit(0)
+          evidence = pathlib.Path("repair-evidence")
+          evidence.mkdir()
+          for job in ids:
+              log = subprocess.check_output(
+                  ["gh", "api", f"repos/{repo}/actions/jobs/{job}/logs"],
+                  text=True,
+              )
+              (evidence / f"job-{job}.log").write_text(log)
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: steps.decide.outputs.action == 'heal'
+        with:
+          name: repair-evidence
+          path: repair-evidence
+          retention-days: 14
+      - name: Flush Cachix daemon
+        if: always()
+        env:
+          NIXCFG_CI_STAGE: flush-cachix
+          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        shell: python
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+  heal:
+    needs: decide
+    if: needs.decide.outputs.action == 'heal'
+    runs-on: macos-15
+    timeout-minutes: 120
+    concurrency:
+      group: nixcfg-darwin-${{ needs.decide.outputs.priority }}
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: read
+      copilot-requests: write
+    outputs:
+      tree: ${{ steps.proposal.outputs.tree }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.check_suite.head_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/update-runtime
+        id: runtime
+        with:
+          github-token: ${{ github.token }}
+          cache-generators: "true"
+          light-image-reclaim: "true"
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: repair-evidence
+          path: ${{ runner.temp }}/repair-evidence
+      - name: Install bounded repair agent
+        shell: python
+        env:
+          NIXCFG_CI_STAGE: install-agent
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+      - name: Propose one repair
+        id: proposal
+        env:
+          NIXCFG_RUNTIME: ${{ steps.runtime.outputs.runtime }}
+          NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
+          NIXCFG_NIXPKGS_PATH: ${{ steps.runtime.outputs.nixpkgs }}
+          NIXCFG_REQUIRE_NIX_EVAL: "true"
+          GITHUB_TOKEN: ${{ github.token }}
+          COPILOT_MODEL: gpt-6-astra
+          COPILOT_AUTO_UPDATE: "false"
+          NIXCFG_CI_STAGE: repair
+        shell: python
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: repair
+          path: |
+            ${{ runner.temp }}/repair.patch
+            ${{ runner.temp }}/repair-receipt.json
+          if-no-files-found: warn
+          retention-days: 14
+  release:
+    needs: [decide, heal]
+    if: |-
+      always() && !cancelled() &&
+      needs.decide.outputs.action == 'heal' &&
+      needs.heal.result != 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Drop the heal latch after a failed proposal
+        env:
+          GH_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          NUMBER: ${{ needs.decide.outputs.number }}
+        shell: python
+        run: |-
+          import os
+          import subprocess
+
+          subprocess.run(
+              [
+                  "gh", "pr", "edit", os.environ["NUMBER"],
+                  "--repo", os.environ["GITHUB_REPOSITORY"],
+                  "--remove-label", "healing",
+              ],
+              check=False,
+          )
+  push:
+    needs: [decide, heal]
+    if: needs.heal.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      actions: write
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.decide.outputs.branch }}
+          persist-credentials: false
+      - uses: ./.github/actions/update-runtime
+        id: runtime
+        with:
+          github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          light-image-reclaim: "true"
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: repair
+          path: ${{ runner.temp }}
+      - uses: crazy-max/ghaction-import-gpg@e89d40939c28e39f97cf32126055eeae86ba74ec # v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+          git_user_signingkey: true
+          git_commit_gpgsign: true
+      - name: Commit the repair on this branch
+        env:
+          NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
+          NIXCFG_RUNTIME: ${{ steps.runtime.outputs.runtime }}
+          GH_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          GITHUB_REF_NAME: ${{ needs.decide.outputs.branch }}
+          NIXCFG_CI_STAGE: commit-heal
+          NIXCFG_REPAIR_TREE: ${{ needs.heal.outputs.tree }}
+        shell: python
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+      - name: Rehash the same pull request
+        env:
+          GH_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          BRANCH: ${{ needs.decide.outputs.branch }}
+          NUMBER: ${{ needs.decide.outputs.number }}
+          TARGETS: ${{ needs.decide.outputs.targets }}
+          PRIORITY: ${{ needs.decide.outputs.priority }}
+          TOUCHES: ${{ needs.decide.outputs.touches_darwin }}
+          TITLE: ${{ needs.decide.outputs.title }}
+        shell: python
+        run: |-
+          import os
+          import subprocess
+
+          branch = os.environ["BRANCH"]
+          subprocess.run(
+              [
+                  "gh", "workflow", "run", "update-pr.yml",
+                  "--repo", os.environ["GITHUB_REPOSITORY"], "--ref", branch,
+                  "-f", f"branch={branch}",
+                  "-f", f"targets={os.environ['TARGETS']}",
+                  "-f", f"priority={os.environ['PRIORITY']}",
+                  "-f", f"touches_darwin={os.environ['TOUCHES']}",
+                  "-f", f"title={os.environ['TITLE']}",
+                  "-f", f"existing_number={os.environ['NUMBER']}",
+              ],
+              check=True,
+          )
+      - name: Flush Cachix daemon
+        if: always()
+        env:
+          NIXCFG_CI_STAGE: flush-cachix
+          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        shell: python
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
