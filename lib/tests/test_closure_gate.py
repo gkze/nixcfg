@@ -382,21 +382,35 @@ def test_unknown_narinfo_is_not_a_cache_hit() -> None:
     assert result.pushed == (_out("tool"),)
 
 
-def test_realize_fails_closed_on_drv_mismatch_or_a_bad_build() -> None:
-    """The build must be the planned drv, and the receipt must be those outputs."""
+def test_realize_builds_the_instantiated_drv_when_ifd_changes_it() -> None:
+    """A Darwin system drv differs once import-from-derivation is allowed.
+
+    The plan stays disabled so the diff is cheap. The build is the
+    instantiated attribute, and the receipt is that drv's outputs.
+    """
+    item = _changed("root", "root-closure-darwin-argus", _drv("plan"))
+    built_drv = _drv("built")
+    output = _out("system")
+    runner = _Runner()
+    runner.drvs[item.attr] = built_drv
+    runner.outputs[built_drv] = (output,)
+    runner.build_result = (output,)
+    result = gate.realize_changed((item,), runner)
+    assert runner.built == (item.installable(),)
+    assert result.pushed == (output,)
+
+
+def test_realize_fails_closed_on_a_bad_build() -> None:
+    """The receipt must be the instantiated drv's outputs."""
     item = _changed("package", "tool", _drv("tool"))
     runner = _Runner()
-    runner.drvs[item.attr] = _drv("other")
-    with pytest.raises(gate.GateError, match="instantiated"):
-        gate.realize_changed((item,), runner)
-    assert runner.built is None
     runner.drvs[item.attr] = item.drv
     runner.outputs[item.drv] = ()
     with pytest.raises(gate.GateError, match="no outputs"):
         gate.realize_changed((item,), runner)
     runner.outputs[item.drv] = (_out("tool"),)
     runner.build_result = (_out("other"),)
-    with pytest.raises(gate.GateError, match="planned drvs"):
+    with pytest.raises(gate.GateError, match="instantiated drvs"):
         gate.realize_changed((item,), runner)
     assert runner.pushed is None
     runner.build_result = (_out("tool"),)

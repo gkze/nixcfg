@@ -318,8 +318,8 @@ def inventory_eval_args(inventory: Path, flake_path: Path, system: str) -> list[
 def instantiate_args(attr: str) -> list[str]:
     """Instantiate the drv ``nix build`` will realize.
 
-    Import-from-derivation stays at Nix's default so this drv is the one the
-    build uses. The plan's disabled-IFD drv must equal it before a build.
+    Import-from-derivation stays at Nix's default. A Darwin system drv
+    differs from the plan's disabled-IFD drv; the build uses this one.
     """
     return [
         "nix",
@@ -570,8 +570,10 @@ def _inventory_from_changed(
 def realize_changed(changed: Sequence[ChangedOutput], runner: _Runner) -> RealizeResult:
     """Build only outputs missing from gkze, then push those outputs.
 
-    A drv that does not match the plan is not built. Paths already proven
-    present are not pushed. A push that does not finish raises.
+    The plan drv is import-from-derivation disabled, so it can differ from
+    the drv ``nix build`` realizes. Output paths and the build receipt come
+    from the instantiated drv. Paths already proven present are not pushed.
+    A push that does not finish raises.
     """
     pending: list[ChangedOutput] = []
     pending_outputs: dict[str, str] = {}
@@ -579,12 +581,12 @@ def realize_changed(changed: Sequence[ChangedOutput], runner: _Runner) -> Realiz
     for item in changed:
         instantiated = runner.instantiate(item.attr)
         if instantiated != item.drv:
-            msg = (
-                f"{item.attr} instantiated {instantiated}, "
-                f"but the plan drv is {item.drv}"
+            sys.stdout.write(
+                f"closure-gate realize {item.attr} "
+                f"plan_drv={item.drv} build_drv={instantiated}\n"
             )
-            raise GateError(msg)
-        outputs = runner.outputs_of(item.drv)
+            sys.stdout.flush()
+        outputs = runner.outputs_of(instantiated)
         if not outputs:
             msg = f"{item.attr} declares no outputs"
             raise GateError(msg)
@@ -593,13 +595,13 @@ def realize_changed(changed: Sequence[ChangedOutput], runner: _Runner) -> Realiz
         if len(present) != len(outputs):
             pending.append(item)
             for path in outputs:
-                pending_outputs[path] = item.drv
+                pending_outputs[path] = instantiated
     pushed: tuple[str, ...] = ()
     if pending:
         built = runner.build(tuple(item.installable() for item in pending))
         if set(built) != set(pending_outputs):
             msg = (
-                "nix build returned outputs that are not the planned drvs: "
+                "nix build returned outputs that are not the instantiated drvs: "
                 f"built={list(built)} expected={sorted(pending_outputs)}"
             )
             raise GateError(msg)
