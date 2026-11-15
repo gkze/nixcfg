@@ -1,3 +1,4 @@
+---
 name: PR closure gate
 # Every same-repo pull request must realize the package outputs and
 # root-closure-* drvs it changes, on the native builder, and push those
@@ -194,6 +195,6 @@ jobs:
           CLOSURE_GATE_RESULTS: results
           CLOSURE_GATE_PLANS: plans
         shell: python
-        run: |
+        run: |-
           import runpy
           runpy.run_path(".github/closure-gate/gate.py", run_name="__main__")
