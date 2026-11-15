@@ -807,6 +807,40 @@ a 4-wide graph eval SIGTERM'd the 16 GiB runner. The public macOS pool and
 the `gkze` cache size stay the other caps. Paid `macos-15-xlarge` is out of
 scope.
 
+## Pull request closure gate
+
+`PR closure gate` (`.github/workflows/pr-closure-gate.yml`) runs on every
+same-repo pull request, including a new push to the PR head. The check name
+is `closure-gate`. It is green only when every package output and
+`checks.<system>.root-closure-*` drv that differs from the merge base was
+realized on that system's native builder and the realized store paths are on
+`gkze.cachix.org`.
+
+The plan evaluates drv paths at the merge base and at the PR head with
+import-from-derivation disabled. It does not build those outputs. A workflow
+or Python change that leaves every drv unchanged produces an empty plan per
+system and the realize jobs stay skipped. aarch64-darwin is always planned.
+An empty Darwin diff is not a waiver, and a missing Darwin plan fails the
+aggregate.
+
+Realize calls the Update reusable workflow (`update-native.yml`) with stage
+`closure-gate` on `macos-15`, `ubuntu-24.04-arm`, and `ubuntu-24.04`. The
+build flags are the validation build (`nix build --no-update-lock-file
+--no-link --keep-going --fallback`) plus `--print-out-paths`. The build
+budget is the Darwin shard budget, 18000 seconds, inside the 360-minute job.
+Outputs already proven by a gkze narinfo are not built and not pushed. A
+missing or unknown narinfo is built. `cachix push` must exit 0 and the
+narinfo must then be 200, or the job fails. The flush step still runs and
+fails closed. The aggregating step writes the pushed and already-cached
+store paths into the job summary.
+
+Fork pull requests do not run the workflow's jobs. The trigger is
+`pull_request` for a head in this repository, and the Cachix token is passed
+only into the realize jobs. The gate program lives in
+`.github/closure-gate/` so editing it does not change the nixcfg package
+source. `lib/tests/test_closure_gate.py` pins the diff, the skip, the push
+failure, and the workflow shape.
+
 ## Related
 
 - [Update overview](README.md)

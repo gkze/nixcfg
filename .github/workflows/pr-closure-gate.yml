@@ -1,0 +1,199 @@
+name: PR closure gate
+# Every same-repo pull request must realize the package outputs and
+# root-closure-* drvs it changes, on the native builder, and push those
+# store paths to gkze. An empty drv diff is success without a build.
+# Fork jobs do not run, so they never receive CACHIX_AUTH_TOKEN.
+# The only trigger is pull_request from this repository.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: pr-closure-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  plan:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: aarch64-darwin
+            runner: macos-15
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+          - system: x86_64-linux
+            runner: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reclaim unused hosted image tools
+        if: runner.os == 'macOS'
+        env:
+          NIXCFG_CI_STAGE: clean-image
+        shell: python
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+      - uses: DeterminateSystems/determinate-nix-action@8d87e8d5e5b8a8309d4281094560f127d9a265f1
+        with:
+          github-token: ${{ github.token }}
+      - name: Compare drv paths with the merge base
+        env:
+          NIXCFG_CLOSURE_GATE_COMMAND: plan
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SYSTEM: ${{ matrix.system }}
+        shell: python
+        run: |
+          import runpy
+          runpy.run_path(".github/closure-gate/gate.py", run_name="__main__")
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: closure-gate-plan-${{ matrix.system }}
+          path: ${{ runner.temp }}/closure-gate/plan.json
+          if-no-files-found: error
+          retention-days: 14
+  route:
+    needs: plan
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      needs.plan.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      changed: ${{ steps.route.outputs.changed }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: closure-gate-plan-*
+          path: ${{ runner.temp }}/plans
+      - name: Require a plan for every policy system
+        id: route
+        env:
+          NIXCFG_CLOSURE_GATE_COMMAND: route
+        shell: python
+        run: |
+          import runpy
+          runpy.run_path(".github/closure-gate/gate.py", run_name="__main__")
+  # A reusable workflow call cannot read matrix in its if, so each
+  # system is its own job. An empty diff skips that job. One failure
+  # does not cancel the others before their Cachix flush.
+  realize-aarch64-darwin:
+    needs: route
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      needs.route.result == 'success' &&
+      fromJSON(needs.route.outputs.changed || '{}')['aarch64-darwin'] > 0
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: closure-gate
+      scope: gate
+      checkout_ref: ${{ github.event.pull_request.head.sha }}
+    secrets:
+      UPDATE_SELF_HEAL_GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+  realize-aarch64-linux:
+    needs: route
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      needs.route.result == 'success' &&
+      fromJSON(needs.route.outputs.changed || '{}')['aarch64-linux'] > 0
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: ubuntu-24.04-arm
+      system: aarch64-linux
+      stage: closure-gate
+      scope: gate
+      checkout_ref: ${{ github.event.pull_request.head.sha }}
+    secrets:
+      UPDATE_SELF_HEAL_GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+  realize-x86_64-linux:
+    needs: route
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      needs.route.result == 'success' &&
+      fromJSON(needs.route.outputs.changed || '{}')['x86_64-linux'] > 0
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: ubuntu-24.04
+      system: x86_64-linux
+      stage: closure-gate
+      scope: gate
+      checkout_ref: ${{ github.event.pull_request.head.sha }}
+    secrets:
+      UPDATE_SELF_HEAL_GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+  closure-gate:
+    needs:
+      - plan
+      - route
+      - realize-aarch64-darwin
+      - realize-aarch64-linux
+      - realize-x86_64-linux
+    if: >-
+      always() &&
+      !cancelled() &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        if: needs.route.result == 'success'
+        with:
+          pattern: closure-gate-plan-*
+          path: plans
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        if: needs.realize-aarch64-darwin.result == 'success'
+        continue-on-error: true
+        with:
+          name: closure-gate-aarch64-darwin-gate
+          path: results/aarch64-darwin
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        if: needs.realize-aarch64-linux.result == 'success'
+        continue-on-error: true
+        with:
+          name: closure-gate-aarch64-linux-gate
+          path: results/aarch64-linux
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        if: needs.realize-x86_64-linux.result == 'success'
+        continue-on-error: true
+        with:
+          name: closure-gate-x86_64-linux-gate
+          path: results/x86_64-linux
+      - name: Require every changed closure on gkze
+        env:
+          NIXCFG_CLOSURE_GATE_COMMAND: aggregate
+          PLAN_RESULT: ${{ needs.plan.result }}
+          ROUTE_RESULT: ${{ needs.route.result }}
+          REALIZE_RESULTS: >-
+            ${{ format(
+            '{{"aarch64-darwin":"{0}","aarch64-linux":"{1}","x86_64-linux":"{2}"}}',
+            needs.realize-aarch64-darwin.result,
+            needs.realize-aarch64-linux.result,
+            needs.realize-x86_64-linux.result) }}
+          CHANGED: ${{ needs.route.outputs.changed || '{}' }}
+          CLOSURE_GATE_RESULTS: results
+          CLOSURE_GATE_PLANS: plans
+        shell: python
+        run: |
+          import runpy
+          runpy.run_path(".github/closure-gate/gate.py", run_name="__main__")
