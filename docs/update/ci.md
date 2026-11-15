@@ -305,10 +305,16 @@ deleted before a Darwin root pin. A linux-builder pin that still keeps days
 is deleted before that image is pinned. If the pin then returns 402, flush
 deletes the hash-named pins and retries that pin once. Run 43613142360
 returned 402 "Pin storage limit exceeded" on `darwin-system-qaj6kyaf` while
-`linux-builder-aarch64-linux` was revision 25 under `--keep-days 14`. After
-a successful daemon stop, flush clears `CACHIX_DAEMON_DIR` even when the
-later push or pin fails, so the action post hook does not stop the closed
-socket again. The flush exception still fails the job.
+`linux-builder-aarch64-linux` was revision 25 under `--keep-days 14`.
+`DELETE /api/v1/cache/gkze/pin/{name}` with the flush's Bearer token is the
+documented pin-delete call. Run 43667571490 got 403 on
+`linux-builder-aarch64-linux`: a Write token can push and create pins, and
+Cachix reserves pin deletion for an Admin token. That 403 is a warning.
+Flush still pins the path it just pushed. `cachix push` and `cachix pin`
+fail the job, including a later 402. After a successful daemon stop, flush
+clears `CACHIX_DAEMON_DIR` even when the later push or pin fails, so the
+action post hook does not stop the closed socket again. The flush exception
+still fails the job.
 Cachix's HTTP client has no response timeout. In run 40048292663 a stalled
 request froze the daemon's queue, so `cachix daemon stop` never returned, and
 the flush spent the job's last three hours. Flush therefore runs inside a

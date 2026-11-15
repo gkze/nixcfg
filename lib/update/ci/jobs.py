@@ -122,7 +122,11 @@ _LINUX_BUILDER_OUTPUT = "nixos-disk-image"
 # "Pin storage limit exceeded" while ``linux-builder-aarch64-linux`` was
 # revision 25 kept for 14 days. A stable name with one revision is what
 # still protects the next substitute without filling the pin quota.
+# 43667571490: DELETE of that pin returned 403. The route and Bearer
+# header match Cachix's API; a Write token can push and create pins,
+# and pin deletion is an Admin operation. Pruning is housekeeping.
 _CACHIX_PIN_KEEP_REVISIONS = 1
+_CACHIX_PIN_DELETE_FORBIDDEN = 403
 _CACHIX_PIN_API = "https://cachix.org/api/v1/cache/gkze/pin"
 _LEGACY_DARWIN_PIN_RE = re.compile(r"^(?:darwin-system|home-generation)-[0-9a-z]{8}$")
 _LINUX_BUILDER_PIN_RE = re.compile(r"^linux-builder-(?:aarch64|x86_64)-linux$")
@@ -3207,7 +3211,13 @@ def _cachix_auth_token() -> str:
 
 
 def _delete_cachix_pin(name: str, budget: _FlushBudget) -> int:
-    """Delete one known pin. 404 means a concurrent shard already removed it."""
+    """Delete one known pin.
+
+    404 means a concurrent shard already removed it. 403 means this
+    token can write the cache but cannot prune pins. Callers log that
+    and continue. A missing token and every other status still fail
+    closed, as do push and pin creation.
+    """
     if _DELETABLE_PIN_RE.fullmatch(name) is None:
         msg = f"refusing to delete Cachix pin {name!r}"
         raise CachixFlushError(msg)
@@ -3217,10 +3227,22 @@ def _delete_cachix_pin(name: str, budget: _FlushBudget) -> int:
         budget.timeout(_CACHIX_QUERY_TIMEOUT_SECONDS),
         token=_cachix_auth_token(),
     )
-    if status not in {200, 202, 204, 404}:
-        msg = f"could not delete Cachix pin {name} status={status}"
-        raise CachixFlushError(msg)
-    return status
+    if status in {200, 202, 204, 404, _CACHIX_PIN_DELETE_FORBIDDEN}:
+        return status
+    msg = f"could not delete Cachix pin {name} status={status}"
+    raise CachixFlushError(msg)
+
+
+def _record_pin_delete(log: TextIO, kind: str, name: str, status: int) -> None:
+    """Log a pin delete. A 403 is pruning and does not fail the flush."""
+    if status == _CACHIX_PIN_DELETE_FORBIDDEN:
+        _write_diagnostic(
+            log,
+            f"warning: could not delete Cachix pin {name} status={status}; "
+            "pruning needs a Cachix Admin token",
+        )
+        return
+    _write_diagnostic(log, f"deleted {kind} Cachix pin {name} status={status}")
 
 
 def _delete_legacy_darwin_pins(log: TextIO, budget: _FlushBudget) -> None:
@@ -3231,8 +3253,7 @@ def _delete_legacy_darwin_pins(log: TextIO, budget: _FlushBudget) -> None:
         if _LEGACY_DARWIN_PIN_RE.fullmatch(str(pin["name"]))
     ]
     for name in legacy:
-        status = _delete_cachix_pin(name, budget)
-        _write_diagnostic(log, f"deleted legacy Cachix pin {name} status={status}")
+        _record_pin_delete(log, "legacy", name, _delete_cachix_pin(name, budget))
 
 
 def _collapse_linux_builder_history(
@@ -3243,7 +3264,8 @@ def _collapse_linux_builder_history(
     ``cachix pin --keep-revisions 1`` trims history only after Cachix accepts
     the new revision. 43613142360 was already over the pin quota, so a pin
     that adds a revision is rejected before that trim. Delete the day-based
-    pin first; this step then pins the one image it just pushed.
+    pin first; this step then pins the one image it just pushed. A 403 on
+    that delete is logged and does not skip the pin.
     """
     if _LINUX_BUILDER_PIN_RE.fullmatch(name) is None:
         msg = f"refusing to collapse Cachix pin {name!r}"
@@ -3254,8 +3276,7 @@ def _collapse_linux_builder_history(
     )
     if current is None or _pin_keeps_one_revision(current):
         return
-    status = _delete_cachix_pin(name, budget)
-    _write_diagnostic(log, f"deleted historical Cachix pin {name} status={status}")
+    _record_pin_delete(log, "historical", name, _delete_cachix_pin(name, budget))
 
 
 def _run_cachix_pin(
@@ -3526,6 +3547,8 @@ def flush_cachix() -> None:
       linux-builder history are deleted first: 43613142360 pinned
       ``darwin-system-qaj6kyaf`` into a 402 "Pin storage limit exceeded"
       while ``linux-builder-aarch64-linux`` was revision 25.
+      43667571490 then 403'd that delete. A Write token cannot prune
+      pins; the 403 is a warning and the push and pin still fail closed.
     - Failed warmup (39301503361 cascade slot 3): the action post hook
       then logs ``Cachix Daemon not started. Skipping push``. Flush still
       ``cachix push``es leftovers and ``realized-root-paths.json`` so the
