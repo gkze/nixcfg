@@ -395,7 +395,9 @@ def output_paths(show_payload: object, drv: str) -> tuple[str, ...]:
     return tuple(paths)
 
 
-def _described_derivation(show_payload: dict[str, object], drv: str) -> dict[str, object]:
+def _described_derivation(
+    show_payload: dict[str, object], drv: str
+) -> dict[str, object]:
     direct = show_payload.get(drv)
     if isinstance(direct, dict):
         return direct
