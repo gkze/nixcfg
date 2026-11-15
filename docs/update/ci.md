@@ -816,8 +816,11 @@ is `closure-gate`. It is green only when every package output and
 realized on that system's native builder and the realized store paths are on
 `gkze.cachix.org`.
 
-The plan evaluates drv paths at the merge base and at the PR head with
-import-from-derivation disabled. It does not build those outputs. A workflow
+The plan evaluates drv paths at the merge base and twice at the PR head,
+with import-from-derivation disabled. It does not build those outputs. A
+drv that changes between the two head evals fails the plan: that output is
+not a function of the tree, so a diff cannot decide whether the pull
+request changed it. A workflow
 or Python change that leaves every drv unchanged produces an empty plan per
 system and the realize jobs stay skipped. aarch64-darwin is always planned.
 An empty Darwin diff is not a waiver, and a missing Darwin plan fails the

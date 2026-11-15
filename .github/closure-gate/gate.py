@@ -221,6 +221,29 @@ def parse_inventory(payload: object) -> dict[tuple[str, str], str]:
     return parsed
 
 
+def stable_inventory(
+    first: Mapping[tuple[str, str], str],
+    second: Mapping[tuple[str, str], str],
+) -> None:
+    """Reject a tree whose drv paths change between two evaluations.
+
+    ``builtins.path`` of a store path on Nix 2.35 allocates a new hash on
+    every eval. A diff against that noise would rebuild the output on every
+    pull request, so the plan fails closed instead of building it.
+    """
+    if set(first) != set(second):
+        msg = "inventory identity changed between two evals of one tree"
+        raise GateError(msg)
+    unstable = [
+        f"{kind} {name}"
+        for (kind, name), drv in sorted(first.items())
+        if second[kind, name] != drv
+    ]
+    if unstable:
+        msg = "drv is not a pure function of the tree: " + ", ".join(unstable)
+        raise GateError(msg)
+
+
 def diff_inventories(
     base: Mapping[tuple[str, str], str],
     head: Mapping[tuple[str, str], str],
@@ -873,6 +896,8 @@ def _command_plan() -> None:
     started = time.monotonic()
     base_doc = _eval_inventory(inventory, base_tree, system)
     head_doc = _eval_inventory(inventory, head_tree, system)
+    head_again = _eval_inventory(inventory, head_tree, system)
+    stable_inventory(parse_inventory(head_doc), parse_inventory(head_again))
     plan = diff_plan(
         system=system,
         merge_base=merge_base,

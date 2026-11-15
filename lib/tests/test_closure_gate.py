@@ -147,6 +147,17 @@ def test_empty_diff_is_empty_for_every_policy_system(system: str) -> None:
     assert gate.diff_inventories(inventory, inventory, system=system) == ()
 
 
+def test_unstable_drv_fails_closed_instead_of_rebuilding() -> None:
+    """A drv that changes between two evals of one tree is not a pull-request diff."""
+    drv = _drv("tool")
+    inventory = {("package", "tool"): drv}
+    gate.stable_inventory(inventory, inventory)
+    with pytest.raises(gate.GateError, match="not a pure function"):
+        gate.stable_inventory(inventory, {("package", "tool"): _drv("other")})
+    with pytest.raises(gate.GateError, match="identity changed"):
+        gate.stable_inventory(inventory, {})
+
+
 def test_diff_rejects_an_unsupported_system() -> None:
     """The matrix cannot invent a system the policy does not build."""
     with pytest.raises(gate.GateError, match="unsupported system"):
