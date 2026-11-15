@@ -126,6 +126,11 @@
         executable = true;
       };
 
+      ".local/bin/nix-store-deep-clean" = {
+        source = ./bin/nix-store-deep-clean;
+        executable = true;
+      };
+
       ".local/bin/but" = {
         source = "${pkgs.gitbutler}/bin/but";
         executable = true;

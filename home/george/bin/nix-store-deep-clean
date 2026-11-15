@@ -1,0 +1,262 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+readonly PROGRAM_NAME=${0:t}
+readonly NIX_BIN=/run/current-system/sw/bin/nix
+readonly COLLECT_GARBAGE_BIN=/run/current-system/sw/bin/nix-collect-garbage
+readonly BUILD_ROOT=/nix/var/nix/builds
+readonly DATA_VOLUME=/System/Volumes/Data
+readonly MAX_GC_ATTEMPTS=3
+
+assume_yes=false
+keep_generations=false
+
+usage() {
+  /bin/cat <<EOF
+Usage: ${PROGRAM_NAME} [--keep-generations] [--yes]
+
+Aggressively reclaim Nix disk space by:
+  1. Removing build sandboxes older than 24 hours.
+  2. Deleting every non-live generation of the user and system profiles, then
+     garbage-collecting unreachable store paths without retaining derivations
+     or outputs solely for debugging/rebuild convenience. A failed collection
+     is retried after clearing macOS app-bundle attributes that make root
+     unable to chmod the path.
+  3. Deduplicating the remaining Nix store.
+
+Deleting generations makes rolling back to them impossible. Use
+--keep-generations to collect garbage while leaving every generation in place.
+
+The script refuses to start while Nix client work or a nix-daemon worker is
+active. It never manually removes anything from /nix/store.
+
+Options:
+  -k, --keep-generations
+              Keep every profile generation instead of deleting non-live ones.
+  -y, --yes   Skip the destructive-action confirmation.
+  -h, --help  Show this help.
+EOF
+}
+
+die() {
+  print -u2 -- "${PROGRAM_NAME}: $*"
+  exit 1
+}
+
+nix_work_is_active() {
+  local process_name
+
+  for process_name in nix nix-build nix-shell nix-store darwin-rebuild; do
+    if /usr/bin/pgrep -x "${process_name}" >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+
+  if /usr/bin/pgrep -f '[n]ixcfg[[:space:]]+update' >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # The daemon itself is expected to be idle with PPID 1. A daemon process
+  # with another parent is a per-connection worker and means work is active.
+  if /bin/ps -axo ppid=,comm= | /usr/bin/awk '
+    $1 != 1 && $2 ~ /(^|\/)nix-daemon$/ { active = 1 }
+    END { exit !active }
+  '; then
+    return 0
+  fi
+
+  return 1
+}
+
+free_kib() {
+  /bin/df -k "${DATA_VOLUME}" | /usr/bin/awk 'NR == 2 { print $4 }'
+}
+
+format_kib() {
+  /usr/bin/awk -v kib="$1" 'BEGIN {
+    printf "%+.2f GiB", kib / 1024 / 1024
+  }'
+}
+
+# Nix's GC makes directories writable with fchmodat before unlinking them. A
+# macOS app bundle that ran with a TCC grant carries a com.apple.macl extended
+# attribute, and macOS rejects both chmod and xattr removal on it even for root,
+# so the collection aborts. Unlinking such a bundle still works, so drop the
+# blocked entries inside the dead store path the GC reported and let the retry
+# finish the job.
+gc_blockers() {
+  local error_log=$1
+
+  /usr/bin/grep -F 'While deleting store path' "${error_log}" 2>/dev/null |
+    /usr/bin/grep -o "/nix/store/[^\"';]*" || true
+}
+
+clear_gc_blockers() {
+  local error_log=$1
+  local -a blocked_paths
+  local blocked_path blocked_entry
+  local cleared=false
+
+  blocked_paths=(${(f)"$(gc_blockers "${error_log}")"})
+
+  if ((${#blocked_paths} == 0)); then
+    return 1
+  fi
+
+  for blocked_path in "${blocked_paths[@]}"; do
+    [[ -d ${blocked_path} ]] || continue
+
+    for blocked_entry in ${(f)"$(/usr/bin/sudo /usr/bin/find "${blocked_path}" \
+      -xattrname com.apple.macl 2>/dev/null || true)"}; do
+      [[ -n ${blocked_entry} ]] || continue
+      print -- "  clearing attribute blocker: ${blocked_entry}"
+      /usr/bin/sudo /bin/rm -rf "${blocked_entry}"
+      cleared=true
+    done
+  done
+
+  [[ ${cleared} == true ]]
+}
+
+# Run one collection pass and retry it once the dead paths it choked on have
+# been unblocked. The command is supplied by the caller because the invoking
+# user and root each delete the generations they own.
+run_gc_pass() {
+  local label=$1
+  shift
+  local attempt=1
+
+  while true; do
+    : >"${gc_error_log}"
+
+    if "$@" 2>"${gc_error_log}"; then
+      /usr/bin/grep -v -F 'is not owned by you' "${gc_error_log}" || true
+      return 0
+    fi
+
+    if ((attempt >= MAX_GC_ATTEMPTS)) || ! clear_gc_blockers "${gc_error_log}"; then
+      /bin/cat "${gc_error_log}" >&2
+      die "${label} failed after ${attempt} attempt(s)"
+    fi
+
+    attempt=$((attempt + 1))
+    print -- "Retrying ${label} (attempt ${attempt}/${MAX_GC_ATTEMPTS})..."
+  done
+}
+
+while (($# > 0)); do
+  case "$1" in
+  -k | --keep-generations)
+    keep_generations=true
+    ;;
+  -y | --yes)
+    assume_yes=true
+    ;;
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  *)
+    usage >&2
+    die "unknown argument: $1"
+    ;;
+  esac
+  shift
+done
+
+[[ -x ${NIX_BIN} ]] || die "Nix executable not found at ${NIX_BIN}"
+[[ -x ${COLLECT_GARBAGE_BIN} ]] || die "nix-collect-garbage not found at ${COLLECT_GARBAGE_BIN}"
+[[ -d ${BUILD_ROOT} ]] || die "build root not found at ${BUILD_ROOT}"
+[[ -d ${DATA_VOLUME} ]] || die "data volume not found at ${DATA_VOLUME}"
+
+# Deleting generations is scoped by ownership, so the user pass has to run as
+# the user whose profiles should be cleaned. Root would only see its own.
+if ((EUID == 0)); then
+  die "run ${PROGRAM_NAME} as your own user; it escalates through sudo where it needs root"
+fi
+
+if nix_work_is_active; then
+  die "Nix work is active; wait for it to finish and retry"
+fi
+
+stale_count=$(
+  /usr/bin/find "${BUILD_ROOT}" \
+    -mindepth 1 -maxdepth 1 -type d -mtime +0 -print |
+    /usr/bin/wc -l |
+    /usr/bin/tr -d '[:space:]'
+)
+before_free_kib=$(free_kib)
+
+print -- "This will permanently remove ${stale_count} Nix build sandbox(es) older than 24 hours,"
+if [[ ${keep_generations} == true ]]; then
+  print -- "keep every profile generation, collect garbage, and optimise the store."
+else
+  print -- "delete every non-live generation of the user and system profiles, collect"
+  print -- "the garbage that frees, and optimise the store. Older generations will no"
+  print -- "longer be available to roll back to."
+fi
+print
+print -- "Before:"
+/bin/df -h "${DATA_VOLUME}" /nix
+
+if [[ ${assume_yes} != true ]]; then
+  [[ -t 0 ]] || die "confirmation requires a terminal; rerun with --yes"
+  print -n -- "Continue? [y/N] "
+  IFS= read -r answer
+  case "${answer}" in
+  y | Y | yes | YES | Yes) ;;
+  *)
+    print -- "Cancelled."
+    exit 0
+    ;;
+  esac
+fi
+
+print
+print -- "Refreshing sudo credentials..."
+/usr/bin/sudo -v
+
+# Recheck after authentication so no cleanup occurs if a build began while the
+# user was confirming or entering their password.
+if nix_work_is_active; then
+  die "Nix work started while waiting; no cleanup was performed"
+fi
+
+print -- "Removing stale build sandboxes..."
+/usr/bin/sudo /usr/bin/find "${BUILD_ROOT}" \
+  -mindepth 1 -maxdepth 1 -type d -mtime +0 \
+  -exec /bin/rm -rf {} +
+
+gc_error_log=$(/usr/bin/mktemp "${TMPDIR:-/tmp}/nix-store-deep-clean.XXXXXX")
+trap '/bin/rm -f "${gc_error_log}"' EXIT
+
+gc_options=(
+  --option keep-derivations false
+  --option keep-outputs false
+)
+
+if [[ ${keep_generations} == true ]]; then
+  print -- "Garbage-collecting unreachable store paths..."
+  run_gc_pass "garbage collection" /usr/bin/sudo "${NIX_BIN}" store gc "${gc_options[@]}"
+else
+  # `nix-collect-garbage --delete-old` deletes the old generations of every
+  # profile it finds and then collects, so each pass already reclaims the space
+  # its own deletions freed and no separate collection is needed.
+  print -- "Deleting non-live generations of user profiles..."
+  run_gc_pass "user profile collection" "${COLLECT_GARBAGE_BIN}" "${gc_options[@]}" -d
+
+  print -- "Deleting non-live generations of system profiles..."
+  run_gc_pass "system profile collection" /usr/bin/sudo "${COLLECT_GARBAGE_BIN}" "${gc_options[@]}" -d
+fi
+
+print -- "Optimising the remaining store..."
+/usr/bin/sudo "${NIX_BIN}" store optimise
+
+after_free_kib=$(free_kib)
+freed_kib=$((after_free_kib - before_free_kib))
+
+print
+print -- "After:"
+/bin/df -h "${DATA_VOLUME}" /nix
+print -- "Data-volume free-space change: $(format_kib "${freed_kib}")"
