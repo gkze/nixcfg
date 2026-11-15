@@ -34,7 +34,6 @@ _PREPARE_SOURCE_COST: Mapping[str, int] = {
     "gooeypi": 14,
     "mux": 14,
     "reflect-open": 14,
-    "executor": 13,
     "github-desktop": 13,
     "goose-cli": 13,
     "opencode": 13,

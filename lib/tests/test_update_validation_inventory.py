@@ -29,7 +29,6 @@ DARWIN_SOURCES = frozenset({
     "buzz",
     "clearly",
     "energy",
-    "executor",
     "gh-current",
     "github-copilot-app",
     "hermes-desktop",
