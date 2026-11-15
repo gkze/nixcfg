@@ -298,6 +298,17 @@ appropriate branch's success and never uses `pull_request_target`.
 Every job that passes an explicit `cachix-token` input to `update-runtime`
 ends with `flush-cachix`; read-only `repair` and `start-repair` do not. That
 step stops the daemon, then pushes and pins the job's recorded root receipts.
+A Darwin root pin uses the shard name (`darwin-argus`, `home-george`) and
+`--keep-revisions 1`. The linux-builder image uses its stable
+per-architecture name and the same one-revision keep. Hash-named pins are
+deleted before a Darwin root pin. A linux-builder pin that still keeps days
+is deleted before that image is pinned. If the pin then returns 402, flush
+deletes the hash-named pins and retries that pin once. Run 43613142360
+returned 402 "Pin storage limit exceeded" on `darwin-system-qaj6kyaf` while
+`linux-builder-aarch64-linux` was revision 25 under `--keep-days 14`. After
+a successful daemon stop, flush clears `CACHIX_DAEMON_DIR` even when the
+later push or pin fails, so the action post hook does not stop the closed
+socket again. The flush exception still fails the job.
 Cachix's HTTP client has no response timeout. In run 40048292663 a stalled
 request froze the daemon's queue, so `cachix daemon stop` never returned, and
 the flush spent the job's last three hours. Flush therefore runs inside a
@@ -474,7 +485,10 @@ decides a job's result. Read the failed step instead.
   take the value from `lib.update.constants.FAKE_HASH`.
 - cachix-action logs "Cachix Daemon not started. Skipping push" after
   `flush-cachix` has stopped the daemon and cleared `CACHIX_DAEMON_DIR`. The
-  flush output above it records what was pushed.
+  flush output above it records what was pushed. If that clear is skipped
+  after a successful stop, the post hook instead fails with `cachix failed
+  exit code 1` on the closed socket. That line is the hook, not the flush
+  error; the flush step's stderr is the cause.
 
 ### Hosted block-device faults
 

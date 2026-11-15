@@ -186,7 +186,10 @@ sample, or skip a target.
   plan-shards measurement; 4-wide already SIGTERM'd. Do not set
   `eval-cores = 0` (all cores) on the 16 GiB ubuntu planner.
 - Do not pin every rust\_\* (thousands of pins, still churns on the next
-  crate bump). Pin the four Darwin roots and the linux-builder image.
+  crate bump). Pin the four Darwin roots and the linux-builder image, one
+  revision each. A new pin name on every closure, or `--keep-days` on the
+  VM image, fills the pin quota and the next root flush returns 402
+  (43613142360, `darwin-system-qaj6kyaf`).
 - Do not `workflow_dispatch` or `gh run cancel` from the Cursor GitHub
   App token (403). Kick remains a `lib/update/**` or
   `.github/update-kick` push to `main`.
