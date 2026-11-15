@@ -11,9 +11,10 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.request
 from collections.abc import Iterator
 from email.message import Message
-from io import StringIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -95,6 +96,13 @@ def native_job(tmp_path: Path) -> tuple[dict[str, str], Path]:
         "            'TEST_CACHE_STOP_EXIT',\n"
         "            os.environ.get('TEST_CACHE_EXIT', '0'),\n"
         "        )))\n"
+        "    if args[:1] == ['pin']:\n"
+        "        err = os.environ.get('TEST_CACHE_PIN_STDERR', '')\n"
+        "        if err:\n"
+        "            print(err, file=sys.stderr)\n"
+        "        code = os.environ.get('TEST_CACHE_PIN_EXIT')\n"
+        "        if code is not None:\n"
+        "            sys.exit(int(code))\n"
         "    sys.exit(int(os.environ.get('TEST_CACHE_EXIT', '0')))\n"
         "Path(os.environ['TEST_LOG']).write_text(json.dumps(args))\n"
         "Path(args[args.index('--output') + 1]).write_text('candidate or evidence')\n"
@@ -144,6 +152,7 @@ def native_job(tmp_path: Path) -> tuple[dict[str, str], Path]:
     # out of native_job unless a test opts in with an isolated path.
     env.pop("GITHUB_ENV", None)
     env.pop("GITHUB_OUTPUT", None)
+    env.pop("CACHIX_AUTH_TOKEN", None)
     # A hosted token would turn this local fixture into a sibling-stop poll.
     env.pop("NIXCFG_ACTIONS_TOKEN", None)
     return env, checkout
@@ -909,6 +918,39 @@ def _budget(seconds: float = 600.0) -> jobs._FlushBudget:
     return jobs._FlushBudget(seconds)
 
 
+def _stub_pin_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+    pins: list[dict[str, object]] | None = None,
+    *,
+    list_status: int = 200,
+    delete_status: int = 204,
+) -> list[tuple[str, str | None]]:
+    """Serve a pin list without calling cachix.org or deleting a real pin."""
+    catalog = [dict(pin) for pin in pins or []]
+    calls: list[tuple[str, str | None]] = []
+
+    def api(
+        method: str,
+        name: str | None,
+        _timeout: float,
+        *,
+        token: str | None = None,
+    ) -> tuple[int, bytes]:
+        calls.append((method, name))
+        if method == "GET":
+            if list_status != 200:
+                return list_status, b""
+            return 200, json.dumps(catalog).encode()
+        if token is None:
+            raise AssertionError("delete reached the pin API without a token")
+        if delete_status in {200, 202, 204, 404}:
+            catalog[:] = [pin for pin in catalog if pin.get("name") != name]
+        return delete_status, b'{"error":"pin-response-body"}'
+
+    monkeypatch.setattr(jobs, "_cachix_pin_api", api)
+    return calls
+
+
 def _digest(path: str) -> str:
     return path.removeprefix("/nix/store/").split("-", 1)[0]
 
@@ -1018,21 +1060,23 @@ def test_flush_cachix_pushes_realized_roots_after_leftover_recovery(
     monkeypatch.setattr(
         jobs, "_realized_root_path_in_cachix", lambda path, _budget: path == store
     )
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "darwin-argus")
+    _stub_pin_catalog(monkeypatch)
     monkeypatch.chdir(checkout)
     assert jobs.main("flush-cachix") == 0
     assert _cachix_calls(env)[-1] == [
         "pin",
         "gkze",
-        "darwin-system-98bwk8gp",
+        "darwin-argus",
         store,
-        "--keep-days",
-        "14",
+        "--keep-revisions",
+        "1",
     ]
     flush_log = (artifacts / "cachix-flush.log").read_text()
     assert "retrying 1 unpushed Cachix paths from daemon.log" in flush_log
     assert "pushing 1 realized root paths after daemon drain" in flush_log
     assert "cachix push realized-roots returncode=0" in flush_log
-    assert "cachix pin darwin-system-98bwk8gp returncode=0" in flush_log
+    assert "cachix pin darwin-argus returncode=0" in flush_log
 
 
 def test_flush_cachix_fails_closed_when_a_recovered_path_is_unsubstitutable(
@@ -1301,20 +1345,22 @@ def test_flush_cachix_pushes_realized_root_paths(native_job, monkeypatch) -> Non
     monkeypatch.setattr(
         jobs, "_realized_root_path_in_cachix", lambda path, _budget: path == store
     )
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "darwin-argus")
+    _stub_pin_catalog(monkeypatch)
     monkeypatch.chdir(checkout)
     assert jobs.main("flush-cachix") == 0
     assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
         "pin",
         "gkze",
-        "darwin-system-98bwk8gp",
+        "darwin-argus",
         store,
-        "--keep-days",
-        "14",
+        "--keep-revisions",
+        "1",
     ]
     flush_log = (artifacts / "cachix-flush.log").read_text()
     assert "pushing 1 realized root paths after daemon drain" in flush_log
     assert "cachix push realized-roots returncode=0" in flush_log
-    assert "cachix pin darwin-system-98bwk8gp returncode=0" in flush_log
+    assert "cachix pin darwin-argus returncode=0" in flush_log
 
 
 def test_flush_cachix_pins_substituted_linux_builder_image(
@@ -1342,6 +1388,7 @@ def test_flush_cachix_pins_substituted_linux_builder_image(
     monkeypatch.setattr(
         jobs, "_realized_root_path_in_cachix", lambda path, _budget: path == store
     )
+    _stub_pin_catalog(monkeypatch)
     monkeypatch.chdir(checkout)
     assert jobs.main("flush-cachix") == 0
     assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
@@ -1349,8 +1396,8 @@ def test_flush_cachix_pins_substituted_linux_builder_image(
         "gkze",
         "linux-builder-aarch64-linux",
         store,
-        "--keep-days",
-        "14",
+        "--keep-revisions",
+        "1",
     ]
     flush_log = (artifacts / "cachix-flush.log").read_text()
     assert "cachix pin linux-builder-aarch64-linux returncode=0" in flush_log
@@ -1474,6 +1521,8 @@ def test_flush_fails_closed_when_nothing_to_push_but_remote_misses(
     monkeypatch.setattr(
         jobs, "_realized_root_path_in_cachix", lambda _path, _budget: False
     )
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "darwin-argus")
+    _stub_pin_catalog(monkeypatch)
     monkeypatch.chdir(checkout)
     with pytest.raises(jobs.CachixFlushError, match="missing from gkze.cachix.org"):
         jobs.main("flush-cachix")
@@ -1525,6 +1574,8 @@ def test_flush_does_not_fail_closed_on_warmup_fod_remote_miss(
     monkeypatch.setattr(
         jobs, "_realized_root_path_in_cachix", lambda path, _budget: path == root
     )
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "darwin-argus")
+    _stub_pin_catalog(monkeypatch)
     monkeypatch.chdir(checkout)
     assert jobs.main("flush-cachix") == 0
     flush_log = (artifacts / "cachix-flush.log").read_text()
@@ -1535,10 +1586,10 @@ def test_flush_does_not_fail_closed_on_warmup_fod_remote_miss(
     assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
         "pin",
         "gkze",
-        "darwin-system-5a5dpbxq",
+        "darwin-argus",
         root,
-        "--keep-days",
-        "14",
+        "--keep-revisions",
+        "1",
     ]
 
 
@@ -1594,6 +1645,8 @@ def test_flush_still_fails_closed_when_darwin_root_misses_among_fods(
     monkeypatch.setattr(
         jobs, "_realized_root_path_in_cachix", lambda _path, _budget: False
     )
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "darwin-argus")
+    _stub_pin_catalog(monkeypatch)
     monkeypatch.chdir(checkout)
     with pytest.raises(
         jobs.CachixFlushError, match="missing from gkze.cachix.org"
@@ -1728,6 +1781,7 @@ def test_linux_builder_pin_helpers_fail_closed(
         jobs._pin_linux_builder_paths((image, f"{image}-copy"), log, _budget())
     monkeypatch.setenv("RUNNER_ARCH", "ARM64")
     monkeypatch.setenv("TEST_CACHE_EXIT", "1")
+    _stub_pin_catalog(monkeypatch)
     with pytest.raises(jobs.CachixFlushError, match="cachix pin of linux-builder"):
         jobs._pin_linux_builder_paths((image,), log, _budget())
     assert jobs._store_path_exists(str(tmp_path))
@@ -1746,18 +1800,41 @@ def test_linux_builder_pin_helpers_fail_closed(
     assert not jobs._realized_root_path_in_cachix(image, _budget())
 
 
-def test_darwin_root_pin_names_are_stable_per_wrapper() -> None:
-    """Four shards pin distinct wrappers; rust_* and the VM image are not pinned."""
+def test_darwin_root_pin_names_follow_the_shard(monkeypatch) -> None:
+    """A shard pins its own root. Hash names, rust_*, and the VM are not pins."""
     argus = "/nix/store/98bwk8gpzhmr12navdg9knjscv09k2nm-darwin-system-26.11.57a3171"
     home = "/nix/store/cccccccccccccccccccccccccccccccc-home-manager-generation"
     image = "/nix/store/wy15yizd3i7z6bmg3llr43a2pflg9yyb-nixos-disk-image"
     rust = "/nix/store/p928kiq59rgwhynxma6ywfzpn9bbyq98-rust_litemap-0.8.0"
-    assert jobs._darwin_root_pin_name(argus) == "darwin-system-98bwk8gp"
-    assert jobs._darwin_root_pin_name(home) == "home-generation-cccccccc"
-    assert jobs._darwin_root_pin_name(image) is None
-    assert jobs._darwin_root_pin_name(rust) is None
-    assert jobs._darwin_root_pin_name("relative") is None
-    assert jobs._darwin_root_pin_name("/nix/store/short-darwin-system") is None
+    aggregate = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-nixcfg-root-closures"
+    assert jobs._darwin_pin_kind(image) is None
+    assert jobs._darwin_pin_kind(rust) is None
+    assert jobs._darwin_pin_kind("relative") is None
+    assert jobs._darwin_pin_kind("/nix/store/short-darwin-system") is None
+    assert jobs._darwin_pin_kind(aggregate) is None
+    assert jobs._stable_darwin_pin_names((image, rust, aggregate)) == {}
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "darwin-argus")
+    assert jobs._stable_darwin_pin_names((argus,)) == {argus: "darwin-argus"}
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "home-george")
+    assert jobs._stable_darwin_pin_names((home,)) == {home: "home-george"}
+    monkeypatch.delenv("NIXCFG_CLOSURE_ROOTS", raising=False)
+    with pytest.raises(jobs.CachixFlushError, match="roots=<unset>"):
+        jobs._stable_darwin_pin_names((argus,))
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "home-george")
+    with pytest.raises(jobs.CachixFlushError, match="darwin roots=<unset>"):
+        jobs._stable_darwin_pin_names((argus,))
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "darwin-argus darwin-zeus")
+    with pytest.raises(jobs.CachixFlushError, match="darwin-argus, darwin-zeus"):
+        jobs._stable_darwin_pin_names((argus,))
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "darwin-argus/evil")
+    with pytest.raises(jobs.CachixFlushError, match="refusing Cachix pin name"):
+        jobs._stable_darwin_pin_names((argus,))
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "zeus")
+    with pytest.raises(jobs.CachixFlushError, match="not a darwin-\\* or home-\\*"):
+        jobs._stable_darwin_pin_names((argus,))
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "darwin-argus")
+    with pytest.raises(jobs.CachixFlushError, match="expected one darwin root"):
+        jobs._stable_darwin_pin_names((argus, argus))
 
 
 def test_pin_realized_darwin_roots_fail_closed(native_job, monkeypatch) -> None:
@@ -1768,10 +1845,335 @@ def test_pin_realized_darwin_roots_fail_closed(native_job, monkeypatch) -> None:
     monkeypatch.chdir(checkout)
     store = "/nix/store/98bwk8gpzhmr12navdg9knjscv09k2nm-darwin-system-26.11.57a3171"
     log = StringIO()
+    calls = _stub_pin_catalog(monkeypatch)
     jobs._pin_realized_darwin_roots(("/nix/store/other-not-a-root",), log, _budget())
+    assert calls == []
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "darwin-argus")
     monkeypatch.setenv("TEST_CACHE_EXIT", "1")
-    with pytest.raises(jobs.CachixFlushError, match="cachix pin of darwin-system"):
+    with pytest.raises(jobs.CachixFlushError, match="cachix pin of darwin-argus"):
         jobs._pin_realized_darwin_roots((store,), log, _budget())
+
+
+def test_legacy_darwin_pins_are_deleted_before_the_stable_pin(
+    monkeypatch,
+) -> None:
+    """43613142360: hash-named pins still occupied the quota after --keep-days."""
+    legacy = "darwin-system-qaj6kyaf"
+    home = "home-generation-vijljmrs"
+    calls = _stub_pin_catalog(
+        monkeypatch,
+        [
+            {"name": legacy},
+            {"name": home},
+            {"name": "linux-builder-aarch64-linux"},
+            {"name": "darwin-argus"},
+        ],
+    )
+    monkeypatch.setenv("CACHIX_AUTH_TOKEN", "test-token")
+    log = StringIO()
+    jobs._delete_legacy_darwin_pins(log, _budget())
+    text = log.getvalue()
+    assert f"deleted legacy Cachix pin {legacy} status=204" in text
+    assert f"deleted legacy Cachix pin {home} status=204" in text
+    assert "linux-builder" not in text
+    assert "pin-response-body" not in text
+    assert ("DELETE", "linux-builder-aarch64-linux") not in calls
+    assert ("DELETE", "darwin-argus") not in calls
+    _stub_pin_catalog(monkeypatch, [{"name": legacy}])
+    monkeypatch.delenv("CACHIX_AUTH_TOKEN", raising=False)
+    with pytest.raises(jobs.CachixFlushError, match="CACHIX_AUTH_TOKEN is unset"):
+        jobs._delete_legacy_darwin_pins(StringIO(), _budget())
+    _stub_pin_catalog(monkeypatch, [{"name": legacy}])
+    monkeypatch.setenv("CACHIX_AUTH_TOKEN", "   ")
+    with pytest.raises(jobs.CachixFlushError, match="CACHIX_AUTH_TOKEN is unset"):
+        jobs._delete_legacy_darwin_pins(StringIO(), _budget())
+
+
+def test_pin_delete_failure_omits_the_response_body(monkeypatch) -> None:
+    _stub_pin_catalog(
+        monkeypatch,
+        [{"name": "darwin-system-qaj6kyaf"}],
+        delete_status=500,
+    )
+    monkeypatch.setenv("CACHIX_AUTH_TOKEN", "test-token")
+    with pytest.raises(jobs.CachixFlushError, match="status=500") as caught:
+        jobs._delete_legacy_darwin_pins(StringIO(), _budget())
+    assert "pin-response-body" not in str(caught.value)
+    calls = _stub_pin_catalog(
+        monkeypatch,
+        [{"name": "home-generation-vijljmrs"}],
+        delete_status=404,
+    )
+    log = StringIO()
+    jobs._delete_legacy_darwin_pins(log, _budget())
+    assert "status=404" in log.getvalue()
+    assert ("DELETE", "home-generation-vijljmrs") in calls
+    with pytest.raises(jobs.CachixFlushError, match="refusing to delete"):
+        jobs._delete_cachix_pin("darwin-argus", _budget())
+
+
+def test_pin_list_rejects_malformed_payloads(monkeypatch) -> None:
+    payloads = (
+        (503, b"", "status=503"),
+        (200, b"not-json", "not JSON"),
+        (200, b'"nope"', "not a list"),
+        (200, b"[1]", "no name"),
+        (200, b"[{}]", "no name"),
+    )
+    for status, body, match in payloads:
+
+        def api(
+            _method: str,
+            _name: str | None,
+            _timeout: float,
+            *,
+            token: str | None = None,
+            status: int = status,
+            body: bytes = body,
+        ) -> tuple[int, bytes]:
+            assert token is None
+            return status, body
+
+        monkeypatch.setattr(jobs, "_cachix_pin_api", api)
+        with pytest.raises(jobs.CachixFlushError, match=match):
+            jobs._list_cachix_pins(_budget())
+
+
+def test_linux_builder_history_collapses_to_one_revision(
+    native_job, monkeypatch
+) -> None:
+    """Revision 25 under --keep-days is deleted before the image is pinned."""
+    env, checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    monkeypatch.setenv("RUNNER_ARCH", "ARM64")
+    monkeypatch.setenv("RUNNER_OS", "Linux")
+    monkeypatch.setenv("CACHIX_AUTH_TOKEN", "test-token")
+    image = "/nix/store/wy15yizd3i7z6bmg3llr43a2pflg9yyb-nixos-disk-image"
+    name = "linux-builder-aarch64-linux"
+    log = StringIO()
+    calls = _stub_pin_catalog(
+        monkeypatch,
+        [{"name": name, "keep": {"tag": "Days", "contents": 14}}],
+    )
+    jobs._pin_linux_builder_paths((image,), log, _budget())
+    assert ("DELETE", name) in calls
+    assert "deleted historical Cachix pin" in log.getvalue()
+    assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text())[-2:] == [
+        "--keep-revisions",
+        "1",
+    ]
+    calls = _stub_pin_catalog(
+        monkeypatch,
+        [{"name": name, "keep": {"tag": "Revisions", "contents": 1}}],
+    )
+    jobs._pin_linux_builder_paths((image,), StringIO(), _budget())
+    assert ("DELETE", name) not in calls
+    calls = _stub_pin_catalog(monkeypatch)
+    jobs._pin_linux_builder_paths((image,), StringIO(), _budget())
+    assert calls == [("GET", None)]
+    assert not jobs._pin_keeps_one_revision({})
+    assert not jobs._pin_keeps_one_revision({"keep": "Days"})
+    assert not jobs._pin_keeps_one_revision({"keep": {"tag": "Days", "contents": 14}})
+    assert not jobs._pin_keeps_one_revision({
+        "keep": {"tag": "Revisions", "contents": 14}
+    })
+    assert jobs._pin_keeps_one_revision({"keep": {"tag": "Revisions", "contents": 1}})
+    with pytest.raises(jobs.CachixFlushError, match="refusing to collapse"):
+        jobs._collapse_linux_builder_history("darwin-argus", StringIO(), _budget())
+
+
+def test_darwin_pin_retries_once_after_storage_limit(native_job, monkeypatch) -> None:
+    """A concurrent shard can fill the quota between the delete and the pin."""
+    env, checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "darwin-argus")
+    monkeypatch.setenv("CACHIX_AUTH_TOKEN", "test-token")
+    store = "/nix/store/qaj6kyaffl1bpj6x411pbwdbk29gv22r-darwin-system-26.11.b2f8c5c"
+    limited = "Pin storage limit exceeded"
+    attempts = {"count": 0}
+
+    def run_pin(
+        name: str, path: str, log: StringIO, budget: jobs._FlushBudget
+    ) -> subprocess.CompletedProcess[str]:
+        attempts["count"] += 1
+        code = 0 if attempts["count"] == 2 else 1
+        stderr = "" if code == 0 else limited
+        jobs._write_diagnostic(log, f"cachix pin {name} returncode={code}")
+        return subprocess.CompletedProcess(
+            ("cachix", "pin", name, path), code, "", stderr
+        )
+
+    monkeypatch.setattr(jobs, "_run_cachix_pin", run_pin)
+    calls = _stub_pin_catalog(monkeypatch, [{"name": "darwin-system-qaj6kyaf"}])
+    log = StringIO()
+    jobs._pin_realized_darwin_roots((store,), log, _budget())
+    assert attempts["count"] == 2
+    assert log.getvalue().count("deleting legacy pins and retrying once") == 1
+    assert [call for call in calls if call[0] == "DELETE"] == [
+        ("DELETE", "darwin-system-qaj6kyaf")
+    ]
+    attempts["count"] = 0
+
+    def still_limited(
+        name: str, path: str, _log: StringIO, _budget: jobs._FlushBudget
+    ) -> subprocess.CompletedProcess[str]:
+        attempts["count"] += 1
+        return subprocess.CompletedProcess(
+            ("cachix", "pin", name, path), 1, "", limited
+        )
+
+    monkeypatch.setattr(jobs, "_run_cachix_pin", still_limited)
+    _stub_pin_catalog(monkeypatch, [{"name": "darwin-system-qaj6kyaf"}])
+    with pytest.raises(jobs.CachixFlushError, match=limited):
+        jobs._pin_realized_darwin_roots((store,), StringIO(), _budget())
+    assert attempts["count"] == 2
+    attempts["count"] = 0
+
+    def other_failure(
+        name: str, path: str, _log: StringIO, _budget: jobs._FlushBudget
+    ) -> subprocess.CompletedProcess[str]:
+        attempts["count"] += 1
+        return subprocess.CompletedProcess(
+            ("cachix", "pin", name, path), 1, "", "connection reset"
+        )
+
+    monkeypatch.setattr(jobs, "_run_cachix_pin", other_failure)
+    _stub_pin_catalog(monkeypatch)
+    with pytest.raises(jobs.CachixFlushError, match="connection reset"):
+        jobs._pin_realized_darwin_roots((store,), StringIO(), _budget())
+    assert attempts["count"] == 1
+    image = "/nix/store/wy15yizd3i7z6bmg3llr43a2pflg9yyb-nixos-disk-image"
+    monkeypatch.setenv("RUNNER_ARCH", "ARM64")
+    monkeypatch.setenv("RUNNER_OS", "Linux")
+    attempts["count"] = 0
+    monkeypatch.setattr(jobs, "_run_cachix_pin", still_limited)
+    _stub_pin_catalog(monkeypatch, [{"name": "darwin-system-qaj6kyaf"}])
+    builder_log = StringIO()
+    with pytest.raises(jobs.CachixFlushError, match=limited):
+        jobs._pin_linux_builder_paths((image,), builder_log, _budget())
+    assert attempts["count"] == 2
+    assert "retrying once" in builder_log.getvalue()
+    assert "deleted legacy Cachix pin darwin-system-qaj6kyaf" in builder_log.getvalue()
+
+
+def test_cachix_pin_api_keeps_the_token_out_of_errors(monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    class _Response:
+        status = 200
+
+        def read(self) -> bytes:
+            return b"[]"
+
+        def __enter__(self) -> _Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    def urlopen(request: urllib.request.Request, timeout: float | None = None):
+        seen["authorization"] = request.get_header("Authorization")
+        seen["agent"] = request.get_header("User-agent")
+        seen["url"] = request.full_url
+        seen["timeout"] = timeout
+        return _Response()
+
+    monkeypatch.setattr(jobs.urllib.request, "urlopen", urlopen)
+    status, body = jobs._cachix_pin_api("GET", None, 3.0)
+    assert (status, body) == (200, b"[]")
+    assert seen["authorization"] is None
+    assert seen["agent"] == "nixcfg-cachix-flush"
+    assert seen["url"] == jobs._CACHIX_PIN_API
+    assert seen["timeout"] == 3.0
+
+    def denied(request: urllib.request.Request, timeout: float | None = None):
+        del timeout
+        seen["authorization"] = request.get_header("Authorization")
+        seen["url"] = request.full_url
+        raise urllib.error.HTTPError(
+            request.full_url,
+            404,
+            "missing",
+            Message(),
+            BytesIO(b'{"error":"gone"}'),
+        )
+
+    monkeypatch.setattr(jobs.urllib.request, "urlopen", denied)
+    status, body = jobs._cachix_pin_api(
+        "DELETE",
+        "darwin-system-qaj6kyaf",
+        3.0,
+        token="test-token",  # noqa: S106 -- fixture credential, not a cache token
+    )
+    assert status == 404
+    assert body == b'{"error":"gone"}'
+    assert seen["authorization"] == "Bearer test-token"
+    assert str(seen["url"]).endswith("/darwin-system-qaj6kyaf")
+
+    def broken(*_args: object, **_kwargs: object) -> object:
+        raise urllib.error.URLError(OSError("token-in-reason"))
+
+    monkeypatch.setattr(jobs.urllib.request, "urlopen", broken)
+    with pytest.raises(jobs.CachixFlushError, match="URLError") as caught:
+        jobs._cachix_pin_api("GET", None, 3.0)
+    assert "token-in-reason" not in str(caught.value)
+    with pytest.raises(jobs.CachixFlushError, match="refusing Cachix pin API name"):
+        jobs._cachix_pin_api(
+            "DELETE",
+            "darwin-argus",
+            3.0,
+            token="test-token",  # noqa: S106 -- fixture credential, not a cache token
+        )
+    raw = (
+        '("Authorization","super-secret-token") '
+        "Authorization: Bearer super-secret-token"
+    )
+    redacted = jobs._redact_cachix_log(raw)
+    assert "super-secret-token" not in redacted
+    assert redacted.count("<redacted>") == 2
+
+
+def test_flush_clears_daemon_dir_when_the_pin_fails(native_job, monkeypatch) -> None:
+    """A pin failure still fails the job, and the post hook must not stop again."""
+    env, checkout = native_job
+    store = "/nix/store/qaj6kyaffl1bpj6x411pbwdbk29gv22r-darwin-system-26.11.b2f8c5c"
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    artifacts.mkdir(parents=True)
+    (artifacts / "realized-root-paths.json").write_text(
+        json.dumps({"storePaths": [store]}) + "\n"
+    )
+    daemon_dir = _cachix_daemon_dir(Path(env["RUNNER_TEMP"]))
+    github_env = Path(env["RUNNER_TEMP"]) / "github-env"
+    github_env.write_text("KEEP=1\n")
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
+    monkeypatch.setenv("GITHUB_ENV", str(github_env))
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "darwin-argus")
+    monkeypatch.setenv("TEST_CACHE_PIN_EXIT", "1")
+    monkeypatch.setenv(
+        "TEST_CACHE_PIN_STDERR",
+        '("Authorization","super-secret-token")',
+    )
+    monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path == store)
+    _stub_pin_catalog(monkeypatch)
+    monkeypatch.chdir(checkout)
+    with pytest.raises(
+        jobs.CachixFlushError, match="cachix pin of darwin-argus"
+    ) as caught:
+        jobs.main("flush-cachix")
+    assert "super-secret-token" not in str(caught.value)
+    assert "<redacted>" in str(caught.value)
+    flush_log = (artifacts / "cachix-flush.log").read_text()
+    assert "super-secret-token" not in flush_log
+    assert "cleared CACHIX_DAEMON_DIR" in flush_log
+    assert "CACHIX_DAEMON_DIR=\n" in github_env.read_text()
+    assert "CACHIX_DAEMON_DIR" not in os.environ
 
 
 def test_record_runner_storage_writes_df_inodes_and_store_bytes(
@@ -2237,6 +2639,8 @@ def test_native_fault_evidence_and_artifact_contract() -> None:
     )
     assert flush["if"] == "always()"
     assert flush["env"]["NIXCFG_CI_STAGE"] == "flush-cachix"
+    assert flush["env"]["NIXCFG_CLOSURE_ROOTS"] == "${{ inputs.closure_roots }}"
+    assert flush["env"]["CACHIX_AUTH_TOKEN"] == "${{ secrets.CACHIX_AUTH_TOKEN }}"  # noqa: S105 -- Actions expression, not a credential.
     assert native["jobs"]["native"]["steps"][-1] is flush
     dump = next(
         step

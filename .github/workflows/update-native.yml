@@ -259,6 +259,11 @@ jobs:
         timeout-minutes: 45
         env:
           NIXCFG_CI_STAGE: flush-cachix
+          # Step env is not inherited. The shard root names the pin
+          # (darwin-argus, home-george); a hash-named pin is a new pin
+          # every closure and filled the Cachix pin quota (43613142360).
+          NIXCFG_CLOSURE_ROOTS: ${{ inputs.closure_roots }}
+          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
         run: |
           import runpy
           runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")

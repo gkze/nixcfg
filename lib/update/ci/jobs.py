@@ -24,6 +24,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TextIO, cast
+from urllib.parse import quote
 
 # A direct script invocation has only lib/update/ci on sys.path. The policy and
 # paths modules and both package initializers are dependency-free, preserving the
@@ -117,7 +118,22 @@ _STORE_PATH_RE = re.compile(r"/nix/store/[0-9a-z]{32}-[^\s]+")
 _REALIZED_ROOT_PATHS_NAME = "realized-root-paths.json"
 _REPAIR_RECEIPT_NAME = "repair-receipt.json"
 _LINUX_BUILDER_OUTPUT = "nixos-disk-image"
-_CACHIX_PIN_KEEP_DAYS = 14
+# 43613142360: ``darwin-system-qaj6kyaf`` returned 402
+# "Pin storage limit exceeded" while ``linux-builder-aarch64-linux`` was
+# revision 25 kept for 14 days. A stable name with one revision is what
+# still protects the next substitute without filling the pin quota.
+_CACHIX_PIN_KEEP_REVISIONS = 1
+_CACHIX_PIN_API = "https://cachix.org/api/v1/cache/gkze/pin"
+_LEGACY_DARWIN_PIN_RE = re.compile(r"^(?:darwin-system|home-generation)-[0-9a-z]{8}$")
+_LINUX_BUILDER_PIN_RE = re.compile(r"^linux-builder-(?:aarch64|x86_64)-linux$")
+_DELETABLE_PIN_RE = re.compile(
+    r"^(?:darwin-system-[0-9a-z]{8}|home-generation-[0-9a-z]{8}|"
+    r"linux-builder-(?:aarch64|x86_64)-linux)$"
+)
+_PIN_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
+_AUTH_LOG_RE = re.compile(
+    r"(?i)authorization(?:['\"]\s*,\s*['\"]|\s*[:=]\s*(?:bearer\s+)?)[^,}\]\s\"']+"
+)
 _BINARY_CACHE_STORE = "https://gkze.cachix.org"
 _STORAGE_MOUNTS = ("/", "/nix", "/nix/store")
 # Live-written on hosted macOS; rmtree can lose a race (ENOTEMPTY) after children
@@ -3007,22 +3023,81 @@ def _linux_builder_pin_name() -> str:
     return f"linux-builder-{arch}-{os_name}"
 
 
-def _darwin_root_pin_name(path: str) -> str | None:
-    """Return a 14-day pin name for a Darwin-system or home-manager wrapper.
-
-    Four 4-wide shards each realize one root. Pin names include the store
-    hash prefix so argus/rocinante/zeus/home do not overwrite each other.
-    ``--keep-days 14`` drops stale hashes after the next green Update.
-    """
+def _store_output_name(path: str) -> str | None:
+    """Return the output name of a Nix store path, without its hash."""
     if not _STORE_PATH_RE.fullmatch(path.rstrip("/")):
         return None
-    name = path.rstrip("/").rsplit("/", 1)[-1]
-    digest, _separator, rest = name.partition("-")
-    if rest.startswith("darwin-system"):
-        return f"darwin-system-{digest[:8]}"
-    if rest.startswith("home-manager-generation"):
-        return f"home-generation-{digest[:8]}"
+    leaf = path.rstrip("/").rsplit("/", 1)[-1]
+    return leaf.split("-", 1)[1]
+
+
+def _darwin_pin_kind(path: str) -> str | None:
+    """Return ``darwin`` or ``home`` when *path* is a pinnable root wrapper."""
+    output = _store_output_name(path)
+    if output is None:
+        return None
+    if output.startswith("darwin-system"):
+        return "darwin"
+    if output.startswith("home-manager-generation"):
+        return "home"
     return None
+
+
+def _closure_root_names() -> tuple[str, ...]:
+    """Return the shard's root names from the flush step environment."""
+    return tuple(os.environ.get("NIXCFG_CLOSURE_ROOTS", "").split())
+
+
+def _roots_by_pin_kind(roots: tuple[str, ...]) -> dict[str, tuple[str, ...]]:
+    """Group shard root names into darwin-system and home-manager pins."""
+    grouped: dict[str, list[str]] = {"darwin": [], "home": []}
+    for root in roots:
+        if root.startswith("darwin-"):
+            grouped["darwin"].append(root)
+        elif root.startswith("home-"):
+            grouped["home"].append(root)
+        else:
+            msg = f"closure root {root!r} is not a darwin-* or home-* pin name"
+            raise CachixFlushError(msg)
+    return {kind: tuple(names) for kind, names in grouped.items()}
+
+
+def _stable_darwin_pin_names(paths: tuple[str, ...]) -> dict[str, str]:
+    """Map each realized Darwin root to its shard's stable pin name.
+
+    Hash-prefixed names (``darwin-system-qaj6kyaf``) are a new pin on every
+    closure. 43613142360 already held two of those plus a home-generation
+    pin, and the next one returned 402. The shard root (``darwin-argus``,
+    ``home-george``) stays one pin; ``--keep-revisions 1`` replaces it.
+    """
+    by_kind: dict[str, list[str]] = {"darwin": [], "home": []}
+    for path in paths:
+        kind = _darwin_pin_kind(path)
+        if kind is not None:
+            by_kind[kind].append(path)
+    if not any(by_kind.values()):
+        return {}
+    grouped = _roots_by_pin_kind(_closure_root_names())
+    assigned: dict[str, str] = {}
+    for kind, kind_paths in by_kind.items():
+        if not kind_paths:
+            continue
+        if len(kind_paths) != 1:
+            msg = f"expected one {kind} root to pin, got {len(kind_paths)}"
+            raise CachixFlushError(msg)
+        choices = grouped[kind]
+        if len(choices) != 1:
+            rendered = ", ".join(choices) if choices else "<unset>"
+            msg = (
+                f"cannot name a Cachix pin for {kind_paths[0]}: {kind} roots={rendered}"
+            )
+            raise CachixFlushError(msg)
+        name = choices[0]
+        if _PIN_NAME_RE.fullmatch(name) is None:
+            msg = f"refusing Cachix pin name {name!r}"
+            raise CachixFlushError(msg)
+        assigned[kind_paths[0]] = name
+    return assigned
 
 
 def _coverage_critical_store_path(path: str) -> bool:
@@ -3038,19 +3113,163 @@ def _coverage_critical_store_path(path: str) -> bool:
     """
     if _LINUX_BUILDER_OUTPUT in path:
         return True
-    return _darwin_root_pin_name(path) is not None
+    return _darwin_pin_kind(path) is not None
 
 
-def _cachix_pin(name: str, path: str, log: TextIO, budget: _FlushBudget) -> None:
-    """Pin *path* on gkze for ``_CACHIX_PIN_KEEP_DAYS`` and fail closed."""
+def _redact_cachix_log(text: str) -> str:
+    """Drop Authorization material before a Cachix error reaches the job log."""
+    return _AUTH_LOG_RE.sub("Authorization <redacted>", text)
+
+
+def _cachix_pin_api(
+    method: str,
+    name: str | None,
+    timeout: float,
+    *,
+    token: str | None = None,
+) -> tuple[int, bytes]:
+    """Call the gkze pin collection. The token stays in the request header."""
+    if name is None:
+        url = _CACHIX_PIN_API
+    elif _DELETABLE_PIN_RE.fullmatch(name) is None:
+        msg = f"refusing Cachix pin API name {name!r}"
+        raise CachixFlushError(msg)
+    else:
+        url = f"{_CACHIX_PIN_API}/{quote(name, safe='')}"
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": _NARINFO_USER_AGENT,
+    }
+    if token is not None:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(  # noqa: S310 -- fixed https://cachix.org pin API
+        url,
+        method=method,
+        headers=headers,
+    )
+    try:
+        with urllib.request.urlopen(  # noqa: S310 -- fixed https://cachix.org pin API
+            request, timeout=timeout
+        ) as response:
+            return int(response.status), response.read()
+    except urllib.error.HTTPError as error:
+        return int(error.code), error.read()
+    except urllib.error.URLError as error:
+        msg = f"Cachix pin API {method} failed: {type(error).__name__}"
+        raise CachixFlushError(msg) from error
+
+
+def _list_cachix_pins(budget: _FlushBudget) -> tuple[dict[str, object], ...]:
+    """Return the public gkze pin list. Names and retention only."""
+    status, body = _cachix_pin_api(
+        "GET",
+        None,
+        budget.timeout(_CACHIX_QUERY_TIMEOUT_SECONDS),
+    )
+    if status != 200:  # noqa: PLR2004 -- HTTP OK
+        msg = f"could not list Cachix pins status={status}"
+        raise CachixFlushError(msg)
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError as error:
+        msg = "Cachix pin list is not JSON"
+        raise CachixFlushError(msg) from error
+    if not isinstance(payload, list):
+        msg = "Cachix pin list is not a list"
+        raise CachixFlushError(msg)
+    pins: list[dict[str, object]] = []
+    for item in payload:
+        if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+            msg = "Cachix pin list entry has no name"
+            raise CachixFlushError(msg)
+        pins.append(item)
+    return tuple(pins)
+
+
+def _pin_keeps_one_revision(pin: dict[str, object]) -> bool:
+    """Return whether *pin* already retains only the latest revision."""
+    keep = pin.get("keep")
+    if not isinstance(keep, dict):
+        return False
+    return (
+        keep.get("tag") == "Revisions"
+        and keep.get("contents") == _CACHIX_PIN_KEEP_REVISIONS
+    )
+
+
+def _cachix_auth_token() -> str:
+    """Return the flush step's Cachix token without putting it in an error."""
+    token = os.environ.get("CACHIX_AUTH_TOKEN", "").strip()
+    if not token:
+        msg = "cannot delete a Cachix pin: CACHIX_AUTH_TOKEN is unset"
+        raise CachixFlushError(msg)
+    return token
+
+
+def _delete_cachix_pin(name: str, budget: _FlushBudget) -> int:
+    """Delete one known pin. 404 means a concurrent shard already removed it."""
+    if _DELETABLE_PIN_RE.fullmatch(name) is None:
+        msg = f"refusing to delete Cachix pin {name!r}"
+        raise CachixFlushError(msg)
+    status, _body = _cachix_pin_api(
+        "DELETE",
+        name,
+        budget.timeout(_CACHIX_QUERY_TIMEOUT_SECONDS),
+        token=_cachix_auth_token(),
+    )
+    if status not in {200, 202, 204, 404}:
+        msg = f"could not delete Cachix pin {name} status={status}"
+        raise CachixFlushError(msg)
+    return status
+
+
+def _delete_legacy_darwin_pins(log: TextIO, budget: _FlushBudget) -> None:
+    """Remove hash-named Darwin pins that ``--keep-days`` would hold."""
+    legacy = [
+        str(pin["name"])
+        for pin in _list_cachix_pins(budget)
+        if _LEGACY_DARWIN_PIN_RE.fullmatch(str(pin["name"]))
+    ]
+    for name in legacy:
+        status = _delete_cachix_pin(name, budget)
+        _write_diagnostic(log, f"deleted legacy Cachix pin {name} status={status}")
+
+
+def _collapse_linux_builder_history(
+    name: str, log: TextIO, budget: _FlushBudget
+) -> None:
+    """Drop retained linux-builder revisions before pinning the latest image.
+
+    ``cachix pin --keep-revisions 1`` trims history only after Cachix accepts
+    the new revision. 43613142360 was already over the pin quota, so a pin
+    that adds a revision is rejected before that trim. Delete the day-based
+    pin first; this step then pins the one image it just pushed.
+    """
+    if _LINUX_BUILDER_PIN_RE.fullmatch(name) is None:
+        msg = f"refusing to collapse Cachix pin {name!r}"
+        raise CachixFlushError(msg)
+    current = next(
+        (pin for pin in _list_cachix_pins(budget) if pin.get("name") == name),
+        None,
+    )
+    if current is None or _pin_keeps_one_revision(current):
+        return
+    status = _delete_cachix_pin(name, budget)
+    _write_diagnostic(log, f"deleted historical Cachix pin {name} status={status}")
+
+
+def _run_cachix_pin(
+    name: str, path: str, log: TextIO, budget: _FlushBudget
+) -> subprocess.CompletedProcess[str]:
+    """Pin *path* under *name* and keep only that revision."""
     pin = _run(
         "cachix",
         "pin",
         _BINARY_CACHE,
         name,
         path,
-        "--keep-days",
-        str(_CACHIX_PIN_KEEP_DAYS),
+        "--keep-revisions",
+        str(_CACHIX_PIN_KEEP_REVISIONS),
         check=False,
         capture=True,
         timeout=budget.timeout(_CACHIX_QUERY_TIMEOUT_SECONDS),
@@ -3058,14 +3277,41 @@ def _cachix_pin(name: str, path: str, log: TextIO, budget: _FlushBudget) -> None
     _write_diagnostic(
         log,
         f"cachix pin {name} returncode={pin.returncode} path={path} "
-        f"stderr={pin.stderr.strip()}",
+        f"stderr={_redact_cachix_log(pin.stderr.strip())}",
     )
+    return pin
+
+
+def _pin_failure(name: str, pin: subprocess.CompletedProcess[str]) -> CachixFlushError:
+    msg = (
+        f"cachix pin of {name} failed "
+        f"returncode={pin.returncode} stderr={_redact_cachix_log(pin.stderr.strip())}"
+    )
+    return CachixFlushError(msg)
+
+
+def _cachix_pin(name: str, path: str, log: TextIO, budget: _FlushBudget) -> None:
+    """Pin *path* for one revision and fail closed.
+
+    A storage-limit response deletes hash-named Darwin pins and retries
+    once. The linux-builder job runs before the roots, so that retry is
+    what lets the one VM revision land while those pins still exist.
+    Concurrent shards can pin before another's delete lands; a second
+    failure still fails the flush.
+    """
+    pin = _run_cachix_pin(name, path, log, budget)
+    if pin.returncode == 0:
+        return
+    if "Pin storage limit exceeded" not in pin.stderr:
+        raise _pin_failure(name, pin)
+    _write_diagnostic(
+        log,
+        f"Cachix pin storage limit for {name}; deleting legacy pins and retrying once",
+    )
+    _delete_legacy_darwin_pins(log, budget)
+    pin = _run_cachix_pin(name, path, log, budget)
     if pin.returncode:
-        msg = (
-            f"cachix pin of {name} failed "
-            f"returncode={pin.returncode} stderr={pin.stderr.strip()}"
-        )
-        raise CachixFlushError(msg)
+        raise _pin_failure(name, pin)
 
 
 def _pin_linux_builder_paths(
@@ -3075,7 +3321,8 @@ def _pin_linux_builder_paths(
 
     39006154683: cache-root-deps copied the image from gkze at 08:22 and
     did not re-upload. Concurrent Darwin packages then LRU-evicted it
-    before closures ``--max-jobs 0`` at 08:57.
+    before closures ``--max-jobs 0`` at 08:57. One revision is enough;
+    day-based history of the image is what filled the pin quota.
     """
     images = [path for path in paths if _LINUX_BUILDER_OUTPUT in path]
     if not images:
@@ -3084,22 +3331,26 @@ def _pin_linux_builder_paths(
         msg = f"expected one linux-builder image to pin, got {len(images)}: {images}"
         _write_diagnostic(log, msg)
         raise CachixFlushError(msg)
-    _cachix_pin(_linux_builder_pin_name(), images[0], log, budget)
+    name = _linux_builder_pin_name()
+    _collapse_linux_builder_history(name, log, budget)
+    _cachix_pin(name, images[0], log, budget)
 
 
 def _pin_realized_darwin_roots(
     paths: tuple[str, ...], log: TextIO, budget: _FlushBudget
 ) -> None:
-    """Pin Darwin-system and home-manager wrappers against gkze Starter LRU.
+    """Pin one Darwin-system or home-manager wrapper per shard root.
 
     39166099302 closures spent 40m after four green roots. If that was
-    compile because LRU dropped the wrappers, a 14-day pin keeps the
-    next run on substitutes. Do not pin every rust_*.
+    compile because LRU dropped the wrappers, the latest pin keeps the
+    next run on substitutes. Do not pin every rust_*. Hash-named pins
+    from ``--keep-days 14`` are deleted first so this pin can fit.
     """
-    for path in paths:
-        name = _darwin_root_pin_name(path)
-        if name is None:
-            continue
+    names = _stable_darwin_pin_names(paths)
+    if not names:
+        return
+    _delete_legacy_darwin_pins(log, budget)
+    for path, name in names.items():
         _cachix_pin(name, path, log, budget)
 
 
@@ -3270,8 +3521,11 @@ def flush_cachix() -> None:
       so rust_* LRU cannot drop the VM before Darwin ``--max-jobs 0``.
     - Darwin-root LRU (39166099302): four green shards still left
       closures compiling for 40m if Starter evicted the wrappers.
-      Flush ``cachix pin --keep-days 14``s each darwin-system /
-      home-manager-generation after the push.
+      Flush pins each shard root (``darwin-argus``, ``home-george``)
+      with ``--keep-revisions 1``. Hash-named pins and day-based
+      linux-builder history are deleted first: 43613142360 pinned
+      ``darwin-system-qaj6kyaf`` into a 402 "Pin storage limit exceeded"
+      while ``linux-builder-aarch64-linux`` was revision 25.
     - Failed warmup (39301503361 cascade slot 3): the action post hook
       then logs ``Cachix Daemon not started. Skipping push``. Flush still
       ``cachix push``es leftovers and ``realized-root-paths.json`` so the
@@ -3370,12 +3624,18 @@ def flush_cachix() -> None:
         )
         if stop.returncode:
             _recover_unconfirmed_drain(stop, socket, daemon_log_text, log, budget)
-        _publish_unpushed_warm_paths(daemon_log_text, log, budget)
-        _release_cachix_daemon_dir()
-        _write_diagnostic(
-            log,
-            "cleared CACHIX_DAEMON_DIR so cachix-action post skips a second stop",
-        )
+        try:
+            _publish_unpushed_warm_paths(daemon_log_text, log, budget)
+        finally:
+            # 43613142360: pin raised after daemon stop, so CACHIX_DAEMON_DIR
+            # stayed set and the action post hook failed on the closed socket.
+            # The flush exception still fails the job; this only skips that
+            # second stop.
+            _release_cachix_daemon_dir()
+            _write_diagnostic(
+                log,
+                "cleared CACHIX_DAEMON_DIR so cachix-action post skips a second stop",
+            )
         record_runner_storage("flush-end", log)
 
 
