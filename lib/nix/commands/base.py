@@ -12,6 +12,7 @@ import importlib
 import os
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -19,6 +20,7 @@ from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass, field
 from functools import partial
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lib.diagnostics import redact_urls
@@ -337,6 +339,21 @@ def _child_pids(listing: str) -> dict[int, tuple[int, ...]]:
     return {parent: tuple(pids) for parent, pids in children.items()}
 
 
+def _process_table_command() -> list[str] | None:
+    """Return a ``ps`` that can list pid and ppid.
+
+    Linux pytest runs in a sandbox with no ``/bin/ps``; that check puts
+    ``procps`` on ``PATH``. Darwin keeps the system ``ps`` when it is not
+    on ``PATH``.
+    """
+    ps = shutil.which("ps")
+    if ps is None and Path("/bin/ps").is_file():
+        ps = "/bin/ps"
+    if ps is None:
+        return None
+    return [ps, "-ax", "-o", "pid=", "-o", "ppid="]
+
+
 def _descendant_pids(pid: int) -> tuple[int, ...]:
     """Return every process under *pid*, nearest children last.
 
@@ -344,9 +361,12 @@ def _descendant_pids(pid: int) -> tuple[int, ...]:
     attempt hit its 1200s budget and left ``zig`` reparented to init; the
     retry then fetched the same cache while that compiler was still alive.
     """
+    command = _process_table_command()
+    if command is None:
+        return ()
     try:
-        listing = subprocess.run(
-            ["/bin/ps", "-ax", "-o", "pid=", "-o", "ppid="],
+        listing = subprocess.run(  # noqa: S603 -- ps is PATH's procps or Darwin /bin/ps
+            command,
             check=False,
             capture_output=True,
             text=True,

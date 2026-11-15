@@ -555,6 +555,9 @@
               runCommandAttrs =
                 { pkgs, ... }:
                 {
+                  # Sandboxed Linux has no /bin/ps. Command timeouts list
+                  # descendants with ps; procps supplies it. Darwin uses
+                  # the system ps.
                   nativeBuildInputs = [
                     pkgs.bun
                     pkgs.cacert
@@ -562,7 +565,7 @@
                     pkgs.nix
                     pkgs.nodejs
                     pkgs.rsync
-                  ];
+                  ] ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.procps ];
                 };
               setup =
                 { pkgs, ... }:

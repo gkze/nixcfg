@@ -439,6 +439,33 @@ def test_descendant_pids_walks_the_tree_and_skips_a_failed_listing(
     assert base._descendant_pids(10) == ()
 
 
+def test_descendant_pids_prefers_path_ps_and_keeps_darwin_bin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Linux CI has procps on PATH; a Darwin sandbox still has /bin/ps."""
+    seen: list[str] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        seen.append(args[0])
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(base.subprocess, "run", run)
+    monkeypatch.setattr(base.shutil, "which", lambda _name: "/nix/store/procps/bin/ps")
+    assert base._descendant_pids(1) == ()
+    assert seen == ["/nix/store/procps/bin/ps"]
+
+    seen.clear()
+    monkeypatch.setattr(base.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(base.Path, "is_file", lambda self: str(self) == "/bin/ps")
+    assert base._descendant_pids(1) == ()
+    assert seen == ["/bin/ps"]
+
+    seen.clear()
+    monkeypatch.setattr(base.Path, "is_file", lambda _self: False)
+    assert base._descendant_pids(1) == ()
+    assert seen == []
+
+
 def test_stop_process_ignores_a_gone_descendant_and_pid_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
