@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-z8Wq5sY401W4rt8x6+VsFq5n2izV8md6ac1oAFXTsTs=",
-    "x86_64-darwin": "sha256-aIVM7oXwNjhDVRqE+Snlo09u3b+tpjifBag5u2eXBX4="
+    "aarch64-darwin": "sha256-lNZAviTBLWe+N0x3/OXTXHiKdeOkOGODGvoE4Yz/rOY=",
+    "x86_64-darwin": "sha256-s8B8sM+WwEy/BEbIR45n79/kpI6uN5wZ0IxxTC/XALY="
   },
   "urls": {
-    "aarch64-darwin": "https://updates.signal.org/desktop/signal-desktop-beta-mac-arm64-8.35.0-beta.1.zip",
-    "x86_64-darwin": "https://updates.signal.org/desktop/signal-desktop-beta-mac-x64-8.35.0-beta.1.zip"
+    "aarch64-darwin": "https://updates.signal.org/desktop/signal-desktop-beta-mac-arm64-8.36.0-beta.1.zip",
+    "x86_64-darwin": "https://updates.signal.org/desktop/signal-desktop-beta-mac-x64-8.36.0-beta.1.zip"
   },
-  "version": "8.35.0-beta.1"
+  "version": "8.36.0-beta.1"
 }
