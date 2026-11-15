@@ -285,6 +285,27 @@ def test_output_paths_come_from_the_instantiated_drv() -> None:
         gate.output_paths({drv: {"outputs": {}}}, drv)
 
 
+def test_output_paths_accept_derivation_show_v4() -> None:
+    """Nix 2.35 keys the drv basename and omits the store directory."""
+    drv = _drv("tool")
+    first = _out("out")
+    second = _out("dev")
+    payload = {
+        "version": 4,
+        "derivations": {
+            drv.removeprefix("/nix/store/"): {
+                "outputs": {
+                    "out": {"path": first.removeprefix("/nix/store/")},
+                    "dev": {"path": second.removeprefix("/nix/store/")},
+                }
+            }
+        },
+    }
+    assert gate.output_paths(payload, drv) == (second, first)
+    with pytest.raises(gate.GateError, match="no entry"):
+        gate.output_paths(payload, _drv("other"))
+
+
 def test_narinfo_queries_gkze_by_digest() -> None:
     """Presence is a gkze narinfo, and only 200 or 404 decide it."""
     path = _out("tool")

@@ -52,6 +52,7 @@ _GKZE_NARINFO = "https://gkze.cachix.org"
 # Cachix answers 403 to urllib's default User-Agent.
 _NARINFO_USER_AGENT = "nixcfg-cachix-flush"
 _STORE_PATH_RE = re.compile(r"/nix/store/[0-9a-z]{32}-[^\s/]+")
+_STORE_BASENAME_RE = re.compile(r"^[0-9a-z]{32}-[^\s/]+$")
 _SYSTEM_RE = re.compile(r"^(?:aarch64|x86_64)-(?:darwin|linux)$")
 _NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._+-]*$")
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -365,14 +366,16 @@ def _normalize_installable(installable: str) -> str:
 
 
 def output_paths(show_payload: object, drv: str) -> tuple[str, ...]:
-    """Return the output paths ``nix derivation show`` declared for *drv*."""
+    """Return the output paths ``nix derivation show`` declared for *drv*.
+
+    Nix 2.35 returns derivation-show version 4: the drv is keyed by its
+    store basename, and each output path omits ``/nix/store/``. Older
+    responses key the full drv path and use absolute output paths.
+    """
     if not isinstance(show_payload, dict):
         msg = "derivation show did not return an object"
         raise GateError(msg)
-    described = show_payload.get(drv)
-    if not isinstance(described, dict):
-        msg = f"derivation show has no entry for {drv}"
-        raise GateError(msg)
+    described = _described_derivation(show_payload, drv)
     outputs = described.get("outputs")
     if not isinstance(outputs, dict) or not outputs:
         msg = f"derivation {drv} declares no outputs"
@@ -383,8 +386,27 @@ def output_paths(show_payload: object, drv: str) -> tuple[str, ...]:
         if not isinstance(described_output, dict):
             msg = f"derivation {drv} output {name} is not an object"
             raise GateError(msg)
-        paths.append(_store_path(described_output.get("path"), derivation=False))
+        paths.append(_absolute_output_path(described_output.get("path")))
     return tuple(paths)
+
+
+def _described_derivation(show_payload: dict[str, object], drv: str) -> dict[str, object]:
+    direct = show_payload.get(drv)
+    if isinstance(direct, dict):
+        return direct
+    derivations = show_payload.get("derivations")
+    basename = drv.removeprefix("/nix/store/")
+    described = derivations.get(basename) if isinstance(derivations, dict) else None
+    if isinstance(described, dict):
+        return described
+    msg = f"derivation show has no entry for {drv}"
+    raise GateError(msg)
+
+
+def _absolute_output_path(value: object) -> str:
+    if isinstance(value, str) and _STORE_BASENAME_RE.fullmatch(value):
+        value = f"/nix/store/{value}"
+    return _store_path(value, derivation=False)
 
 
 def narinfo_url(store_path: str) -> str:
