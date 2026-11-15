@@ -1,6 +1,7 @@
 """The PR closure gate selects, realizes, and publishes changed drvs."""
 
 import ast
+import builtins
 import importlib.util
 import json
 import shutil
@@ -662,6 +663,35 @@ def test_pushed_paths_are_recorded_for_the_flush(
     assert load_realized_root_paths(tmp_path / "update-artifacts") == (path,)
     gate._remember(())
     assert load_realized_root_paths(tmp_path / "update-artifacts") == (path,)
+
+
+def test_jobs_loader_does_not_import_the_ci_package(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The runner has no typer, and ``lib.update.ci`` imports it."""
+    gate._JOBS.clear()
+    for name in list(sys.modules):
+        if name == "lib.update.ci" or name.startswith("lib.update.ci."):
+            monkeypatch.delitem(sys.modules, name)
+    real_import = builtins.__import__
+
+    def guarded(
+        name: str,
+        global_ns: dict[str, object] | None = None,
+        local_ns: dict[str, object] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> object:
+        if name == "lib.update.ci" or name.startswith("lib.update.ci."):
+            msg = name
+            raise ModuleNotFoundError(msg)
+        return real_import(name, global_ns, local_ns, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", guarded)
+    jobs = gate._load_jobs()
+    assert callable(jobs.remember_realized_store_paths)
+    assert callable(jobs.reclaim_hosted_store)
+    assert jobs.__name__ == "_nixcfg_closure_gate_jobs"
 
 
 def _workflow(name: str) -> dict[str, object]:

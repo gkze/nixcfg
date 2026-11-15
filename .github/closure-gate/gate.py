@@ -16,6 +16,7 @@ Actions invokes it before the devshell exists.
 from __future__ import annotations
 
 import ast
+import importlib.util
 import json
 import os
 import re
@@ -28,6 +29,10 @@ import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 # Actions runs this file as a script. The repo root is not a package path
 # until it is inserted, and the Update helpers are imported only by realize.
@@ -871,14 +876,34 @@ class _ProcessRunner(_Runner):
                 raise GateError(msg)
 
 
+_JOBS: dict[str, ModuleType] = {}
+
+
+def _load_jobs() -> ModuleType:
+    """Load ``jobs.py`` as a script.
+
+    ``lib.update.ci`` imports typer. The hosted runner's Python does not
+    have it, and Actions invokes ``jobs.py`` directly for that reason.
+    """
+    cached = _JOBS.get("jobs")
+    if cached is not None:
+        return cached
+    path = _REPO_ROOT / "lib" / "update" / "ci" / "jobs.py"
+    spec = importlib.util.spec_from_file_location("_nixcfg_closure_gate_jobs", path)
+    if spec is None or spec.loader is None:
+        msg = "cannot load the update job entrypoint"
+        raise GateError(msg)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["_nixcfg_closure_gate_jobs"] = module
+    spec.loader.exec_module(module)
+    _JOBS["jobs"] = module
+    return module
+
+
 def _remember(paths: tuple[str, ...]) -> None:
     if not paths:
         return
-    from lib.update.ci.jobs import (  # noqa: PLC0415 -- realize is the only command that records a flush receipt
-        remember_realized_store_paths,
-    )
-
-    remember_realized_store_paths(paths)
+    _load_jobs().remember_realized_store_paths(paths)
 
 
 def _write_summary(text: str) -> None:
@@ -965,11 +990,7 @@ def _command_realize() -> None:
         msg = f"{system} has an empty plan; the realize job should have been skipped"
         raise GateError(msg)
     if any(item.kind == "root" for item in plan.changed):
-        from lib.update.ci.jobs import (  # noqa: PLC0415 -- reclaim only runs when a root closure is built
-            reclaim_hosted_store,
-        )
-
-        reclaim_hosted_store()
+        _load_jobs().reclaim_hosted_store()
     result = realize_changed(plan.changed, _ProcessRunner())
     _remember(result.pushed)
     artifact = Path(os.environ["RUNNER_TEMP"]) / "update-artifacts"
