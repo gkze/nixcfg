@@ -316,11 +316,16 @@ deletes the hash-named pins and retries that pin once. Run 43613142360
 returned 402 "Pin storage limit exceeded" on `darwin-system-qaj6kyaf` while
 `linux-builder-aarch64-linux` was revision 25 under `--keep-days 14`.
 `DELETE /api/v1/cache/gkze/pin/{name}` with the flush's Bearer token is the
-documented pin-delete call. Run 43667571490 got 403 on
-`linux-builder-aarch64-linux`: a Write token can push and create pins, and
-Cachix reserves pin deletion for an Admin token. That 403 is a warning.
-Flush still pins the path it just pushed. `cachix push` and `cachix pin`
-fail the job, including a later 402. After a successful daemon stop, flush
+documented pin-delete call. Runs 43667571490 and 43738140207 got 403 on
+`linux-builder-aarch64-linux`. That status is the same body an absent token
+gets, and `GET /api/v1/cache/gkze/pin` is public, so a successful list does
+not identify the credential. The pin POST in 43738140207 was authorized and
+returned 402: the image it had just pushed was already revision 25.
+`--keep-revisions 1` trims only after Cachix accepts a new revision, so flush
+does not pin a path the latest revision already retains. A 403 stays a
+warning. `cachix push` still fails the job, and so does `cachix pin` of a
+path that pin does not already retain, including a later 402. After a
+successful daemon stop, flush
 clears `CACHIX_DAEMON_DIR` even when the later push or pin fails, so the
 action post hook does not stop the closed socket again. The flush exception
 still fails the job.

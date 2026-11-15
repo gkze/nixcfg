@@ -2054,10 +2054,11 @@ def test_pin_delete_failure_omits_the_response_body(monkeypatch) -> None:
 def test_forbidden_pin_delete_warns_and_pin_still_fails_closed(
     native_job, monkeypatch
 ) -> None:
-    """43667571490: a Write token's 403 must not skip or pass a pin.
+    """A 403 is an authorization refusal and does not skip a new pin.
 
-    Pin pruning is housekeeping. ``cachix pin`` still fail-closes, and the
-    delete response body stays out of the log.
+    The pin in this case does not already retain the pushed path, so
+    ``cachix pin`` still fail-closes. The delete response body stays out
+    of the log. A list of pins does not identify the token.
     """
     env, checkout = native_job
     for key, value in env.items():
@@ -2078,7 +2079,7 @@ def test_forbidden_pin_delete_warns_and_pin_still_fails_closed(
     text = log.getvalue()
     assert ("DELETE", name) in calls
     assert f"warning: could not delete Cachix pin {name} status=403" in text
-    assert "Admin token" in text
+    assert "authorization refused token_len=10" in text
     assert "deleted historical" not in text
     assert "pin-response-body" not in text
     pinned = json.loads(Path(env["TEST_CACHE_LOG"]).read_text())
@@ -2188,6 +2189,178 @@ def test_linux_builder_history_collapses_to_one_revision(
     assert jobs._pin_keeps_one_revision({"keep": {"tag": "Revisions", "contents": 1}})
     with pytest.raises(jobs.CachixFlushError, match="refusing to collapse"):
         jobs._collapse_linux_builder_history("darwin-argus", StringIO(), _budget())
+
+
+def _clear_cachix_log(env: dict[str, str]) -> None:
+    Path(env["TEST_CACHE_LOG"]).unlink(missing_ok=True)
+    Path(env["TEST_CACHE_LOG"] + "l").unlink(missing_ok=True)
+
+
+_VM_IMAGE = "/nix/store/h1af85b11l7pz34a7f1c2zqjvdz979kg-nixos-disk-image"
+_VM_PIN = "linux-builder-aarch64-linux"
+
+
+def _arm_linux_builder(native_job, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+    """Point a flush at the aarch64 linux-builder image from run 43738140207."""
+    env, checkout = native_job
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    artifacts.mkdir(parents=True)
+    (artifacts / "realized-root-paths.json").write_text(
+        json.dumps({"storePaths": [_VM_IMAGE]}) + "\n"
+    )
+    daemon_dir = _cachix_daemon_dir(Path(env["RUNNER_TEMP"]))
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    monkeypatch.setenv("CACHIX_AUTH_TOKEN", "test-token")
+    monkeypatch.setenv("RUNNER_ARCH", "ARM64")
+    monkeypatch.setenv("RUNNER_OS", "Linux")
+    monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path == _VM_IMAGE)
+    monkeypatch.chdir(checkout)
+    return env
+
+
+def _vm_pin(store_path: object, *, revisions: int | None = None) -> dict[str, object]:
+    keep: dict[str, object] = (
+        {"tag": "Revisions", "contents": 1}
+        if revisions == 1
+        else {"tag": "Days", "contents": 14}
+    )
+    return {
+        "name": _VM_PIN,
+        "keep": keep,
+        "lastRevision": {"storePath": store_path},
+    }
+
+
+def test_retained_linux_builder_revision_is_not_pinned_again(
+    native_job, monkeypatch
+) -> None:
+    """43738140207: the pushed image was already the pin's latest revision.
+
+    ``--keep-revisions 1`` counts a new revision before it trims. A refused
+    delete leaves that revision in place, so flush does not add another.
+    The push still has to succeed, and a missing remote copy still fails.
+    """
+    env = _arm_linux_builder(native_job, monkeypatch)
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    pin = _vm_pin(f"{_VM_IMAGE}/")
+    monkeypatch.setattr(
+        jobs, "_realized_root_path_in_cachix", lambda path, _budget: path == _VM_IMAGE
+    )
+    _stub_pin_catalog(monkeypatch, [pin], delete_status=403)
+    assert jobs.main("flush-cachix") == 0
+    flush_log = (artifacts / "cachix-flush.log").read_text()
+    assert f"Cachix pin {_VM_PIN} already retains {_VM_IMAGE}" in flush_log
+    assert "authorization refused token_len=10" in flush_log
+    assert "test-token" not in flush_log
+    assert "pin-response-body" not in flush_log
+    assert "cachix push realized-roots returncode=0" in flush_log
+    assert f"cachix pin {_VM_PIN}" not in flush_log
+    assert all(call[:1] != ["pin"] for call in _cachix_calls(env))
+
+    monkeypatch.setattr(
+        jobs, "_realized_root_path_in_cachix", lambda _path, _budget: False
+    )
+    _stub_pin_catalog(monkeypatch, [pin], delete_status=403)
+    _clear_cachix_log(env)
+    with pytest.raises(jobs.CachixFlushError, match="missing from gkze.cachix.org"):
+        jobs._push_realized_root_paths(StringIO(), _budget())
+    pushed = _cachix_calls(env)
+    assert any(call[:1] == ["push"] for call in pushed)
+    assert all(call[:1] != ["pin"] for call in pushed)
+
+
+def test_deleted_current_pin_is_created_again(native_job, monkeypatch) -> None:
+    """A delete that succeeds removes retention, so the image is pinned again."""
+    env = _arm_linux_builder(native_job, monkeypatch)
+    calls = _stub_pin_catalog(monkeypatch, [_vm_pin(f"{_VM_IMAGE}/")])
+    log = StringIO()
+    jobs._pin_linux_builder_paths((_VM_IMAGE,), log, _budget())
+    assert ("DELETE", _VM_PIN) in calls
+    assert "already retains" not in log.getvalue()
+    assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text())[:4] == [
+        "pin",
+        "gkze",
+        _VM_PIN,
+        _VM_IMAGE,
+    ]
+
+    _clear_cachix_log(env)
+    calls = _stub_pin_catalog(monkeypatch, [_vm_pin(_VM_IMAGE, revisions=1)])
+    log = StringIO()
+    jobs._pin_linux_builder_paths((f"{_VM_IMAGE}/",), log, _budget())
+    assert ("DELETE", _VM_PIN) not in calls
+    assert f"already retains {_VM_IMAGE}/" in log.getvalue()
+    assert not Path(env["TEST_CACHE_LOG"]).exists()
+
+
+def test_unretained_linux_builder_shapes_are_still_pinned(
+    native_job, monkeypatch
+) -> None:
+    """A latest revision that is not this store path is still pinned."""
+    env = _arm_linux_builder(native_job, monkeypatch)
+    other = "/nix/store/wy15yizd3i7z6bmg3llr43a2pflg9yyb-nixos-disk-image"
+    for last_revision in (
+        "not-a-revision",
+        {"storePath": 5},
+        {"storePath": "not-a-store"},
+        {"storePath": other},
+    ):
+        _clear_cachix_log(env)
+        _stub_pin_catalog(
+            monkeypatch,
+            [
+                {
+                    "name": _VM_PIN,
+                    "keep": {"tag": "Days", "contents": 14},
+                    "lastRevision": last_revision,
+                }
+            ],
+            delete_status=403,
+        )
+        jobs._pin_linux_builder_paths((_VM_IMAGE,), StringIO(), _budget())
+        assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text())[3] == _VM_IMAGE
+
+
+def test_retained_darwin_root_is_not_pinned_again(native_job, monkeypatch) -> None:
+    """A stable Darwin pin is not given another revision of the same path."""
+    env, checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    monkeypatch.setenv("CACHIX_AUTH_TOKEN", "test-token")
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "darwin-argus")
+    store = "/nix/store/qaj6kyaffl1bpj6x411pbwdbk29gv22r-darwin-system-26.11.b2f8c5c"
+    _stub_pin_catalog(
+        monkeypatch,
+        [
+            {
+                "name": "darwin-argus",
+                "keep": {"tag": "Revisions", "contents": 1},
+                "lastRevision": {"storePath": store},
+            }
+        ],
+    )
+    log = StringIO()
+    jobs._pin_realized_darwin_roots((store,), log, _budget())
+    assert "Cachix pin darwin-argus already retains" in log.getvalue()
+    assert not Path(env["TEST_CACHE_LOG"]).exists()
+
+    changed = "/nix/store/748wmbw5fa8ggk9dw3fwpj1gfpnylxxn-darwin-system-26.11.b2f8c5c"
+    _clear_cachix_log(env)
+    _stub_pin_catalog(
+        monkeypatch,
+        [
+            {
+                "name": "darwin-argus",
+                "keep": {"tag": "Revisions", "contents": 1},
+                "lastRevision": {"storePath": store},
+            }
+        ],
+    )
+    jobs._pin_realized_darwin_roots((changed,), StringIO(), _budget())
+    assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text())[3] == changed
 
 
 def test_darwin_pin_retries_once_after_storage_limit(native_job, monkeypatch) -> None:
