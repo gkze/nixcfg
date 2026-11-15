@@ -252,11 +252,26 @@ def diff_inventories(
     return tuple(changed)
 
 
+def _nix_string(value: str) -> str:
+    """Quote *value* as a Nix string literal."""
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("${", "\\${")
+    return f'"{escaped}"'
+
+
 def inventory_eval_args(inventory: Path, flake_path: Path, system: str) -> list[str]:
-    """Eval one tree's drv map without importing derivation outputs."""
+    """Eval one tree's drv map without importing derivation outputs.
+
+    ``nix eval --file`` does not apply ``--argstr``; the file stays a
+    function and ``--json`` fails. Apply the arguments in ``--expr``.
+    """
     if _SYSTEM_RE.fullmatch(system) is None:
         msg = f"unsupported system: {system}"
         raise GateError(msg)
+    expr = (
+        f"import {_nix_string(str(inventory))} {{ "
+        f"flakePath = {_nix_string(str(flake_path))}; "
+        f"system = {_nix_string(system)}; }}"
+    )
     return [
         "nix",
         "eval",
@@ -266,14 +281,8 @@ def inventory_eval_args(inventory: Path, flake_path: Path, system: str) -> list[
         "--option",
         "allow-import-from-derivation",
         "false",
-        "--file",
-        str(inventory),
-        "--argstr",
-        "flakePath",
-        str(flake_path),
-        "--argstr",
-        "system",
-        system,
+        "--expr",
+        expr,
     ]
 
 

@@ -247,6 +247,15 @@ def test_plan_eval_disables_ifd_and_instantiate_does_not() -> None:
     ]
     assert "allow-import-from-derivation" in inventory
     assert inventory[inventory.index("allow-import-from-derivation") + 1] == "false"
+    expr = inventory[-1]
+    assert expr.startswith('import "inventory.nix"')
+    assert 'flakePath = "/tree"' in expr
+    assert 'system = "aarch64-darwin"' in expr
+    quoted = gate.inventory_eval_args(
+        Path('inven"tory.nix'), Path("/tree/${x}"), "x86_64-linux"
+    )[-1]
+    assert r'import "inven\"tory.nix"' in quoted
+    assert r'flakePath = "/tree/\${x}"' in quoted
     instantiate = gate.instantiate_args("packages.aarch64-darwin.tool")
     assert "allow-import-from-derivation" not in instantiate
     assert instantiate[-1] == ".#packages.aarch64-darwin.tool.drvPath"
