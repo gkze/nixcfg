@@ -2490,8 +2490,10 @@ def test_cachix_pin_api_keeps_the_token_out_of_errors(monkeypatch) -> None:
     )
     assert status == 404
     assert body == b'{"error":"gone"}'
-    assert seen["authorization"] == "Bearer test-token"
+    assert seen["authorization"] == "test-token"
     assert str(seen["url"]).endswith("/darwin-system-qaj6kyaf")
+    monkeypatch.setenv("CACHIX_AUTH_TOKEN", " \n test-token \n")
+    assert jobs._cachix_auth_token() == "test-token"
 
     def broken(*_args: object, **_kwargs: object) -> object:
         raise urllib.error.URLError(OSError("token-in-reason"))

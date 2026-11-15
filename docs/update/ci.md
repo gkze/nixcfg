@@ -315,8 +315,9 @@ is deleted before that image is pinned. If the pin then returns 402, flush
 deletes the hash-named pins and retries that pin once. Run 43613142360
 returned 402 "Pin storage limit exceeded" on `darwin-system-qaj6kyaf` while
 `linux-builder-aarch64-linux` was revision 25 under `--keep-days 14`.
-`DELETE /api/v1/cache/gkze/pin/{name}` with the flush's Bearer token is the
-documented pin-delete call. Runs 43667571490 and 43738140207 got 403 on
+`DELETE /api/v1/cache/gkze/pin/{name}` sends the flush token as the
+`Authorization` value, the same header `cachix pin` uses. A `Bearer `
+prefix is not that header. Runs 43667571490 and 43738140207 got 403 on
 `linux-builder-aarch64-linux`. That status is the same body an absent token
 gets, and `GET /api/v1/cache/gkze/pin` is public, so a successful list does
 not identify the credential. The pin POST in 43738140207 was authorized and

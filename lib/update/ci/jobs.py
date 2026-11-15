@@ -127,12 +127,14 @@ _LINUX_BUILDER_OUTPUT = "nixos-disk-image"
 # still protects the next substitute without filling the pin quota.
 # 43667571490 and 43738140207: DELETE of that pin returned 403 with the
 # same body an absent token gets ("You're not authorized to access binary
-# cache gkze."). The flush step's Bearer token is the one ``cachix pin``
-# uses, and that POST is authorized (402). Listing pins does not prove
-# the token: GET is public. A 403 is an authorization refusal. Pruning is
-# housekeeping. A path the latest revision already retains is not pinned
-# again: ``--keep-revisions`` trims only after Cachix accepts a new
-# revision, and that POST 402s while the account is over the pin quota.
+# cache gkze."). ``cachix pin`` in that job sent Authorization as the raw
+# token (the servant log value has no scheme prefix) and the POST was
+# authorized (402). Prefixing ``Bearer `` makes Cachix ignore the
+# credential. Listing pins does not prove the token: GET is public. A 403
+# is an authorization refusal. Pruning is housekeeping. A path the latest
+# revision already retains is not pinned again: ``--keep-revisions`` trims
+# only after Cachix accepts a new revision, and that POST 402s while the
+# account is over the pin quota.
 _CACHIX_PIN_KEEP_REVISIONS = 1
 _CACHIX_PIN_DELETE_FORBIDDEN = 403
 _CACHIX_PIN_API = "https://cachix.org/api/v1/cache/gkze/pin"
@@ -3208,7 +3210,9 @@ def _cachix_pin_api(
         "User-Agent": _NARINFO_USER_AGENT,
     }
     if token is not None:
-        headers["Authorization"] = f"Bearer {token}"
+        # cachix 1.11.1's pin POST puts the token in Authorization with no
+        # scheme. ``Bearer <token>`` is a different credential and 403s.
+        headers["Authorization"] = token
     request = urllib.request.Request(  # noqa: S310 -- fixed https://cachix.org pin API
         url,
         method=method,
@@ -3659,8 +3663,8 @@ def flush_cachix() -> None:
       linux-builder history are deleted first: 43613142360 pinned
       ``darwin-system-qaj6kyaf`` into a 402 "Pin storage limit exceeded"
       while ``linux-builder-aarch64-linux`` was revision 25.
-      43667571490 and 43738140207 then 403'd that delete. The same
-      Bearer token's pin POST is authorized and returns 402. A path
+      43667571490 and 43738140207 then 403'd that delete. The pin POST
+      in that job authorized with the raw token and returned 402. A path
       the latest revision already retains is not pinned again. A pin
       of any other path still fails the flush, and so does the push.
     - Failed warmup (39301503361 cascade slot 3): the action post hook
