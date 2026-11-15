@@ -565,7 +565,8 @@
                     pkgs.nix
                     pkgs.nodejs
                     pkgs.rsync
-                  ] ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.procps ];
+                  ]
+                  ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.procps ];
                 };
               setup =
                 { pkgs, ... }:
@@ -956,6 +957,13 @@
               "test-nix-language-path-modules" =
                 { pkgs, ... }:
                 import ./tests/nix/language-path-modules.nix {
+                  inherit (pkgs) lib;
+                  src = ./.;
+                };
+
+              "test-nix-home-paths" =
+                { pkgs, ... }:
+                import ./tests/nix/home-paths.nix {
                   inherit (pkgs) lib;
                   src = ./.;
                 };

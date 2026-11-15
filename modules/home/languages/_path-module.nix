@@ -23,6 +23,6 @@ in
   };
 
   config = lib.mkIf cfg.enable (
-    extraConfig // { home.sessionPath = [ cfg.${pathOptionName} ] ++ extraPaths; }
+    extraConfig // { nixcfg.paths.user = [ cfg.${pathOptionName} ] ++ extraPaths; }
   );
 }

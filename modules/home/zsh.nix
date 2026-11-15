@@ -123,20 +123,29 @@ in
         compinit && bashcompinit
         compdef _gpg gpg-sq
       '';
-      initContent = lib.mkOrder 550 ''
-        unalias &>/dev/null run-help && autoload run-help
-        zmodload zsh/complist zsh/zle
-        zstyle ':completion:*' menu select
-        autoload -Uz +X select-word-style
-        select-word-style bash
-        bindkey -M menuselect '^[[Z' reverse-menu-complete
-        bindkey "^R" history-incremental-search-backward
-        typeset -U PATH MANPATH
+      initContent = lib.mkMerge [
+        (lib.mkOrder 550 ''
+          unalias &>/dev/null run-help && autoload run-help
+          zmodload zsh/complist zsh/zle
+          zstyle ':completion:*' menu select
+          autoload -Uz +X select-word-style
+          select-word-style bash
+          bindkey -M menuselect '^[[Z' reverse-menu-complete
+          bindkey "^R" history-incremental-search-backward
+          typeset -U PATH MANPATH
 
-        source ${./gpg-tty.zsh}
+          source ${./gpg-tty.zsh}
 
-        ${cfg.extraInitContent}
-      '';
+          ${cfg.extraInitContent}
+        '')
+        # Home Manager's `programs.zsh.plugins` adds every plugin directory to
+        # PATH as well as fpath. Those directories ship completions and sourced
+        # scripts, never executables, so drop them again and keep the shell PATH
+        # to the canonical nixcfg.paths entries plus the tool-managed layers.
+        (lib.mkAfter ''
+          path=(''${path:#${config.xdg.configHome}/zsh/plugins/*})
+        '')
+      ];
       plugins = map mkPlugin (
         (with pkgs; [
           {

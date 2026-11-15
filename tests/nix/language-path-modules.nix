@@ -12,10 +12,12 @@ let
           type = lib.types.str;
           default = "/Users/test";
         };
-        sessionPath = lib.mkOption {
-          type = lib.types.listOf lib.types.str;
-          default = [ ];
-        };
+      };
+      # The shared PATH owner from `modules/home/paths.nix`; the language
+      # modules write here instead of `home.sessionPath`.
+      nixcfg.paths.user = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
       };
       programs = {
         bun.enable = lib.mkOption {
@@ -38,7 +40,7 @@ let
         module
         settings
       ];
-    }).config.home.sessionPath;
+    }).config.nixcfg.paths.user;
 
   languageModule = name: import (src + "/modules/home/languages/${name}.nix");
   enabled = name: evalModule (languageModule name) { nixcfg.languages.${name}.enable = true; };

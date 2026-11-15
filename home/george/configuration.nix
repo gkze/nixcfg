@@ -149,9 +149,6 @@
         '';
       };
     };
-    sessionPath = [
-      "$HOME/.local/bin"
-    ];
     sessionVariables = {
       DELTA_PAGER = "bat -p";
       EDITOR = "nvim";
@@ -308,6 +305,12 @@
       managedMacAppProjection = macAppHelpers.managedMacAppRoutingProjection managedMacAppRouting;
     in
     {
+      # The only hand-maintained user PATH entry; the language modules add
+      # their own through nixcfg.languages.*. nix-darwin composes this list
+      # with nixcfg.paths.system for both shells and the launchd user domain,
+      # so it must not also be added to home.sessionPath.
+      paths.user = [ "$HOME/.local/bin" ];
+
       # Nix-managed tools cannot self-update, so their Topgrade steps are
       # excluded here instead of in a hand-maintained disable list. Packages own
       # the step names they expose; third-party tools are named explicitly
