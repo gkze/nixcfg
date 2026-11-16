@@ -68,7 +68,10 @@ Darwin prepare jobs and the heal job use four lanes:
 `nixcfg-darwin-routine`. A lane queues. The lanes run at the same time. Four
 is the public macOS pool of five, minus one runner. `cancel-in-progress` is
 false. `closure-gate` Darwin jobs use the same lane names, taken from the
-pull request's priority label.
+pull request's priority label. The Darwin plan leg and
+`realize-aarch64-darwin` join that lane. A pull request with no priority
+label uses routine. Linux gate jobs do not. The workflow still cancels a
+replaced head of the same pull request.
 
 Priority order is main-fix, then security, then heal, then routine. A routine
 repair becomes heal. Security and main-fix stay above heal. The schedule does

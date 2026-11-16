@@ -739,6 +739,18 @@ def test_pull_request_workflow_is_same_repo_and_keeps_darwin() -> None:
     assert {row["system"]: row["runner"] for row in plan} == _RUNNERS
     assert jobs["plan"]["strategy"]["fail-fast"] == "false"
     assert "closure-gate" in jobs
+    plan_lane = jobs["plan"]["concurrency"]
+    assert plan_lane["cancel-in-progress"] == "false"
+    assert "matrix.system == 'aarch64-darwin'" in plan_lane["group"]
+    assert "nixcfg-darwin-" in plan_lane["group"]
+    assert "pr-closure-gate-plan-" in plan_lane["group"]
+    darwin_lane = jobs["realize-aarch64-darwin"]["concurrency"]
+    assert darwin_lane["cancel-in-progress"] == "false"
+    for lane in ("main-fix", "security", "heal", "routine"):
+        assert lane in darwin_lane["group"]
+        assert lane in plan_lane["group"]
+    assert "concurrency" not in jobs["realize-aarch64-linux"]
+    assert "concurrency" not in jobs["realize-x86_64-linux"]
     quality = (ROOT / ".github/workflows/pr-quality.yml").read_text(encoding="utf-8")
     assert "lib/tests/test_closure_gate.py" in quality
 
