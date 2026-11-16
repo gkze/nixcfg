@@ -476,8 +476,89 @@ _PATCHES_138 = (
 )
 
 
+# 0.3.6 (e48dcbed1254f1ee97cbc4fcfc95de791c3a2122) keeps the 0.2.138 ownership
+# surface but moves three bodies. Download delegates to
+# download_release_file_from, staging's platform check lives in
+# stage_headless_on, and restart_service runs before_restart before the
+# managed-restart hook. The Nix guard stays ahead of each of those effects.
+# Fetch, apply, relaunch, and the background checker are unchanged.
+_PATCHES_306 = (
+    *_PATCHES_138[:3],
+    _update(
+        (
+            "pub async fn download_release_file(\n"
+            "    edge_url: &str,\n"
+            "    manifest: &Manifest,\n"
+            "    file: &str,\n"
+            "    dest: &Path,\n"
+            ") -> anyhow::Result<()> {\n"
+            "    // From the feed the manifest came from: a beta's files are beta's.\n"
+            "    download_release_file_from("
+            "&manifest.channel.base(&release_base(edge_url)?), "
+            "manifest, file, dest).await\n"
+        ),
+        (
+            "pub async fn download_release_file(\n"
+            "    edge_url: &str,\n"
+            "    manifest: &Manifest,\n"
+            "    file: &str,\n"
+            "    dest: &Path,\n"
+            ") -> anyhow::Result<()> {\n"
+            "    ensure_updates_mutable()?;\n"
+            "    // From the feed the manifest came from: a beta's files are beta's.\n"
+            "    download_release_file_from("
+            "&manifest.channel.base(&release_base(edge_url)?), "
+            "manifest, file, dest).await\n"
+        ),
+    ),
+    _update(
+        """async fn stage_headless_on(
+    edge_url: &str,
+    manifest: &Manifest,
+    app_root: &Path,
+    cloud: bool,
+) -> anyhow::Result<PathBuf> {
+    // Reject unsupported targets before creating a stage or making a request.
+    require_managed_update_platform()?;
+    let version = &manifest.version;
+""",
+        """async fn stage_headless_on(
+    edge_url: &str,
+    manifest: &Manifest,
+    app_root: &Path,
+    cloud: bool,
+) -> anyhow::Result<PathBuf> {
+    // Reject unsupported targets before creating a stage or making a request.
+    require_managed_update_platform()?;
+    ensure_updates_mutable()?;
+    let version = &manifest.version;
+""",
+    ),
+    _PATCHES_138[5],
+    _update(
+        """pub fn restart_service() -> anyhow::Result<()> {
+    before_restart();
+    if let Some(restart) = MANAGED_RESTART.get() {
+        return restart();
+    }
+    require_managed_update_platform()?;
+""",
+        """pub fn restart_service() -> anyhow::Result<()> {
+    ensure_updates_mutable()?;
+    before_restart();
+    if let Some(restart) = MANAGED_RESTART.get() {
+        return restart();
+    }
+    require_managed_update_platform()?;
+""",
+    ),
+    *_PATCHES_138[7:],
+)
+
+
 # Supported updater layouts, newest first. Exactly one must match the tree.
 _LAYOUTS = {
+    "0.3.6": _PATCHES_306,
     "0.2.138": _PATCHES_138,
     "0.2.136": _PATCHES_136,
     "0.2.115": _PATCHES_115,

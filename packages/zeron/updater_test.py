@@ -98,16 +98,16 @@ def _install_release_source(
     return urls
 
 
-@pytest.mark.parametrize("layout", ["0.2.115", "0.2.136", "0.2.138"])
+@pytest.mark.parametrize("layout", ["0.2.115", "0.2.136", "0.2.138", "0.3.6"])
 def test_zeron_resolves_the_release_tag_to_an_immutable_public_commit(
     monkeypatch: pytest.MonkeyPatch,
     layout: str,
 ) -> None:
     """Release discovery must pin a commit rather than trust a mutable tag.
 
-    0.2.136 and 0.2.138 stay acceptable: their channel fetch, channel-scoped
-    download, and apply admission are ownership anchors, so the pins stage
-    admits those releases.
+    0.2.136, 0.2.138, and 0.3.6 stay acceptable: their channel fetch,
+    channel-scoped download, and apply admission are ownership anchors, so
+    the pins stage admits those releases.
     """
     module = _load_updater_module()
     updater = module.ZeronUpdater()
@@ -150,7 +150,7 @@ def test_zeron_resolves_the_release_tag_to_an_immutable_public_commit(
     ]
 
 
-@pytest.mark.parametrize("layout", ["0.2.115", "0.2.136", "0.2.138"])
+@pytest.mark.parametrize("layout", ["0.2.115", "0.2.136", "0.2.138", "0.3.6"])
 def test_zeron_rejects_a_release_the_ownership_patch_cannot_anchor(
     monkeypatch: pytest.MonkeyPatch,
     layout: str,
@@ -165,7 +165,7 @@ def test_zeron_rejects_a_release_the_ownership_patch_cannot_anchor(
     group = _load_patch_module()._LAYOUTS[layout]
     # Drop the channel fetch on 0.2.136 and later. An older layout drops its
     # last guard.
-    omitted = 2 if layout in {"0.2.136", "0.2.138"} else len(group) - 1
+    omitted = 2 if layout in {"0.2.136", "0.2.138", "0.3.6"} else len(group) - 1
     owned = [patch for index, patch in enumerate(group) if index != omitted]
     _install_release_source(
         monkeypatch,
@@ -307,6 +307,7 @@ def test_zeron_validates_the_materialized_bootstrap_source() -> None:
 
 
 _LAYOUT_NAMES = (
+    "0.3.6",
     "0.2.138",
     "0.2.136",
     "0.2.115",
@@ -320,10 +321,12 @@ _DESKTOP_LAYOUT_GUARDS = (
     ("0.2.115", 13),
     ("0.2.136", 14),
     ("0.2.138", 14),
+    ("0.3.6", 14),
 )
 _NO_LAYOUT = (
     r"^expected exactly one supported source layout in .* "
-    r"\(0\.2\.138, 0\.2\.136, 0\.2\.115, 0\.2\.97, 0\.2\.94, primary, fallback\), found none$"
+    r"\(0\.3\.6, 0\.2\.138, 0\.2\.136, 0\.2\.115, 0\.2\.97, 0\.2\.94, "
+    r"primary, fallback\), found none$"
 )
 
 
@@ -332,6 +335,7 @@ def test_zeron_declares_every_supported_update_layout() -> None:
     module = _load_patch_module()
 
     assert tuple(module._LAYOUTS) == _LAYOUT_NAMES
+    assert len(module._LAYOUTS["0.3.6"]) == 14
     assert len(module._LAYOUTS["0.2.138"]) == 14
     assert len(module._LAYOUTS["0.2.136"]) == 14
     assert len(module._LAYOUTS["0.2.115"]) == 13
@@ -341,6 +345,33 @@ def test_zeron_declares_every_supported_update_layout() -> None:
         for patches in module._LAYOUTS.values()
         for patch in patches
     )
+
+
+def test_zeron_0_3_6_release_matches_only_its_ownership_layout(tmp_path: Path) -> None:
+    """v0.3.6's updater crate is the layout that quarantined Update 43738140207.
+
+    The fixture is crates/update/src/lib.rs at e48dcbed (tag v0.3.6). Anchor
+    fixtures cannot show that those strings occur once in the real file.
+    """
+    module = _load_patch_module()
+    source = (_PACKAGE_DIR / "tests/fixtures/update-lib-0.3.6.rs").read_text(
+        encoding="utf-8"
+    )
+    assert module.validate_update_source(source) == "0.3.6"
+
+    patches = module._LAYOUTS["0.3.6"]
+    expected = source
+    for patch in patches:
+        assert source.count(patch.old) == patch.expected_count
+        expected = expected.replace(patch.old, patch.new, patch.expected_count)
+
+    update_path = tmp_path / "crates/update/src/lib.rs"
+    update_path.parent.mkdir(parents=True)
+    update_path.write_text(source, encoding="utf-8")
+    assert module.main([str(tmp_path)]) == 0
+    patched = update_path.read_text(encoding="utf-8")
+    assert patched == expected
+    assert module._PATCH_SENTINEL in patched
 
 
 @pytest.mark.parametrize("layout", _LAYOUT_NAMES)

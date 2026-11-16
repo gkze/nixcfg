@@ -148,6 +148,38 @@ _NATIVE_MANIFEST_CASES = [
         97,
         "2608.0.0",
     ),
+    (
+        "0.15.3",
+        "native-manifest-0.14.0.txt",
+        "16bdd9a3bf63ee848c3853baa0d0f50b367845edb3e6415d7f29ef851b5570bb",
+        201,
+        96,
+        "2601.0.0",
+    ),
+    (
+        "0.15.3",
+        "native-manifest-0.14.0-abseil-20260817.txt",
+        "2f64aeaf2727f47450f498540488b03845190b4e99487c01a26cea95ab721dec",
+        203,
+        97,
+        "2608.0.0",
+    ),
+    (
+        "0.15.4",
+        "native-manifest-0.14.0.txt",
+        "16bdd9a3bf63ee848c3853baa0d0f50b367845edb3e6415d7f29ef851b5570bb",
+        201,
+        96,
+        "2601.0.0",
+    ),
+    (
+        "0.15.4",
+        "native-manifest-0.14.0-abseil-20260817.txt",
+        "2f64aeaf2727f47450f498540488b03845190b4e99487c01a26cea95ab721dec",
+        203,
+        97,
+        "2608.0.0",
+    ),
 ]
 _MSGPACKR_EXTRACT_ADDON = (
     "node_modules/@msgpackr-extract/msgpackr-extract-darwin-arm64/node.napi.glibc.node"
@@ -2982,7 +3014,7 @@ def test_paseo_every_selected_native_manifest_is_reviewed() -> None:
     assert {name for _release, name in selected} == {
         path.name for path in _PACKAGE_DIR.glob("native-manifest*.txt")
     }
-    # 0.15.0 through 0.15.2 match the 0.14.0 buildOptions layout, so they are
+    # 0.15.0 through 0.15.4 match the 0.14.0 buildOptions layout, so they are
     # not new layout keys. Each still needs its own reviewed release because
     # sources.json records the release version and the updater will not
     # select a tag outside that set.
@@ -2992,6 +3024,8 @@ def test_paseo_every_selected_native_manifest_is_reviewed() -> None:
         "0.15.0",
         "0.15.1",
         "0.15.2",
+        "0.15.3",
+        "0.15.4",
     }
     module = _load_updater_module()
     assert module.reviewed_release_versions() == releases
@@ -3023,6 +3057,10 @@ def test_paseo_selects_only_reviewed_protobuf_abseil_inventories() -> None:
         "release0151Latest": "native-manifest-0.14.0-abseil-20260817.txt",
         "release0152Current": "native-manifest-0.14.0.txt",
         "release0152Latest": "native-manifest-0.14.0-abseil-20260817.txt",
+        "release0153Current": "native-manifest-0.14.0.txt",
+        "release0153Latest": "native-manifest-0.14.0-abseil-20260817.txt",
+        "release0154Current": "native-manifest-0.14.0.txt",
+        "release0154Latest": "native-manifest-0.14.0-abseil-20260817.txt",
         "unrelatedDependency": "native-manifest-abseil-20260817.txt",
         "unknownRelease": True,
         "missingRelease": True,
