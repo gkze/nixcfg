@@ -52,6 +52,7 @@ jobs:
                   "uv",
                   "run",
                   "pytest",
+                  "lib/tests/test_closure_gate.py",
                   "lib/tests/test_models.py",
                   "lib/tests/test_pr_update_targets.py",
                   "lib/tests/test_prepare_shard.py",

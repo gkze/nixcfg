@@ -130,7 +130,6 @@ let
         "devin"
         "docker-desktop"
         "energy"
-        "executor"
         "freelens"
         "gemini"
         "ghostty-tip"

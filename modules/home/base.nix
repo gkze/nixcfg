@@ -11,6 +11,8 @@ let
   inherit (lib) mkOption types;
 in
 {
+  imports = [ ./paths.nix ];
+
   options.nixcfg.flakePath = mkOption {
     type = types.str;
     default = "${config.xdg.configHome}/nixcfg";
