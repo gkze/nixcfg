@@ -19,6 +19,13 @@ jobs:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
+    # The Darwin leg shares the four update lanes. Linux legs stay per pull
+    # request. A missing priority label is routine. cancel-in-progress stays
+    # false so one lane does not drop another pull request's Darwin plan.
+    concurrency:
+      group: ${{ matrix.system == 'aarch64-darwin' && format('nixcfg-darwin-{0}', contains(github.event.pull_request.labels.*.name, 'main-fix') && 'main-fix' || contains(github.event.pull_request.labels.*.name, 'security') && 'security' || contains(github.event.pull_request.labels.*.name, 'heal') && 'heal' || 'routine') || format('pr-closure-gate-plan-{0}-{1}', github.event.pull_request.number, matrix.system) }}
+      cancel-in-progress: false
+      queue: max
     strategy:
       fail-fast: false
       matrix:
@@ -97,6 +104,10 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository &&
       needs.route.result == 'success' &&
       fromJSON(needs.route.outputs.changed || '{}')['aarch64-darwin'] > 0
+    concurrency:
+      group: ${{ format('nixcfg-darwin-{0}', contains(github.event.pull_request.labels.*.name, 'main-fix') && 'main-fix' || contains(github.event.pull_request.labels.*.name, 'security') && 'security' || contains(github.event.pull_request.labels.*.name, 'heal') && 'heal' || 'routine') }}
+      cancel-in-progress: false
+      queue: max
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15

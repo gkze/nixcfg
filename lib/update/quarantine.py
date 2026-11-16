@@ -6,11 +6,11 @@ one :class:`QuarantineEntry`, and seals the candidate. Runner, cache, and
 authentication failures are not package failures: they still fail the job.
 
 The rot clock is the open GitHub issue's original ``since``, not a fresh
-timestamp written on each candidate. Update runs weekly (Monday 07:17 UTC).
-``QUARANTINE_ROT_AFTER`` is seven days, compared with ``since + threshold <=
+timestamp written on each candidate. Update runs nightly (07:17 UTC).
+``QUARANTINE_ROT_AFTER`` is one day, compared with ``since + threshold <=
 now``, so the run that first quarantines a package still publishes and the
 next scheduled run fails before certify. That is one grace publication, then
-a hard stop, so a package cannot ride isolation for a second week.
+a hard stop, so a package cannot ride isolation into a second night.
 
 ``jobs.py`` must not import this module. It runs on the runner's Python 3.12
 before the packaged CLI exists. The publish job calls ``nixcfg ci update
@@ -35,7 +35,7 @@ from lib.update.failures import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
-QUARANTINE_ROT_AFTER = timedelta(days=7)
+QUARANTINE_ROT_AFTER = timedelta(days=1)
 EXCERPT_MAX = 2000
 PACKAGE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
 _TITLE = re.compile(r"^nixcfg quarantine: ([A-Za-z0-9][A-Za-z0-9._+-]*)$")
@@ -201,9 +201,9 @@ class QuarantineRotError(RuntimeError):
         rendered = ", ".join(
             f"{entry.package} since {entry.since.isoformat()}" for entry in entries
         )
-        super().__init__(
-            f"quarantine exceeded {QUARANTINE_ROT_AFTER.days} days: {rendered}"
-        )
+        days = QUARANTINE_ROT_AFTER.days
+        span = "1 day" if days == 1 else f"{days} days"
+        super().__init__(f"quarantine exceeded {span}: {rendered}")
 
 
 class QuarantineListTruncatedError(RuntimeError):

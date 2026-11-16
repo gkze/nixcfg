@@ -3,8 +3,9 @@
 The update subsystem refreshes source versions, hashes, and flake input refs.
 It prepares one disposable candidate, validates that candidate, and then
 promotes it atomically. This document is the overview. Read
-[ci.md](ci.md), [runtime.md](runtime.md), and [safety.md](safety.md) for the
-detail.
+[ci.md](ci.md), [pull-requests.md](pull-requests.md), [runtime.md](runtime.md),
+and [safety.md](safety.md) for the detail. The pull-request document is the
+per-package planner. This document remains the whole-repo pipeline.
 
 ## Pipeline
 

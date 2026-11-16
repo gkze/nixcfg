@@ -7,3 +7,11 @@ paths:
   .github/workflows/{update,update-agent-check}.yml:
     ignore:
       - '^unknown permission scope "copilot-requests"\.'
+  .github/workflows/update-self-heal.yml:
+    ignore:
+      - '^unknown permission scope "copilot-requests"\.'
+      # actionlint 1.7.12 rejects the documented concurrency.queue key.
+      - 'unexpected key "queue" for "concurrency" section'
+  .github/workflows/{update-pr,pr-closure-gate}.yml:
+    ignore:
+      - 'unexpected key "queue" for "concurrency" section'

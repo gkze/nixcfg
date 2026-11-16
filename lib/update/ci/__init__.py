@@ -6,6 +6,7 @@ from lib.cli import HELP_CONTEXT_SETTINGS, make_main
 from lib.update.ci.bun_lock import app as bun_lock_app
 from lib.update.ci.candidate import app as candidate_app
 from lib.update.ci.crate2nix import app as crate2nix_app
+from lib.update.ci.pull_requests import app as pull_requests_app
 
 app = typer.Typer(
     name="ci",
@@ -22,6 +23,7 @@ pipeline_app = typer.Typer(
 
 app.add_typer(pipeline_app, name="pipeline")
 app.add_typer(candidate_app, name="update")
+app.add_typer(pull_requests_app, name="pull-requests")
 
 pipeline_app.add_typer(crate2nix_app, name="crate2nix")
 pipeline_app.add_typer(bun_lock_app, name="bun-lock")

@@ -1,0 +1,438 @@
+---
+name: Update pull request
+# Hash one planned group with the Update prepare blueprint, then open or
+# update that group's pull request. A quarantined candidate is not pushed.
+on:
+  workflow_call:
+    inputs:
+      branch:
+        description: update/* branch this group owns
+        required: true
+        type: string
+      mode:
+        description: plan reads the planner artifact
+        default: plan
+        type: string
+      plan_artifact:
+        description: Planner artifact that contains plan.json
+        default: update-plan
+        type: string
+      from_default:
+        description: Build from the default branch plus the selected targets
+        default: false
+        type: boolean
+      targets:
+        description: Unused when mode is plan
+        default: ""
+        type: string
+      priority:
+        description: Unused when mode is plan
+        default: ""
+        type: string
+      touches_darwin:
+        description: Unused when mode is plan
+        default: false
+        type: boolean
+      title:
+        description: Unused when mode is plan
+        default: ""
+        type: string
+      existing_number:
+        description: Unused when mode is plan
+        default: "0"
+        type: string
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: update/* branch to rehash
+        required: true
+        type: string
+      mode:
+        description: rehash uses the dispatch fields
+        default: rehash
+        type: string
+      from_default:
+        description: Replace the branch tree with the default branch plus these targets
+        default: false
+        type: boolean
+      targets:
+        description: Space-separated updater targets
+        required: true
+        type: string
+      priority:
+        description: main-fix, security, heal, or routine
+        required: true
+        type: string
+      touches_darwin:
+        description: Whether this group changes a Darwin closure
+        required: true
+        type: boolean
+      title:
+        description: Pull request title
+        required: true
+        type: string
+      existing_number:
+        description: Open pull request number. 0 opens a pull request.
+        default: "0"
+        type: string
+permissions:
+  actions: read
+  contents: write
+  pull-requests: write
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      targets: ${{ steps.resolve.outputs.targets }}
+      priority: ${{ steps.resolve.outputs.priority }}
+      touches_darwin: ${{ steps.resolve.outputs.touches_darwin }}
+      title: ${{ steps.resolve.outputs.title }}
+      number: ${{ steps.resolve.outputs.number }}
+      action: ${{ steps.resolve.outputs.action }}
+      body_artifact: ${{ steps.resolve.outputs.body_artifact }}
+      artifact_namespace: ${{ steps.resolve.outputs.artifact_namespace }}
+      from_default: ${{ steps.resolve.outputs.from_default }}
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        if: inputs.mode == 'plan'
+        with:
+          name: ${{ inputs.plan_artifact }}
+          github-token: ${{ github.token }}
+          run-id: ${{ github.run_id }}
+          path: plan
+      - name: Read the planned group
+        id: resolve
+        env:
+          MODE: ${{ inputs.mode }}
+          FROM_DEFAULT: ${{ inputs.from_default }}
+          BRANCH: ${{ inputs.branch }}
+          TARGETS: ${{ inputs.targets || '' }}
+          PRIORITY: ${{ inputs.priority || '' }}
+          TOUCHES: ${{ inputs.touches_darwin || '' }}
+          TITLE: ${{ inputs.title || '' }}
+          NUMBER: ${{ inputs.existing_number || '0' }}
+          GH_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+        shell: python
+        run: |-
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          branch = os.environ["BRANCH"]
+          namespace = branch.replace("/", "-")
+          mode = os.environ["MODE"]
+          number = os.environ["NUMBER"] or "0"
+          if mode == "rehash":
+              fields = {
+                  "targets": os.environ["TARGETS"],
+                  "priority": os.environ["PRIORITY"],
+                  "touches_darwin": "true" if os.environ["TOUCHES"] == "true" else "false",
+                  "title": os.environ["TITLE"],
+                  "number": number,
+                  "action": "update" if number not in {"", "0"} else "open",
+              }
+              if number not in {"", "0"}:
+                  viewed = subprocess.check_output(
+                      [
+                          "gh", "pr", "view", number,
+                          "--repo", os.environ["GITHUB_REPOSITORY"], "--json", "body",
+                      ],
+                      text=True,
+                  )
+                  body_text = json.loads(viewed).get("body") or ""
+              else:
+                  body_text = os.environ["TITLE"] + "\n"
+              Path("body.md").write_text(body_text)
+          elif mode == "plan":
+              plan = json.loads((Path("plan") / "plan.json").read_text())
+              selected = next(item for item in plan["updates"] if item["branch"] == branch)
+              number = str(selected.get("existingNumber") or 0)
+              fields = {
+                  "targets": " ".join(selected["targets"]),
+                  "priority": selected["priority"],
+                  "touches_darwin": "true" if selected["touchesDarwin"] else "false",
+                  "title": selected["title"],
+                  "number": number,
+                  "action": selected["action"],
+              }
+              Path("body.md").write_text(
+                  "<!-- nixcfg-update-plan " + selected["marker"] + " -->\n"
+              )
+          else:
+              raise SystemExit(f"unknown update invocation mode: {mode}")
+          fields["artifact_namespace"] = namespace
+          fields["from_default"] = (
+              "true" if os.environ["FROM_DEFAULT"] == "true" else "false"
+          )
+          fields["body_artifact"] = "update-pr-body-" + namespace
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as handle:
+              for key, value in fields.items():
+                  handle.write(f"{key}={value}\n")
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ steps.resolve.outputs.body_artifact }}
+          path: body.md
+          retention-days: 14
+  sync:
+    needs: resolve
+    if: >-
+      needs.resolve.outputs.action == 'update' &&
+      needs.resolve.outputs.from_default != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.branch }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Merge the default branch without rewriting history
+        env:
+          GH_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          BASE: ${{ github.event.repository.default_branch }}
+        shell: python
+        run: |-
+          import os
+          import subprocess
+
+          base = os.environ["BASE"]
+          subprocess.run(["git", "fetch", "origin", base], check=True)
+          subprocess.run(["git", "merge", "--no-edit", f"origin/{base}"], check=True)
+          subprocess.run(["gh", "auth", "setup-git"], check=True)
+          subprocess.run(["git", "push", "origin", "HEAD"], check=True)
+  prepare-pins:
+    needs: [resolve, sync]
+    if: |-
+      always() && !cancelled() &&
+      needs.resolve.outputs.action != 'skip' &&
+      (needs.sync.result == 'success' || needs.sync.result == 'skipped')
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: ubuntu-24.04
+      system: x86_64-linux
+      stage: prepare-pins
+      targets: ${{ needs.resolve.outputs.targets }}
+      artifact_namespace: ${{ needs.resolve.outputs.artifact_namespace }}
+      checkout_ref: ${{ needs.resolve.outputs.from_default == 'true' && github.event.repository.default_branch || (needs.resolve.outputs.action == 'update' && inputs.branch || '') }}
+    secrets: inherit
+  prepare-darwin:
+    needs: [resolve, prepare-pins]
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-pins.result == 'success' &&
+      needs.resolve.outputs.touches_darwin == 'true'
+    concurrency:
+      group: nixcfg-darwin-${{ needs.resolve.outputs.priority }}
+      cancel-in-progress: false
+      queue: max
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: prepare
+      previous: prepare-pins
+      artifact_namespace: ${{ needs.resolve.outputs.artifact_namespace }}
+      targets: ${{ needs.resolve.outputs.targets }}
+      checkout_ref: ${{ needs.resolve.outputs.from_default == 'true' && github.event.repository.default_branch || (needs.resolve.outputs.action == 'update' && inputs.branch || '') }}
+    secrets: inherit
+  prepare-arm:
+    needs: [resolve, prepare-pins]
+    if: always() && !cancelled() && needs.prepare-pins.result == 'success'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: ubuntu-24.04-arm
+      system: aarch64-linux
+      stage: prepare
+      previous: prepare-pins
+      artifact_namespace: ${{ needs.resolve.outputs.artifact_namespace }}
+      targets: ${{ needs.resolve.outputs.targets }}
+      checkout_ref: ${{ needs.resolve.outputs.from_default == 'true' && github.event.repository.default_branch || (needs.resolve.outputs.action == 'update' && inputs.branch || '') }}
+    secrets: inherit
+  prepare-x86:
+    needs: [resolve, prepare-pins]
+    if: always() && !cancelled() && needs.prepare-pins.result == 'success'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: ubuntu-24.04
+      system: x86_64-linux
+      stage: prepare
+      previous: prepare-pins
+      artifact_namespace: ${{ needs.resolve.outputs.artifact_namespace }}
+      targets: ${{ needs.resolve.outputs.targets }}
+      checkout_ref: ${{ needs.resolve.outputs.from_default == 'true' && github.event.repository.default_branch || (needs.resolve.outputs.action == 'update' && inputs.branch || '') }}
+    secrets: inherit
+  prepare-merge:
+    needs: [resolve, prepare-darwin, prepare-arm, prepare-x86]
+    if: |-
+      always() && !cancelled() &&
+      (needs.prepare-darwin.result == 'success' || needs.prepare-darwin.result == 'skipped') &&
+      needs.prepare-arm.result == 'success' &&
+      needs.prepare-x86.result == 'success'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: ubuntu-24.04
+      system: x86_64-linux
+      stage: merge-candidates
+      previous: ${{ needs.resolve.outputs.touches_darwin == 'true' && 'prepare-aarch64-darwin' || 'prepare-aarch64-linux' }}
+      previous_extra: ${{ needs.resolve.outputs.touches_darwin == 'true' && 'prepare-aarch64-linux' || 'prepare-x86_64-linux' }}
+      previous_third: ${{ needs.resolve.outputs.touches_darwin == 'true' && 'prepare-x86_64-linux' || '' }}
+      artifact_namespace: ${{ needs.resolve.outputs.artifact_namespace }}
+      checkout_ref: ${{ needs.resolve.outputs.from_default == 'true' && github.event.repository.default_branch || (needs.resolve.outputs.action == 'update' && inputs.branch || '') }}
+    secrets: inherit
+  publish:
+    needs: [resolve, prepare-merge]
+    if: needs.prepare-merge.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ (needs.resolve.outputs.from_default == 'true' || needs.resolve.outputs.action == 'update') && inputs.branch || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: ./.github/actions/update-runtime
+        id: runtime
+        with:
+          github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: prepare-x86_64-linux-${{ needs.resolve.outputs.artifact_namespace }}
+          path: candidate
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: ${{ needs.resolve.outputs.body_artifact }}
+          path: request
+      - uses: crazy-max/ghaction-import-gpg@e89d40939c28e39f97cf32126055eeae86ba74ec # v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+          git_user_signingkey: true
+          git_commit_gpgsign: true
+      - name: Publish the prepared candidate on this branch
+        env:
+          NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
+          GH_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          BRANCH: ${{ inputs.branch }}
+          TITLE: ${{ needs.resolve.outputs.title }}
+          NUMBER: ${{ needs.resolve.outputs.number }}
+          ACTION: ${{ needs.resolve.outputs.action }}
+          PRIORITY: ${{ needs.resolve.outputs.priority }}
+          BASE: ${{ github.event.repository.default_branch }}
+          FROM_DEFAULT: ${{ needs.resolve.outputs.from_default }}
+        shell: python
+        run: |-
+          import json
+          import os
+          import pathlib
+          import subprocess
+
+          devshell = os.environ["NIXCFG_DEVSHELL"]
+          decision = subprocess.check_output(
+              [
+                  "nix", "develop", devshell, "--command",
+                  "nixcfg", "ci", "pull-requests", "accept-candidate",
+                  "candidate/candidate.json", "--patch-out", "update.patch",
+              ],
+              text=True,
+          ).strip()
+          from_default = os.environ["FROM_DEFAULT"] == "true"
+          if from_default:
+              base = os.environ["BASE"]
+              subprocess.run(["git", "fetch", "origin", base], check=True)
+              # The probe tree is the default branch plus the selected patch.
+              # read-tree drops files the previous batch commit added.
+              subprocess.run(
+                  ["git", "read-tree", "--reset", "-u", f"origin/{base}"], check=True
+              )
+          if decision == "noop" and not from_default:
+              raise SystemExit(0)
+          if decision == "publish":
+              subprocess.run(
+                  ["git", "apply", "--index", "--binary", "update.patch"], check=True
+              )
+          dirty = subprocess.run(["git", "diff", "--cached", "--quiet"], check=False)
+          if dirty.returncode:
+              subprocess.run(["git", "commit", "-S", "-m", os.environ["TITLE"]], check=True)
+          subprocess.run(["gh", "auth", "setup-git"], check=True)
+          branch = os.environ["BRANCH"]
+          if os.environ["ACTION"] == "open":
+              subprocess.run(["git", "switch", "-c", branch], check=True)
+          subprocess.run(["git", "push", "origin", f"HEAD:{branch}"], check=True)
+          repo = os.environ["GITHUB_REPOSITORY"]
+          number = os.environ["NUMBER"]
+          request = pathlib.Path("request")
+          request.mkdir(exist_ok=True)
+          body = request / "body.md"
+          if not body.is_file() and number not in {"", "0"}:
+              viewed = subprocess.check_output(
+                  ["gh", "pr", "view", number, "--repo", repo, "--json", "body"],
+                  text=True,
+              )
+              body.write_text(json.loads(viewed).get("body") or "")
+          if not body.is_file():
+              body.write_text(os.environ["TITLE"] + "\n")
+          if number == "0":
+              url = subprocess.check_output(
+                  [
+                      "gh", "pr", "create", "--repo", repo, "--base", os.environ["BASE"],
+                      "--head", branch, "--title", os.environ["TITLE"],
+                      "--body-file", str(body),
+                  ],
+                  text=True,
+              ).strip()
+              number = url.rsplit("/", 1)[-1]
+          else:
+              subprocess.run(
+                  [
+                      "gh", "pr", "edit", number, "--repo", repo,
+                      "--title", os.environ["TITLE"], "--body-file", str(body),
+                  ],
+                  check=True,
+              )
+          priority = os.environ["PRIORITY"]
+          for stale in ("main-fix", "security", "heal", "routine"):
+              if stale == priority:
+                  continue
+              subprocess.run(
+                  ["gh", "pr", "edit", number, "--repo", repo, "--remove-label", stale],
+                  check=False,
+              )
+          subprocess.run(
+              [
+                  "gh", "pr", "edit", number, "--repo", repo,
+                  "--add-label", f"{priority},nixcfg-update",
+              ],
+              check=True,
+          )
+      - name: Clear the heal latch
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          NUMBER: ${{ needs.resolve.outputs.number }}
+        shell: python
+        run: |-
+          import os
+          import subprocess
+
+          number = os.environ["NUMBER"]
+          if number == "0":
+              raise SystemExit(0)
+          subprocess.run(
+              [
+                  "gh", "pr", "edit", number, "--repo", os.environ["GITHUB_REPOSITORY"],
+                  "--remove-label", "healing",
+              ],
+              check=False,
+          )
+      - name: Flush Cachix daemon
+        if: always()
+        env:
+          NIXCFG_CI_STAGE: flush-cachix
+          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        shell: python
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")

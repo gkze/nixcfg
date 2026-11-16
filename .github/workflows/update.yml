@@ -37,7 +37,7 @@ on:
         type: string
         default: ""
   schedule:
-    - cron: "17 7 * * 1"
+    - cron: "17 7 * * *"
   # workflow_dispatch is unavailable to the Cursor GitHub App token
   # (HTTP 403, missing actions:write). Touching .github/update-kick on
   # main queues one Update run. Prefer
