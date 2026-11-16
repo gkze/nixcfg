@@ -568,16 +568,13 @@ def _inventory_from_changed(
 
 
 def realize_changed(changed: Sequence[ChangedOutput], runner: _Runner) -> RealizeResult:
-    """Build only outputs missing from gkze, then push those outputs.
+    """Build the selected installables and push paths gkze does not have.
 
-    The plan drv is import-from-derivation disabled, so it can differ from
-    the drv ``nix build`` realizes. Output paths and the build receipt come
-    from the instantiated drv. Paths already proven present are not pushed.
-    A push that does not finish raises.
+    ``nix build --print-out-paths`` is the receipt. Derivation show of a
+    Darwin system names a different output than that build realizes, so it
+    cannot choose the push set. A path already on gkze is substituted and
+    is not pushed again. A push that does not finish raises.
     """
-    pending: list[ChangedOutput] = []
-    pending_outputs: dict[str, str] = {}
-    already: set[str] = set()
     for item in changed:
         instantiated = runner.instantiate(item.attr)
         if instantiated != item.drv:
@@ -586,32 +583,27 @@ def realize_changed(changed: Sequence[ChangedOutput], runner: _Runner) -> Realiz
                 f"plan_drv={item.drv} build_drv={instantiated}\n"
             )
             sys.stdout.flush()
-        outputs = runner.outputs_of(instantiated)
-        if not outputs:
-            msg = f"{item.attr} declares no outputs"
-            raise GateError(msg)
-        present = [path for path in outputs if runner.presence(path) == "present"]
-        already.update(present)
-        if len(present) != len(outputs):
-            pending.append(item)
-            for path in outputs:
-                pending_outputs[path] = instantiated
-    pushed: tuple[str, ...] = ()
-    if pending:
-        built = runner.build(tuple(item.installable() for item in pending))
-        if set(built) != set(pending_outputs):
-            msg = (
-                "nix build returned outputs that are not the instantiated drvs: "
-                f"built={list(built)} expected={sorted(pending_outputs)}"
-            )
-            raise GateError(msg)
-        to_push = tuple(path for path in built if path not in already)
-        if to_push:
-            runner.push(to_push)
-            pushed = to_push
+    built = runner.build(tuple(item.installable() for item in changed))
+    if len(built) < len(changed):
+        msg = f"nix build returned {len(built)} paths for {len(changed)} installables"
+        raise GateError(msg)
+    cached: list[str] = []
+    to_push: list[str] = []
+    seen: set[str] = set()
+    for path in built:
+        if path in seen:
+            continue
+        seen.add(path)
+        if runner.presence(path) == "present":
+            cached.append(path)
+        else:
+            to_push.append(path)
+    pushed = tuple(to_push)
+    if pushed:
+        runner.push(pushed)
     return RealizeResult(
         pushed=pushed,
-        cached=tuple(sorted(already - set(pushed))),
+        cached=tuple(sorted(cached)),
         installables=tuple(item.installable() for item in changed),
     )
 

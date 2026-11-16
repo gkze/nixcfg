@@ -338,14 +338,14 @@ def test_narinfo_queries_gkze_by_digest() -> None:
 
 
 def test_realize_skips_outputs_already_on_gkze() -> None:
-    """A fully cached installable is not built and is not pushed."""
+    """A substituted path is not pushed again."""
     item = _changed("package", "tool", _drv("tool"))
     runner = _Runner()
     runner.drvs[item.attr] = item.drv
-    runner.outputs[item.drv] = (_out("tool"),)
     runner.present.add(_out("tool"))
+    runner.build_result = (_out("tool"),)
     result = gate.realize_changed((item,), runner)
-    assert runner.built is None
+    assert runner.built == (item.installable(),)
     assert runner.pushed is None
     assert result.pushed == ()
     assert result.cached == (_out("tool"),)
@@ -353,13 +353,12 @@ def test_realize_skips_outputs_already_on_gkze() -> None:
 
 
 def test_realize_builds_a_missing_output_and_does_not_repush_a_hit() -> None:
-    """One absent output builds the installable and pushes only that output."""
+    """The build receipt is pushed, except paths already on gkze."""
     item = _changed("root", "root-closure-darwin-argus", _drv("root"))
     present = _out("present")
     missing = _out("missing")
     runner = _Runner()
     runner.drvs[item.attr] = item.drv
-    runner.outputs[item.drv] = (present, missing)
     runner.present.add(present)
     runner.build_result = (present, missing)
     result = gate.realize_changed((item,), runner)
@@ -370,11 +369,10 @@ def test_realize_builds_a_missing_output_and_does_not_repush_a_hit() -> None:
 
 
 def test_unknown_narinfo_is_not_a_cache_hit() -> None:
-    """A 403 or a timeout must not skip the build."""
+    """A 403 or a timeout must not skip the push."""
     item = _changed("package", "tool", _drv("tool"))
     runner = _Runner()
     runner.drvs[item.attr] = item.drv
-    runner.outputs[item.drv] = (_out("tool"),)
     runner.presence_value = "unknown"
     runner.build_result = (_out("tool"),)
     result = gate.realize_changed((item,), runner)
@@ -393,7 +391,6 @@ def test_realize_builds_the_instantiated_drv_when_ifd_changes_it() -> None:
     output = _out("system")
     runner = _Runner()
     runner.drvs[item.attr] = built_drv
-    runner.outputs[built_drv] = (output,)
     runner.build_result = (output,)
     result = gate.realize_changed((item,), runner)
     assert runner.built == (item.installable(),)
@@ -401,16 +398,12 @@ def test_realize_builds_the_instantiated_drv_when_ifd_changes_it() -> None:
 
 
 def test_realize_fails_closed_on_a_bad_build() -> None:
-    """The receipt must be the instantiated drv's outputs."""
+    """A build that prints nothing, or a failed push, is red."""
     item = _changed("package", "tool", _drv("tool"))
     runner = _Runner()
     runner.drvs[item.attr] = item.drv
-    runner.outputs[item.drv] = ()
-    with pytest.raises(gate.GateError, match="no outputs"):
-        gate.realize_changed((item,), runner)
-    runner.outputs[item.drv] = (_out("tool"),)
-    runner.build_result = (_out("other"),)
-    with pytest.raises(gate.GateError, match="instantiated drvs"):
+    runner.build_result = ()
+    with pytest.raises(gate.GateError, match="returned 0 paths"):
         gate.realize_changed((item,), runner)
     assert runner.pushed is None
     runner.build_result = (_out("tool"),)

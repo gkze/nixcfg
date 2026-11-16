@@ -820,10 +820,9 @@ The plan evaluates drv paths at the merge base and twice at the PR head,
 with import-from-derivation disabled. It does not build those outputs. A
 drv that changes between the two head evals fails the plan: that output is
 not a function of the tree, so a diff cannot decide whether the pull
-request changed it. Realization then instantiates each selected attribute
-with import-from-derivation left on. A Darwin system drv differs from the
-plan drv; the gate builds that instantiated drv and checks the build
-receipt against its outputs. A workflow
+request changed it. Realization builds each selected attribute with
+import-from-derivation left on, and the paths that build prints are the
+ones that must be on gkze. A workflow
 or Python change that leaves every drv unchanged produces an empty plan per
 system and the realize jobs stay skipped. aarch64-darwin is always planned.
 An empty Darwin diff is not a waiver, and a missing Darwin plan fails the
@@ -834,9 +833,11 @@ Realize calls the Update reusable workflow (`update-native.yml`) with stage
 build flags are the validation build (`nix build --no-update-lock-file
 --no-link --keep-going --fallback`) plus `--print-out-paths`. The build
 budget is the Darwin shard budget, 18000 seconds, inside the 360-minute job.
-Outputs already proven by a gkze narinfo are not built and not pushed. A
-missing or unknown narinfo is built. `cachix push` must exit 0 and the
-narinfo must then be 200, or the job fails. The flush step still runs and
+The receipt is `--print-out-paths`. Derivation show of a Darwin system
+names a different output than the build realizes, so it does not choose
+what gets pushed. `nix build` substitutes a path already on gkze. The gate
+pushes only printed paths whose gkze narinfo is not 200. `cachix push`
+must exit 0 and the narinfo must then be 200, or the job fails. The flush step still runs and
 fails closed. The aggregating step writes the pushed and already-cached
 store paths into the job summary.
 
