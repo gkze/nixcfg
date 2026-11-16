@@ -2971,8 +2971,9 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
         for step in native["jobs"]["native"]["steps"]
         if str(step.get("uses", "")).startswith("actions/checkout@")
     )
+    assert native["on"]["workflow_call"]["inputs"]["checkout_ref"]["default"] == ""
     assert checkout["with"]["ref"] == (
-        "${{ github.event.inputs.repair_commit || github.sha }}"
+        "${{ inputs.checkout_ref || github.event.inputs.repair_commit || github.sha }}"
     )
     assert step["env"]["NIXCFG_MERGE_EXTRA"].startswith("${{ inputs.previous_third")
     downloads = [
