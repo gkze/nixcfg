@@ -745,7 +745,12 @@ def test_open_pr_and_check_parsers() -> None:
     assert ids == (42,)
     assert gate_failure_job_ids({"check_runs": "nope"}) == ()
     unlabeled = open_prs_from_payload([
-        {"number": 3, "headRefName": "update/solo", "labels": "nixcfg-update", "body": ""}
+        {
+            "number": 3,
+            "headRefName": "update/solo",
+            "labels": "nixcfg-update",
+            "body": "",
+        }
     ])
     assert unlabeled[0].labels == frozenset()
 
@@ -776,9 +781,12 @@ def test_failure_body_records_the_probe_and_the_split() -> None:
         priority=UpdatePriority.ROUTINE,
         members=("bar",),
     )
-    assert render_failure_body(
-        FailureResponse("ignore", None, (), ()), run_url="https://example.test"
-    ) == ""
+    assert (
+        render_failure_body(
+            FailureResponse("ignore", None, (), ()), run_url="https://example.test"
+        )
+        == ""
+    )
     body = render_failure_body(
         FailureResponse("bisect", marker, ("bar",), ("solo",)),
         run_url="https://example.test",

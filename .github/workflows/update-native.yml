@@ -13,7 +13,7 @@ on:
         required: true
         type: string
       checkout_ref:
-        description: Checkout this commit instead of the caller SHA
+        description: Checkout this ref instead of the caller SHA. Empty keeps the caller SHA.
         default: ""
         type: string
       previous:
@@ -79,10 +79,6 @@ on:
         description: Fresh-VM rerun of a device-faulted warmup or root cell; a second fault fails
         default: false
         type: boolean
-      checkout_ref:
-        description: Checkout this ref instead of the caller SHA. Empty keeps the caller SHA.
-        default: ""
-        type: string
     outputs:
       darwin_closure_shards:
         description: Generated always-run Darwin closure matrix
