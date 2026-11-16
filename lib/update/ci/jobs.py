@@ -125,9 +125,16 @@ _LINUX_BUILDER_OUTPUT = "nixos-disk-image"
 # "Pin storage limit exceeded" while ``linux-builder-aarch64-linux`` was
 # revision 25 kept for 14 days. A stable name with one revision is what
 # still protects the next substitute without filling the pin quota.
-# 43667571490: DELETE of that pin returned 403. The route and Bearer
-# header match Cachix's API; a Write token can push and create pins,
-# and pin deletion is an Admin operation. Pruning is housekeeping.
+# 43667571490 and 43738140207: DELETE of that pin returned 403 with the
+# same body an absent token gets ("You're not authorized to access binary
+# cache gkze."). ``cachix pin`` in that job sent Authorization as the raw
+# token (the servant log value has no scheme prefix) and the POST was
+# authorized (402). Prefixing ``Bearer `` makes Cachix ignore the
+# credential. Listing pins does not prove the token: GET is public. A 403
+# is an authorization refusal. Pruning is housekeeping. A path the latest
+# revision already retains is not pinned again: ``--keep-revisions`` trims
+# only after Cachix accepts a new revision, and that POST 402s while the
+# account is over the pin quota.
 _CACHIX_PIN_KEEP_REVISIONS = 1
 _CACHIX_PIN_DELETE_FORBIDDEN = 403
 _CACHIX_PIN_API = "https://cachix.org/api/v1/cache/gkze/pin"
@@ -3236,7 +3243,9 @@ def _cachix_pin_api(
         "User-Agent": _NARINFO_USER_AGENT,
     }
     if token is not None:
-        headers["Authorization"] = f"Bearer {token}"
+        # cachix 1.11.1's pin POST puts the token in Authorization with no
+        # scheme. ``Bearer <token>`` is a different credential and 403s.
+        headers["Authorization"] = token
     request = urllib.request.Request(  # noqa: S310 -- fixed https://cachix.org pin API
         url,
         method=method,
@@ -3292,6 +3301,25 @@ def _pin_keeps_one_revision(pin: dict[str, object]) -> bool:
     )
 
 
+def _pin_latest_store_path(pin: dict[str, object] | None) -> str | None:
+    """Return the latest revision's store path, when the pin records one."""
+    if pin is None:
+        return None
+    revision = pin.get("lastRevision")
+    if not isinstance(revision, dict):
+        return None
+    path = revision.get("storePath")
+    if not isinstance(path, str) or not path.startswith("/nix/store/"):
+        return None
+    return path.rstrip("/")
+
+
+def _pin_retains_path(pin: dict[str, object] | None, path: str) -> bool:
+    """Return whether *pin*'s latest revision is already *path*."""
+    latest = _pin_latest_store_path(pin)
+    return latest is not None and latest == path.rstrip("/")
+
+
 def _cachix_auth_token() -> str:
     """Return the flush step's Cachix token without putting it in an error."""
     token = os.environ.get("CACHIX_AUTH_TOKEN", "").strip()
@@ -3304,10 +3332,12 @@ def _cachix_auth_token() -> str:
 def _delete_cachix_pin(name: str, budget: _FlushBudget) -> int:
     """Delete one known pin.
 
-    404 means a concurrent shard already removed it. 403 means this
-    token can write the cache but cannot prune pins. Callers log that
-    and continue. A missing token and every other status still fail
-    closed, as do push and pin creation.
+    404 means a concurrent shard already removed it. 403 means Cachix
+    refused authorization. An absent token gets that same status, so
+    callers log the refusal and do not treat it as proof of an Admin
+    role. A missing token and every other status still fail closed, as
+    do push and a pin of a path the latest revision does not already
+    retain.
     """
     if _DELETABLE_PIN_RE.fullmatch(name) is None:
         msg = f"refusing to delete Cachix pin {name!r}"
@@ -3327,10 +3357,14 @@ def _delete_cachix_pin(name: str, budget: _FlushBudget) -> int:
 def _record_pin_delete(log: TextIO, kind: str, name: str, status: int) -> None:
     """Log a pin delete. A 403 is pruning and does not fail the flush."""
     if status == _CACHIX_PIN_DELETE_FORBIDDEN:
+        # Length only. The response body stays out of the log, and the
+        # token value is never written. GET /pin is public, so a 200
+        # there does not identify this credential.
+        token_len = len(os.environ.get("CACHIX_AUTH_TOKEN", "").strip())
         _write_diagnostic(
             log,
             f"warning: could not delete Cachix pin {name} status={status}; "
-            "pruning needs a Cachix Admin token",
+            f"authorization refused token_len={token_len}",
         )
         return
     _write_diagnostic(log, f"deleted {kind} Cachix pin {name} status={status}")
@@ -3349,14 +3383,15 @@ def _delete_legacy_darwin_pins(log: TextIO, budget: _FlushBudget) -> None:
 
 def _collapse_linux_builder_history(
     name: str, log: TextIO, budget: _FlushBudget
-) -> None:
-    """Drop retained linux-builder revisions before pinning the latest image.
+) -> dict[str, object] | None:
+    """Drop a day-based linux-builder pin. Return the pin that remains.
 
     ``cachix pin --keep-revisions 1`` trims history only after Cachix accepts
     the new revision. 43613142360 was already over the pin quota, so a pin
     that adds a revision is rejected before that trim. Delete the day-based
-    pin first; this step then pins the one image it just pushed. A 403 on
-    that delete is logged and does not skip the pin.
+    pin first when this token is allowed to. None means the pin is gone and
+    the caller must pin the image it just pushed. The returned pin is still
+    on the cache: it already keeps one revision, or deletion was refused.
     """
     if _LINUX_BUILDER_PIN_RE.fullmatch(name) is None:
         msg = f"refusing to collapse Cachix pin {name!r}"
@@ -3366,8 +3401,12 @@ def _collapse_linux_builder_history(
         None,
     )
     if current is None or _pin_keeps_one_revision(current):
-        return
-    _record_pin_delete(log, "historical", name, _delete_cachix_pin(name, budget))
+        return current
+    status = _delete_cachix_pin(name, budget)
+    _record_pin_delete(log, "historical", name, status)
+    if status == _CACHIX_PIN_DELETE_FORBIDDEN:
+        return current
+    return None
 
 
 def _run_cachix_pin(
@@ -3426,6 +3465,14 @@ def _cachix_pin(name: str, path: str, log: TextIO, budget: _FlushBudget) -> None
         raise _pin_failure(name, pin)
 
 
+def _skip_current_pin(name: str, path: str, log: TextIO) -> None:
+    """Record that *path* is already the latest revision of *name*."""
+    _write_diagnostic(
+        log,
+        f"Cachix pin {name} already retains {path}; not adding a revision",
+    )
+
+
 def _pin_linux_builder_paths(
     paths: tuple[str, ...], log: TextIO, budget: _FlushBudget
 ) -> None:
@@ -3435,6 +3482,10 @@ def _pin_linux_builder_paths(
     did not re-upload. Concurrent Darwin packages then LRU-evicted it
     before closures ``--max-jobs 0`` at 08:57. One revision is enough;
     day-based history of the image is what filled the pin quota.
+    43738140207 pushed ``h1af85b11...-nixos-disk-image``, which was already
+    revision 25. Another ``cachix pin`` adds a revision before
+    ``--keep-revisions 1`` can trim, and that POST returned 402. Keep the
+    existing revision instead of failing the push.
     """
     images = [path for path in paths if _LINUX_BUILDER_OUTPUT in path]
     if not images:
@@ -3444,7 +3495,10 @@ def _pin_linux_builder_paths(
         _write_diagnostic(log, msg)
         raise CachixFlushError(msg)
     name = _linux_builder_pin_name()
-    _collapse_linux_builder_history(name, log, budget)
+    remaining = _collapse_linux_builder_history(name, log, budget)
+    if _pin_retains_path(remaining, images[0]):
+        _skip_current_pin(name, images[0], log)
+        return
     _cachix_pin(name, images[0], log, budget)
 
 
@@ -3462,7 +3516,11 @@ def _pin_realized_darwin_roots(
     if not names:
         return
     _delete_legacy_darwin_pins(log, budget)
+    catalog = {str(pin.get("name")): pin for pin in _list_cachix_pins(budget)}
     for path, name in names.items():
+        if _pin_retains_path(catalog.get(name), path):
+            _skip_current_pin(name, path, log)
+            continue
         _cachix_pin(name, path, log, budget)
 
 
@@ -3638,8 +3696,10 @@ def flush_cachix() -> None:
       linux-builder history are deleted first: 43613142360 pinned
       ``darwin-system-qaj6kyaf`` into a 402 "Pin storage limit exceeded"
       while ``linux-builder-aarch64-linux`` was revision 25.
-      43667571490 then 403'd that delete. A Write token cannot prune
-      pins; the 403 is a warning and the push and pin still fail closed.
+      43667571490 and 43738140207 then 403'd that delete. The pin POST
+      in that job authorized with the raw token and returned 402. A path
+      the latest revision already retains is not pinned again. A pin
+      of any other path still fails the flush, and so does the push.
     - Failed warmup (39301503361 cascade slot 3): the action post hook
       then logs ``Cachix Daemon not started. Skipping push``. Flush still
       ``cachix push``es leftovers and ``realized-root-paths.json`` so the

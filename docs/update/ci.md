@@ -176,7 +176,7 @@ A package quarantined on one platform is held on every platform. Each
 candidate records its hold: the files of its failed and withheld packages,
 the inputs whose lock nodes it rolled back, and both flake files only when a
 ref declaration cannot be restored on its own. A ref declared as an attribute
-set is restored in place, in ``flake.nix`` and ``flake.lock``, including the
+set is restored in place, in `flake.nix` and `flake.lock`, including the
 lock nodes that flake reaches. A dependency node another pin still uses is
 copied aside, so other pins and the crate2nix artifacts generated for them
 stay together. `prepare-darwin-merge`
@@ -317,12 +317,18 @@ is deleted before that image is pinned. If the pin then returns 402, flush
 deletes the hash-named pins and retries that pin once. Run 43613142360
 returned 402 "Pin storage limit exceeded" on `darwin-system-qaj6kyaf` while
 `linux-builder-aarch64-linux` was revision 25 under `--keep-days 14`.
-`DELETE /api/v1/cache/gkze/pin/{name}` with the flush's Bearer token is the
-documented pin-delete call. Run 43667571490 got 403 on
-`linux-builder-aarch64-linux`: a Write token can push and create pins, and
-Cachix reserves pin deletion for an Admin token. That 403 is a warning.
-Flush still pins the path it just pushed. `cachix push` and `cachix pin`
-fail the job, including a later 402. After a successful daemon stop, flush
+`DELETE /api/v1/cache/gkze/pin/{name}` sends the flush token as the
+`Authorization` value, the same header `cachix pin` uses. A `Bearer `
+prefix is not that header. Runs 43667571490 and 43738140207 got 403 on
+`linux-builder-aarch64-linux`. That status is the same body an absent token
+gets, and `GET /api/v1/cache/gkze/pin` is public, so a successful list does
+not identify the credential. The pin POST in 43738140207 was authorized and
+returned 402: the image it had just pushed was already revision 25.
+`--keep-revisions 1` trims only after Cachix accepts a new revision, so flush
+does not pin a path the latest revision already retains. A 403 stays a
+warning. `cachix push` still fails the job, and so does `cachix pin` of a
+path that pin does not already retain, including a later 402. After a
+successful daemon stop, flush
 clears `CACHIX_DAEMON_DIR` even when the later push or pin fails, so the
 action post hook does not stop the closed socket again. The flush exception
 still fails the job.
@@ -503,8 +509,7 @@ decides a job's result. Read the failed step instead.
 - cachix-action logs "Cachix Daemon not started. Skipping push" after
   `flush-cachix` has stopped the daemon and cleared `CACHIX_DAEMON_DIR`. The
   flush output above it records what was pushed. If that clear is skipped
-  after a successful stop, the post hook instead fails with `cachix failed
-  exit code 1` on the closed socket. That line is the hook, not the flush
+  after a successful stop, the post hook instead fails with `cachix failed exit code 1` on the closed socket. That line is the hook, not the flush
   error; the flush step's stderr is the cause.
 
 ### Hosted block-device faults
@@ -808,6 +813,47 @@ existing three-system merge. Plan-shards stays one `ubuntu-24.04` job because
 a 4-wide graph eval SIGTERM'd the 16 GiB runner. The public macOS pool and
 the `gkze` cache size stay the other caps. Paid `macos-15-xlarge` is out of
 scope.
+
+## Pull request closure gate
+
+`PR closure gate` (`.github/workflows/pr-closure-gate.yml`) runs on every
+same-repo pull request, including a new push to the PR head. The check name
+is `closure-gate`. It is green only when every package output and
+`checks.<system>.root-closure-*` drv that differs from the merge base was
+realized on that system's native builder and the realized store paths are on
+`gkze.cachix.org`.
+
+The plan evaluates drv paths at the merge base and twice at the PR head,
+with import-from-derivation disabled. It does not build those outputs. A
+drv that changes between the two head evals fails the plan: that output is
+not a function of the tree, so a diff cannot decide whether the pull
+request changed it. Realization builds each selected attribute with
+import-from-derivation left on, and the paths that build prints are the
+ones that must be on gkze. A workflow
+or Python change that leaves every drv unchanged produces an empty plan per
+system and the realize jobs stay skipped. aarch64-darwin is always planned.
+An empty Darwin diff is not a waiver, and a missing Darwin plan fails the
+aggregate.
+
+Realize calls the Update reusable workflow (`update-native.yml`) with stage
+`closure-gate` on `macos-15`, `ubuntu-24.04-arm`, and `ubuntu-24.04`. The
+build flags are the validation build (`nix build --no-update-lock-file
+--no-link --keep-going --fallback`) plus `--print-out-paths`. The build
+budget is the Darwin shard budget, 18000 seconds, inside the 360-minute job.
+The receipt is `--print-out-paths`. Derivation show of a Darwin system
+names a different output than the build realizes, so it does not choose
+what gets pushed. `nix build` substitutes a path already on gkze. The gate
+pushes only printed paths whose gkze narinfo is not 200. `cachix push`
+must exit 0 and the narinfo must then be 200, or the job fails. The flush step still runs and
+fails closed. The aggregating step writes the pushed and already-cached
+store paths into the job summary.
+
+Fork pull requests do not run the workflow's jobs. The trigger is
+`pull_request` for a head in this repository, and the Cachix token is passed
+only into the realize jobs. The gate program lives in
+`.github/closure-gate/` so editing it does not change the nixcfg package
+source. `lib/tests/test_closure_gate.py` pins the diff, the skip, the push
+failure, and the workflow shape.
 
 ## Related
 

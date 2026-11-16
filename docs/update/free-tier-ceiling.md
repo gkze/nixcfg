@@ -189,7 +189,9 @@ sample, or skip a target.
   crate bump). Pin the four Darwin roots and the linux-builder image, one
   revision each. A new pin name on every closure, or `--keep-days` on the
   VM image, fills the pin quota and the next root flush returns 402
-  (43613142360, `darwin-system-qaj6kyaf`).
+  (43613142360, `darwin-system-qaj6kyaf`). `--keep-revisions 1` trims only
+  after Cachix accepts the new revision, so a path the latest revision
+  already retains is not pinned again (43738140207).
 - Do not `workflow_dispatch` or `gh run cancel` from the Cursor GitHub
   App token (403). Kick remains a `lib/update/**` or
   `.github/update-kick` push to `main`.

@@ -9,10 +9,11 @@
 let
   inherit (inputs.red.inputs) pyproject-build-systems pyproject-nix uv2nix;
   platformCompat = import ../lib/pinned-input-platform-compat;
-  redSource = builtins.path {
-    path = inputs.red;
-    name = builtins.unsafeDiscardStringContext (builtins.baseNameOf (toString inputs.red));
-  };
+  # Copying a store path with builtins.path allocates a new hash on every
+  # eval (Nix 2.35). The drv would then differ from itself and the closure
+  # gate would rebuild this package on every pull request. The locked flake
+  # input path is already content-addressed.
+  redSource = inputs.red.outPath;
   workspace = uv2nix.lib.workspace.loadWorkspace { workspaceRoot = inputs.red; };
   pySet = (callPackage pyproject-nix.build.packages { python = python313; }).overrideScope (
     lib.composeManyExtensions [

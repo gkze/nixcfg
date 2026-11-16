@@ -81,6 +81,8 @@ let
   ++ lib.optional (nixDarwinOwnsUserScope && userMacAppScope.entries != [ ]) userMacAppScope;
 in
 {
+  imports = [ ./paths.nix ];
+
   options.nixcfg.macApps = {
     applications = macApps.applicationsOption;
     resolved = macApps.resolvedOption;

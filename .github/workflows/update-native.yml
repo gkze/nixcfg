@@ -12,6 +12,10 @@ on:
       stage:
         required: true
         type: string
+      checkout_ref:
+        description: Checkout this commit instead of the caller SHA
+        default: ""
+        type: string
       previous:
         default: ""
         type: string
@@ -181,8 +185,31 @@ jobs:
           import runpy
           runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
         shell: python
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        if: inputs.stage == 'closure-gate'
+        with:
+          name: closure-gate-plan-${{ inputs.system }}
+          path: ${{ runner.temp }}/closure-gate
+          github-token: ${{ github.token }}
+          run-id: ${{ github.run_id }}
+      - name: Realize changed outputs and root closures
+        if: inputs.stage == 'closure-gate'
+        env:
+          NIXCFG_CLOSURE_GATE_COMMAND: realize
+          NIXCFG_CLOSURE_GATE_PLAN: ${{ runner.temp }}/closure-gate/plan.json
+          SYSTEM: ${{ inputs.system }}
+        shell: python
+        run: |
+          import os
+          import runpy
+
+          nix_bin = "/nix/var/nix/profiles/default/bin"
+          if os.path.isfile(os.path.join(nix_bin, "nix")):
+              os.environ["PATH"] = nix_bin + os.pathsep + os.environ.get("PATH", "")
+          runpy.run_path(".github/closure-gate/gate.py", run_name="__main__")
       - name: Prepare or validate candidate
         id: candidate
+        if: inputs.stage != 'closure-gate'
         env:
           NIXCFG_RUNTIME: ${{ steps.runtime.outputs.runtime }}
           NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
@@ -259,6 +286,7 @@ jobs:
           retention-days: 30
       # Backstop for jobs.py's 40-minute flush budget (40048292663 sat 3h).
       - name: Flush Cachix daemon
+        id: flush
         if: always()
         timeout-minutes: 45
         env:

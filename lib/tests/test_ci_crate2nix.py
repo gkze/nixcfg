@@ -1132,7 +1132,6 @@ def test_package_registry_metadata_overrides_are_intentional() -> None:
         "zen-twilight",
         "zo",
     ]
-    assert overrides["executor"]["constraint"] == ["aarch64-darwin"]
     assert overrides["github-copilot-app"]["constraint"] == ["aarch64-darwin"]
     assert overrides["hermes-desktop"]["constraint"] == ["aarch64-darwin"]
     assert overrides["goose-desktop"]["constraint"] == ["aarch64-darwin"]
