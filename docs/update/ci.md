@@ -326,8 +326,17 @@ not identify the credential. The pin POST in 43738140207 was authorized and
 returned 402: the image it had just pushed was already revision 25.
 `--keep-revisions 1` trims only after Cachix accepts a new revision, so flush
 does not pin a path the latest revision already retains. A 403 stays a
-warning. `cachix push` still fails the job, and so does `cachix pin` of a
-path that pin does not already retain, including a later 402. After a
+warning. Run 43770072139 built the four Darwin roots, pushed
+`home-george`, and `cachix pin` returned 402. `darwin-system-748wmbw5`
+(~38 GiB of that closure on gkze) and `home-generation-vijljmrs` (~6.6 GiB)
+were still kept for 14 days, and DELETE of each returned 403. Those two
+pins plus the linux-builder image already fill the 50 GiB plan, so another
+full closure cannot be charged before trim. Flush then pins each remaining
+hash-named pin to one pushed empty file with `--keep-revisions 1` and
+retries the stable name. A later 402 does not fail the flush when
+`nix path-info --store https://gkze.cachix.org` sees the path: failing the
+shard sibling-stops the other roots. `cachix push` still fails the job, and
+so does `cachix pin` when the path is not on gkze. After a
 successful daemon stop, flush
 clears `CACHIX_DAEMON_DIR` even when the later push or pin fails, so the
 action post hook does not stop the closed socket again. The flush exception

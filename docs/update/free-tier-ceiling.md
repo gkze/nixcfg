@@ -191,7 +191,12 @@ sample, or skip a target.
   VM image, fills the pin quota and the next root flush returns 402
   (43613142360, `darwin-system-qaj6kyaf`). `--keep-revisions 1` trims only
   after Cachix accepts the new revision, so a path the latest revision
-  already retains is not pinned again (43738140207).
+  already retains is not pinned again (43738140207). 43770072139 402'd
+  `home-george` while `darwin-system-748wmbw5` (~38 GiB) and
+  `home-generation-vijljmrs` (~6.6 GiB) were still kept for 14 days and
+  DELETE returned 403. Flush retargets those hash-named pins at one empty
+  file so the old closure can drop. A further 402 does not fail a flush
+  whose path is already on gkze.
 - Do not `workflow_dispatch` or `gh run cancel` from the Cursor GitHub
   App token (403). Kick remains a `lib/update/**` or
   `.github/update-kick` push to `main`.

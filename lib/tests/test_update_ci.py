@@ -80,6 +80,12 @@ def native_job(tmp_path: Path) -> tuple[dict[str, str], Path]:
         "if name == 'nix':\n"
         "    print('devshell startup', flush=True)\n"
         "    sys.exit(subprocess.call(args[args.index('--command') + 1:]))\n"
+        "if name == 'nix-store' and args[:1] == ['--add']:\n"
+        "    print(os.environ.get(\n"
+        "        'TEST_NIX_STORE_STDOUT',\n"
+        "        '/nix/store/11111111111111111111111111111111-pin-quota-release',\n"
+        "    ))\n"
+        "    sys.exit(int(os.environ.get('TEST_NIX_STORE_EXIT', '0')))\n"
         "if name == 'cachix':\n"
         "    Path(os.environ['TEST_CACHE_LOG']).write_text(json.dumps(args))\n"
         "    with Path(os.environ['TEST_CACHE_LOG'] + 'l').open('a') as calls:\n"
@@ -137,6 +143,7 @@ def native_job(tmp_path: Path) -> tuple[dict[str, str], Path]:
     )
     boundary.chmod(0o755)
     (tools / "nix").symlink_to(boundary)
+    (tools / "nix-store").symlink_to(boundary)
     (tools / "cachix").symlink_to(boundary)
     runtime = tmp_path / "runtime"
     (runtime / "bin").mkdir(parents=True)
@@ -2406,6 +2413,9 @@ def test_darwin_pin_retries_once_after_storage_limit(native_job, monkeypatch) ->
         )
 
     monkeypatch.setattr(jobs, "_run_cachix_pin", still_limited)
+    monkeypatch.setattr(
+        jobs, "_realized_root_path_in_cachix", lambda _path, _budget: False
+    )
     _stub_pin_catalog(monkeypatch, [{"name": "darwin-system-qaj6kyaf"}])
     with pytest.raises(jobs.CachixFlushError, match=limited):
         jobs._pin_realized_darwin_roots((store,), StringIO(), _budget())
@@ -2437,6 +2447,257 @@ def test_darwin_pin_retries_once_after_storage_limit(native_job, monkeypatch) ->
     assert attempts["count"] == 2
     assert "retrying once" in builder_log.getvalue()
     assert "deleted legacy Cachix pin darwin-system-qaj6kyaf" in builder_log.getvalue()
+
+
+_QUOTA_RELEASE = "/nix/store/11111111111111111111111111111111-pin-quota-release"
+
+
+def test_quota_release_store_path_pushes_one_empty_file(
+    native_job, monkeypatch
+) -> None:
+    """The retarget file is content-addressed and pushed before any pin."""
+    env, _checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    log = StringIO()
+    assert jobs._quota_release_store_path(log, _budget()) == _QUOTA_RELEASE
+    assert f"pin-quota release path={_QUOTA_RELEASE}" in log.getvalue()
+    assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text())[:3] == [
+        "push",
+        "gkze",
+        _QUOTA_RELEASE,
+    ]
+    monkeypatch.setenv("TEST_NIX_STORE_EXIT", "1")
+    with pytest.raises(jobs.CachixFlushError, match="returncode=1"):
+        jobs._quota_release_store_path(StringIO(), _budget())
+    monkeypatch.setenv("TEST_NIX_STORE_EXIT", "0")
+    monkeypatch.setenv("TEST_NIX_STORE_STDOUT", "not-a-store-path")
+    with pytest.raises(jobs.CachixFlushError, match="returncode=0"):
+        jobs._quota_release_store_path(StringIO(), _budget())
+    monkeypatch.setenv("TEST_NIX_STORE_STDOUT", "")
+    with pytest.raises(jobs.CachixFlushError, match="returncode=0"):
+        jobs._quota_release_store_path(StringIO(), _budget())
+    monkeypatch.delenv("TEST_NIX_STORE_STDOUT")
+    monkeypatch.setenv("TEST_CACHE_EXIT", "1")
+    with pytest.raises(jobs.CachixFlushError, match="could not push"):
+        jobs._quota_release_store_path(StringIO(), _budget())
+
+
+_ARGUS_STORE = "/nix/store/qaj6kyaffl1bpj6x411pbwdbk29gv22r-darwin-system-26.11.b2f8c5c"
+_LEGACY_PIN = "darwin-system-748wmbw5"
+_PIN_LIMIT = "Pin storage limit exceeded"
+
+
+def _arm_pin_quota(native_job, monkeypatch) -> None:
+    env, checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "darwin-argus")
+    monkeypatch.setenv("CACHIX_AUTH_TOKEN", "test-token")
+
+
+def _pin_result(
+    name: str, path: str, code: int, stderr: str
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(("cachix", "pin", name, path), code, "", stderr)
+
+
+def _legacy_catalog(monkeypatch, *, retained: str | None = None) -> None:
+    pin: dict[str, object] = {"name": _LEGACY_PIN}
+    if retained is not None:
+        pin["lastRevision"] = {"storePath": retained}
+    _stub_pin_catalog(monkeypatch, [pin], delete_status=403)
+
+
+def test_storage_limit_retargets_a_legacy_pin_then_pins_the_root(
+    native_job, monkeypatch
+) -> None:
+    """43770072139: DELETE is 403, so the legacy closure is replaced in place."""
+    _arm_pin_quota(native_job, monkeypatch)
+    pinned: list[tuple[str, str]] = []
+
+    def run_pin(
+        name: str, path: str, log: StringIO, _budget: jobs._FlushBudget
+    ) -> subprocess.CompletedProcess[str]:
+        pinned.append((name, path))
+        root_attempts = sum(1 for item in pinned if item[0] == "darwin-argus")
+        accepted = path == _QUOTA_RELEASE or root_attempts >= 3
+        jobs._write_diagnostic(
+            log, f"cachix pin {name} returncode={0 if accepted else 1}"
+        )
+        return _pin_result(
+            name, path, 0 if accepted else 1, "" if accepted else _PIN_LIMIT
+        )
+
+    monkeypatch.setattr(jobs, "_run_cachix_pin", run_pin)
+    _legacy_catalog(
+        monkeypatch,
+        retained="/nix/store/748wmbw5fa8ggk9dw3fwpj1gfpnylxxn-darwin-system-26.11.b2f8c5c",
+    )
+    log = StringIO()
+    jobs._pin_realized_darwin_roots((_ARGUS_STORE,), log, _budget())
+    assert (_LEGACY_PIN, _QUOTA_RELEASE) in pinned
+    assert pinned[-1] == ("darwin-argus", _ARGUS_STORE)
+    assert "already on gkze" not in log.getvalue()
+
+
+def test_retargeted_pin_keeps_a_root_that_still_exceeds_storage(
+    native_job, monkeypatch
+) -> None:
+    """A third 402 keeps the flush when the new root is already on gkze."""
+    _arm_pin_quota(native_job, monkeypatch)
+    pinned: list[tuple[str, str]] = []
+
+    def still_over(
+        name: str, path: str, log: StringIO, _budget: jobs._FlushBudget
+    ) -> subprocess.CompletedProcess[str]:
+        pinned.append((name, path))
+        if path == _QUOTA_RELEASE:
+            jobs._write_diagnostic(log, f"cachix pin {name} returncode=0")
+            return _pin_result(name, path, 0, "")
+        return _pin_result(name, path, 1, _PIN_LIMIT)
+
+    monkeypatch.setattr(jobs, "_run_cachix_pin", still_over)
+    monkeypatch.setattr(
+        jobs,
+        "_realized_root_path_in_cachix",
+        lambda path, _budget: path == _ARGUS_STORE,
+    )
+    _legacy_catalog(monkeypatch, retained=f"{_QUOTA_RELEASE}-old")
+    kept = StringIO()
+    jobs._pin_realized_darwin_roots((_ARGUS_STORE,), kept, _budget())
+    assert f"{_ARGUS_STORE} is already on gkze" in kept.getvalue()
+    assert sum(1 for name, _path in pinned if name == "darwin-argus") == 3
+
+    monkeypatch.setattr(
+        jobs, "_realized_root_path_in_cachix", lambda _path, _budget: False
+    )
+    _legacy_catalog(monkeypatch)
+    with pytest.raises(jobs.CachixFlushError, match=_PIN_LIMIT):
+        jobs._pin_realized_darwin_roots((_ARGUS_STORE,), StringIO(), _budget())
+
+
+def test_legacy_retarget_error_fails_before_another_root_pin(
+    native_job, monkeypatch
+) -> None:
+    """A non-quota failure while shrinking a legacy pin is not treated as full."""
+    _arm_pin_quota(native_job, monkeypatch)
+
+    def rejected(
+        name: str, path: str, _log: StringIO, _budget: jobs._FlushBudget
+    ) -> subprocess.CompletedProcess[str]:
+        stderr = "connection reset" if path == _QUOTA_RELEASE else _PIN_LIMIT
+        return _pin_result(name, path, 1, stderr)
+
+    monkeypatch.setattr(jobs, "_run_cachix_pin", rejected)
+    _legacy_catalog(monkeypatch)
+    with pytest.raises(jobs.CachixFlushError, match="connection reset"):
+        jobs._pin_realized_darwin_roots((_ARGUS_STORE,), StringIO(), _budget())
+
+
+def test_second_pin_error_is_not_a_storage_limit(native_job, monkeypatch) -> None:
+    """Only the storage-limit body opens the retarget path."""
+    _arm_pin_quota(native_job, monkeypatch)
+    attempts = {"count": 0}
+
+    def second_other(
+        name: str, path: str, _log: StringIO, _budget: jobs._FlushBudget
+    ) -> subprocess.CompletedProcess[str]:
+        attempts["count"] += 1
+        stderr = _PIN_LIMIT if attempts["count"] == 1 else "connection reset"
+        return _pin_result(name, path, 1, stderr)
+
+    monkeypatch.setattr(jobs, "_run_cachix_pin", second_other)
+    _stub_pin_catalog(monkeypatch, [], delete_status=204)
+    with pytest.raises(jobs.CachixFlushError, match="connection reset"):
+        jobs._cachix_pin("darwin-argus", _ARGUS_STORE, StringIO(), _budget())
+    assert attempts["count"] == 2
+
+
+def test_third_pin_error_after_retarget_fails_the_flush(
+    native_job, monkeypatch
+) -> None:
+    """A transport error after the legacy pin shrinks still fails the flush."""
+    _arm_pin_quota(native_job, monkeypatch)
+    attempts = {"count": 0}
+
+    def third_other(
+        name: str, path: str, _log: StringIO, _budget: jobs._FlushBudget
+    ) -> subprocess.CompletedProcess[str]:
+        if path == _QUOTA_RELEASE:
+            return _pin_result(name, path, 0, "")
+        attempts["count"] += 1
+        stderr = "connection reset" if attempts["count"] >= 3 else _PIN_LIMIT
+        return _pin_result(name, path, 1, stderr)
+
+    monkeypatch.setattr(jobs, "_run_cachix_pin", third_other)
+    _legacy_catalog(monkeypatch)
+    with pytest.raises(jobs.CachixFlushError, match="connection reset"):
+        jobs._pin_realized_darwin_roots((_ARGUS_STORE,), StringIO(), _budget())
+    assert attempts["count"] == 3
+
+
+def test_unrefusable_legacy_pin_keeps_a_root_already_on_gkze(
+    native_job, monkeypatch
+) -> None:
+    """When the empty-file pin also 402s, a pushed root still does not fail."""
+    _arm_pin_quota(native_job, monkeypatch)
+    attempts = {"count": 0}
+
+    def tiny_refused(
+        name: str, path: str, log: StringIO, _budget: jobs._FlushBudget
+    ) -> subprocess.CompletedProcess[str]:
+        attempts["count"] += 1
+        if path == _QUOTA_RELEASE:
+            jobs._write_diagnostic(log, f"cachix pin {name} returncode=1")
+        return _pin_result(name, path, 1, _PIN_LIMIT)
+
+    monkeypatch.setattr(jobs, "_run_cachix_pin", tiny_refused)
+    monkeypatch.setattr(
+        jobs,
+        "_realized_root_path_in_cachix",
+        lambda path, _budget: path == _ARGUS_STORE,
+    )
+    _legacy_catalog(monkeypatch)
+    refused = StringIO()
+    jobs._pin_realized_darwin_roots((_ARGUS_STORE,), refused, _budget())
+    assert "could not be retargeted" in refused.getvalue()
+    assert f"{_ARGUS_STORE} is already on gkze" in refused.getvalue()
+    assert attempts["count"] == 3
+
+    monkeypatch.setattr(
+        jobs, "_realized_root_path_in_cachix", lambda _path, _budget: False
+    )
+    _legacy_catalog(monkeypatch)
+    with pytest.raises(jobs.CachixFlushError, match=_PIN_LIMIT):
+        jobs._pin_realized_darwin_roots((_ARGUS_STORE,), StringIO(), _budget())
+
+
+def test_legacy_pin_already_at_the_release_path_is_not_pinned_again(
+    native_job, monkeypatch
+) -> None:
+    """A legacy pin that already keeps the empty file is not given another revision."""
+    env, _checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("CACHIX_AUTH_TOKEN", "test-token")
+    _stub_pin_catalog(
+        monkeypatch,
+        [
+            {
+                "name": "home-generation-vijljmrs",
+                "lastRevision": {"storePath": _QUOTA_RELEASE},
+            }
+        ],
+        delete_status=403,
+    )
+    log = StringIO()
+    assert jobs._shrink_legacy_pin_closures(log, _budget()) is False
+    assert f"already retains {_QUOTA_RELEASE}" in log.getvalue()
+    calls = Path(env["TEST_CACHE_LOG"] + "l").read_text()
+    assert '"push"' in calls
+    assert '"pin"' not in calls
 
 
 def test_cachix_pin_api_keeps_the_token_out_of_errors(monkeypatch) -> None:

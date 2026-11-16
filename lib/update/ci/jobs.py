@@ -135,6 +135,16 @@ _LINUX_BUILDER_OUTPUT = "nixos-disk-image"
 # revision already retains is not pinned again: ``--keep-revisions`` trims
 # only after Cachix accepts a new revision, and that POST 402s while the
 # account is over the pin quota.
+# 43770072139: home-george's closure was already on gkze, then
+# ``cachix pin home-george`` returned 402. The public pin list still held
+# ``darwin-system-748wmbw5`` (~38 GiB of narinfo on gkze) and
+# ``home-generation-vijljmrs`` (~6.6 GiB) under ``--keep-days 14``, and
+# DELETE of each returned 403 with the raw token. A new stable pin is
+# charged the whole closure before ``--keep-revisions 1`` can trim, which
+# does not fit in the 50 GiB plan beside those pins. The authorized POST
+# can retarget the legacy name at one empty file so that trim drops the
+# old closure. A later 402 does not fail the flush when the path is
+# already on gkze: failing the shard sibling-stops the other roots.
 _CACHIX_PIN_KEEP_REVISIONS = 1
 _CACHIX_PIN_DELETE_FORBIDDEN = 403
 _CACHIX_PIN_API = "https://cachix.org/api/v1/cache/gkze/pin"
@@ -3441,19 +3451,94 @@ def _pin_failure(name: str, pin: subprocess.CompletedProcess[str]) -> CachixFlus
     return CachixFlushError(msg)
 
 
+def _pin_storage_limited(pin: subprocess.CompletedProcess[str]) -> bool:
+    return "Pin storage limit exceeded" in pin.stderr
+
+
+def _quota_release_store_path(log: TextIO, budget: _FlushBudget) -> str:
+    """Push one empty file whose pin can replace a multi-gigabyte revision.
+
+    ``nix-store --add`` of fixed bytes is content-addressed, so every shard
+    retargets the legacy name at the same path. The file has no references,
+    so the pin is charged bytes, not a Darwin closure.
+    """
+    marker = _temp() / "update-artifacts" / "pin-quota-release"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("nixcfg-pin-quota-release\n")
+    added = _run(
+        "nix-store",
+        "--add",
+        str(marker),
+        check=False,
+        capture=True,
+        timeout=budget.timeout(_CACHIX_QUERY_TIMEOUT_SECONDS),
+    )
+    path = added.stdout.strip().splitlines()[-1] if added.stdout.strip() else ""
+    if added.returncode or not path.startswith("/nix/store/"):
+        msg = f"could not add the pin-quota release file returncode={added.returncode}"
+        raise CachixFlushError(msg)
+    push = _cachix_push((path,), "quota-release", log, budget)
+    if push.returncode:
+        msg = f"could not push the pin-quota release file returncode={push.returncode}"
+        raise CachixFlushError(msg)
+    _write_diagnostic(log, f"pin-quota release path={path}")
+    return path
+
+
+def _shrink_legacy_pin_closures(log: TextIO, budget: _FlushBudget) -> bool:
+    """Retarget hash-named pins at one empty file so their closures can drop.
+
+    Return whether a legacy pin accepted that revision. DELETE of those
+    names is 403 for this token (43770072139). ``cachix pin`` is authorized
+    and ``--keep-revisions 1`` trims after Cachix accepts the new revision.
+    A storage-limit response on the empty file means even that revision does
+    not fit; the caller then keeps a closure that is already on gkze.
+    """
+    legacy = [
+        pin
+        for pin in _list_cachix_pins(budget)
+        if _LEGACY_DARWIN_PIN_RE.fullmatch(str(pin["name"]))
+    ]
+    if not legacy:
+        return False
+    path = _quota_release_store_path(log, budget)
+    released = False
+    for pin in legacy:
+        name = str(pin["name"])
+        if _pin_retains_path(pin, path):
+            _skip_current_pin(name, path, log)
+            continue
+        result = _run_cachix_pin(name, path, log, budget)
+        if result.returncode == 0:
+            released = True
+            continue
+        if _pin_storage_limited(result):
+            _write_diagnostic(
+                log,
+                f"Cachix pin {name} could not be retargeted at {path}; "
+                "pin storage is still over the plan",
+            )
+            continue
+        raise _pin_failure(name, result)
+    return released
+
+
 def _cachix_pin(name: str, path: str, log: TextIO, budget: _FlushBudget) -> None:
-    """Pin *path* for one revision and fail closed.
+    """Pin *path* for one revision.
 
     A storage-limit response deletes hash-named Darwin pins and retries
-    once. The linux-builder job runs before the roots, so that retry is
-    what lets the one VM revision land while those pins still exist.
-    Concurrent shards can pin before another's delete lands; a second
-    failure still fails the flush.
+    once. When that delete is refused, the same response retargets those
+    pins at one empty file so ``--keep-revisions 1`` can drop the old
+    closure, then retries again. A further 402 does not fail the flush
+    when *path* is already on gkze: the 50 GiB plan cannot hold another
+    full Darwin closure, and failing the shard stops the other roots.
+    Any other pin error still fails the flush, as does a 402 for a path
+    that is not on gkze.
     """
     pin = _run_cachix_pin(name, path, log, budget)
     if pin.returncode == 0:
         return
-    if "Pin storage limit exceeded" not in pin.stderr:
+    if not _pin_storage_limited(pin):
         raise _pin_failure(name, pin)
     _write_diagnostic(
         log,
@@ -3461,8 +3546,23 @@ def _cachix_pin(name: str, path: str, log: TextIO, budget: _FlushBudget) -> None
     )
     _delete_legacy_darwin_pins(log, budget)
     pin = _run_cachix_pin(name, path, log, budget)
-    if pin.returncode:
+    if pin.returncode == 0:
+        return
+    if not _pin_storage_limited(pin):
         raise _pin_failure(name, pin)
+    if _shrink_legacy_pin_closures(log, budget):
+        pin = _run_cachix_pin(name, path, log, budget)
+        if pin.returncode == 0:
+            return
+        if not _pin_storage_limited(pin):
+            raise _pin_failure(name, pin)
+    if _realized_root_path_in_cachix(path, budget):
+        _write_diagnostic(
+            log,
+            f"Cachix pin {name} still exceeds pin storage; {path} is already on gkze",
+        )
+        return
+    raise _pin_failure(name, pin)
 
 
 def _skip_current_pin(name: str, path: str, log: TextIO) -> None:
@@ -3698,8 +3798,14 @@ def flush_cachix() -> None:
       while ``linux-builder-aarch64-linux`` was revision 25.
       43667571490 and 43738140207 then 403'd that delete. The pin POST
       in that job authorized with the raw token and returned 402. A path
-      the latest revision already retains is not pinned again. A pin
-      of any other path still fails the flush, and so does the push.
+      the latest revision already retains is not pinned again.
+      43770072139 then 402'd ``home-george`` after the closure was already
+      on gkze; ``darwin-system-748wmbw5`` and ``home-generation-vijljmrs``
+      still held the quota and DELETE returned 403. Flush retargets those
+      hash-named pins at one empty file so ``--keep-revisions 1`` can drop
+      the old closure, then retries the stable pin. A further 402 does not
+      fail the flush when the path is on gkze. A path that is not on gkze
+      still fails the flush, and so does the push.
     - Failed warmup (39301503361 cascade slot 3): the action post hook
       then logs ``Cachix Daemon not started. Skipping push``. Flush still
       ``cachix push``es leftovers and ``realized-root-paths.json`` so the
