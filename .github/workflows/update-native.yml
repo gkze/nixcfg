@@ -16,6 +16,10 @@ on:
         description: Checkout this ref instead of the caller SHA. Empty keeps the caller SHA.
         default: ""
         type: string
+      artifact_namespace:
+        description: Suffix isolating this group's prepare artifacts in a shared run
+        default: ""
+        type: string
       previous:
         default: ""
         type: string
@@ -121,17 +125,17 @@ jobs:
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         if: inputs.previous != ''
         with:
-          name: ${{ inputs.previous }}
+          name: ${{ inputs.artifact_namespace != '' && format('{0}-{1}', inputs.previous, inputs.artifact_namespace) || inputs.previous }}
           path: ${{ runner.temp }}/previous
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         if: inputs.previous_extra != ''
         with:
-          name: ${{ inputs.previous_extra }}
+          name: ${{ inputs.artifact_namespace != '' && format('{0}-{1}', inputs.previous_extra, inputs.artifact_namespace) || inputs.previous_extra }}
           path: ${{ runner.temp }}/previous-extra
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         if: inputs.previous_third != ''
         with:
-          name: ${{ inputs.previous_third }}
+          name: ${{ inputs.artifact_namespace != '' && format('{0}-{1}', inputs.previous_third, inputs.artifact_namespace) || inputs.previous_third }}
           path: ${{ runner.temp }}/previous-third
       # Exact names, not a glob: a faulted attempt uploads
       # prepare-aarch64-darwin-shard-N-device-fault and must not be folded.
@@ -262,7 +266,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: |-
-            ${{ format('{0}{1}',
+            ${{ format('{0}{1}{2}',
             inputs.stage == 'merge-candidates' && 'prepare-x86_64-linux' ||
             inputs.stage == 'merge-prepare-shards' && 'prepare-aarch64-darwin' ||
             inputs.stage == 'prepare-pins' && 'prepare-pins' ||
@@ -275,7 +279,8 @@ jobs:
             format('{0}-{1}-{2}', inputs.stage, inputs.system, inputs.scope),
             (steps.candidate.outputs.device_fault == 'true' ||
             steps.storage.outputs.device_fault == 'true') && '-device-fault' ||
-            steps.candidate.outputs.runner_fault == 'true' && '-runner-fault' || '') }}
+            steps.candidate.outputs.runner_fault == 'true' && '-runner-fault' || '',
+            inputs.artifact_namespace != '' && format('-{0}', inputs.artifact_namespace) || '') }}
           path: ${{ runner.temp }}/update-artifacts
           if-no-files-found: warn
           overwrite: true

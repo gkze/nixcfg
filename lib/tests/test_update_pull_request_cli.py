@@ -182,3 +182,19 @@ def test_candidate_show_failure_and_merge_commands(tmp_path: Path) -> None:
         runner.invoke(app, ["batch-success", "--body-file", str(body)]).output.strip()
         == "merge"
     )
+
+
+def test_normalize_checks_folds_paginated_documents(tmp_path: Path) -> None:
+    raw = tmp_path / "pages.json"
+    raw.write_text(
+        json.dumps({"check_runs": [{"name": "one"}]})
+        + "\n"
+        + json.dumps({"check_runs": [{"name": "two"}]})
+    )
+    folded = tmp_path / "folded.json"
+    normalized = runner.invoke(app, ["normalize-checks", str(raw), str(folded)])
+    assert normalized.exit_code == 0, normalized.output
+    assert json.loads(folded.read_text())["check_runs"] == [
+        {"name": "one"},
+        {"name": "two"},
+    ]

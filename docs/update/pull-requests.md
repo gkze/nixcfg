@@ -67,8 +67,9 @@ Darwin prepare jobs and the heal job use four lanes:
 `nixcfg-darwin-main-fix`, `nixcfg-darwin-security`, `nixcfg-darwin-heal`, and
 `nixcfg-darwin-routine`. A lane queues. The lanes run at the same time. Four
 is the public macOS pool of five, minus one runner. `cancel-in-progress` is
-false. `closure-gate` Darwin jobs use the same lane names, taken from the
-pull request's priority label. The Darwin plan leg and
+false, and `queue` is `max`, so a third arrival waits instead of replacing
+the one pending job. `closure-gate` Darwin jobs use the same lane names,
+taken from the pull request's priority label. The Darwin plan leg and
 `realize-aarch64-darwin` join that lane. A pull request with no priority
 label uses routine. Linux gate jobs do not. The workflow still cancels a
 replaced head of the same pull request.
@@ -106,11 +107,16 @@ When `closure-gate` fails:
    that rehash finishes so the next gate result can be read.
 4. Three heal attempts, or a gate failure with no job log, add `needs-human`.
 
-A green `check_suite` on `update/*` merges only when every check is completed
-with success, skipped, or neutral, and a `closure-gate` check succeeded. The
-merge command is `gh pr merge <number> --repo <repo> --squash
---match-head-commit <sha>`. A passing narrowed batch probe updates the probe
-instead of merging. The first full-batch probe may merge.
+A completed `PR closure gate` workflow on `update/*` is what starts the merge
+and the healer. GitHub does not emit `check_suite` for a suite that Actions
+itself created, so these workflows listen to `workflow_run`. They run from
+the default branch. The merge still reads every check on the head. It merges
+only when every check is completed with success, skipped, or neutral, and a
+`closure-gate` check succeeded. The merge command is `gh pr merge <number>
+--repo <repo> --squash --match-head-commit <sha>`. A passing narrowed batch
+probe rebuilds that branch from the default branch plus the surviving
+targets, then updates the probe instead of merging. The first full-batch
+probe may merge. A heal rehash keeps the repair commit already on the branch.
 
 A branch that does not start with `update/` is not merged by this workflow.
 The nightly Update publication is unchanged apart from its nightly schedule

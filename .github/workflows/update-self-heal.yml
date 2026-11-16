@@ -3,15 +3,16 @@ name: Update self-heal
 # A failed closure-gate on an update branch is repaired on that same branch.
 # The attempt cap and the needs-human label live in the planner decision.
 on:
-  check_suite:
+  workflow_run:
+    workflows: ["PR closure gate"]
     types: [completed]
 permissions:
   contents: read
 jobs:
   decide:
     if: |-
-      startsWith(github.event.check_suite.head_branch, 'update/') &&
-      github.event.check_suite.conclusion == 'failure'
+      startsWith(github.event.workflow_run.head_branch, 'update/') &&
+      github.event.workflow_run.conclusion == 'failure'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -29,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ github.event.check_suite.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
       - uses: ./.github/actions/update-runtime
         id: runtime
@@ -41,8 +42,9 @@ jobs:
         env:
           NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
           GH_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
-          BRANCH: ${{ github.event.check_suite.head_branch }}
-          SHA: ${{ github.event.check_suite.head_sha }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          BASE: ${{ github.event.repository.default_branch }}
         shell: python
         run: |-
           import json
@@ -78,6 +80,14 @@ jobs:
               raise SystemExit(0)
           body = pathlib.Path("body.md")
           body.write_text(pr.get("body") or "")
+          subprocess.run(
+              [
+                  "nix", "develop", os.environ["NIXCFG_DEVSHELL"], "--command",
+                  "nixcfg", "ci", "pull-requests", "normalize-checks",
+                  "checks.json", "checks.json",
+              ],
+              check=True,
+          )
           command = [
               "nix", "develop", os.environ["NIXCFG_DEVSHELL"], "--command",
               "nixcfg", "ci", "pull-requests", "failure", "checks.json",
@@ -124,6 +134,8 @@ jobs:
                   "gh", "workflow", "run", "update-pr.yml", "--repo", repo,
                   "--ref", os.environ["BRANCH"],
                   "-f", f"branch={os.environ['BRANCH']}",
+                  "-f", "mode=rehash",
+                  "-f", "from_default=true",
                   "-f", "targets=" + " ".join(decision["batchTargets"]),
                   "-f", f"priority={fields['priority']}",
                   "-f", f"touches_darwin={fields['touches_darwin']}",
@@ -136,8 +148,10 @@ jobs:
                   subprocess.run(
                       [
                           "gh", "workflow", "run", "update-pr.yml", "--repo", repo,
-                          "--ref", os.environ["GITHUB_REF_NAME"],
+                          "--ref", os.environ["BASE"],
                           "-f", f"branch={split}",
+                          "-f", "mode=rehash",
+                          "-f", "from_default=false",
                           "-f", f"targets={name}",
                           "-f", "priority=routine",
                           "-f", "touches_darwin=true",
@@ -201,6 +215,7 @@ jobs:
     concurrency:
       group: nixcfg-darwin-${{ needs.decide.outputs.priority }}
       cancel-in-progress: false
+      queue: max
     permissions:
       actions: read
       contents: read
@@ -210,7 +225,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ github.event.check_suite.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
       - uses: ./.github/actions/update-runtime
         id: runtime
@@ -342,6 +357,8 @@ jobs:
                   "gh", "workflow", "run", "update-pr.yml",
                   "--repo", os.environ["GITHUB_REPOSITORY"], "--ref", branch,
                   "-f", f"branch={branch}",
+                  "-f", "mode=rehash",
+                  "-f", "from_default=false",
                   "-f", f"targets={os.environ['TARGETS']}",
                   "-f", f"priority={os.environ['PRIORITY']}",
                   "-f", f"touches_darwin={os.environ['TOUCHES']}",

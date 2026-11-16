@@ -3,15 +3,16 @@ name: Update automerge
 # Squash-merge one green update pull request. The head sha is pinned.
 # Auto-merge and admin bypasses are not used.
 on:
-  check_suite:
+  workflow_run:
+    workflows: ["PR closure gate"]
     types: [completed]
 permissions:
   contents: read
 jobs:
   merge:
     if: |-
-      startsWith(github.event.check_suite.head_branch, 'update/') &&
-      github.event.check_suite.conclusion == 'success'
+      startsWith(github.event.workflow_run.head_branch, 'update/') &&
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -21,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ github.event.check_suite.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
       - uses: ./.github/actions/update-runtime
         id: runtime
@@ -32,8 +33,8 @@ jobs:
         env:
           NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
           GH_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
-          BRANCH: ${{ github.event.check_suite.head_branch }}
-          SHA: ${{ github.event.check_suite.head_sha }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
         shell: python
         run: |-
           import json
@@ -92,6 +93,8 @@ jobs:
                       "gh", "workflow", "run", "update-pr.yml", "--repo", repo,
                       "--ref", os.environ["BRANCH"],
                       "-f", f"branch={os.environ['BRANCH']}",
+                      "-f", "mode=rehash",
+                      "-f", "from_default=true",
                       "-f", "targets=" + " ".join(decision["batchTargets"]),
                       "-f", f"priority={marker.get('priority', 'routine')}",
                       "-f", f"touches_darwin={touches}",
@@ -101,6 +104,14 @@ jobs:
                   check=True,
               )
               raise SystemExit(0)
+          subprocess.run(
+              [
+                  "nix", "develop", devshell, "--command",
+                  "nixcfg", "ci", "pull-requests", "normalize-checks",
+                  "checks.json", "checks.json",
+              ],
+              check=True,
+          )
           considered = [label for label in labels if label != "bisecting"]
           command = [
               "nix", "develop", devshell, "--command",

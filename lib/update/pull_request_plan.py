@@ -579,6 +579,57 @@ def open_prs_from_payload(payload: object) -> tuple[OpenUpdatePR, ...]:
     return tuple(found)
 
 
+def artifact_namespace(branch: str) -> str:
+    """Return the artifact suffix for one update branch.
+
+    Several groups share one planner run. A slash in the branch would make
+    their prepare artifacts overwrite each other, so the suffix uses hyphens.
+    """
+    parts = branch.split("/")
+    if (
+        parts[0] != "update"
+        or not parts[1:]
+        or any(part in {"", ".", ".."} for part in parts)
+    ):
+        msg = f"unsafe update branch: {branch}"
+        raise ValueError(msg)
+    slug = branch.replace("/", "-")
+    if _NAME.fullmatch(slug) is None:
+        msg = f"unsafe update branch: {branch}"
+        raise ValueError(msg)
+    return slug
+
+
+def merge_check_run_pages(text: str) -> dict[str, list[object]]:
+    """Fold ``gh api --paginate`` output into one check-run document.
+
+    Each page is its own JSON object. One ``json.loads`` of the file stops
+    at the first page and then raises ``Extra data``.
+    """
+    decoder = json.JSONDecoder()
+    index = 0
+    runs: list[object] = []
+    length = len(text)
+    while index < length:
+        while index < length and text[index].isspace():
+            index += 1
+        if index >= length:
+            break
+        payload, index = decoder.raw_decode(text, index)
+        if isinstance(payload, dict):
+            page = payload.get("check_runs", [])
+            if not isinstance(page, list):
+                msg = "check page is missing check_runs"
+                raise TypeError(msg)
+            runs.extend(page)
+        elif isinstance(payload, list):
+            runs.extend(payload)
+        else:
+            msg = "check page must be an object or an array"
+            raise TypeError(msg)
+    return {"check_runs": runs}
+
+
 def checks_from_payload(payload: object) -> tuple[CheckResult, ...]:
     """Parse a commit check-run list."""
     if isinstance(payload, dict):
@@ -1313,6 +1364,7 @@ __all__ = [
     "UpdateOffer",
     "UpdatePriority",
     "advance_batch",
+    "artifact_namespace",
     "automerge_allowed",
     "batch_success_response",
     "checks_from_payload",
@@ -1324,6 +1376,7 @@ __all__ = [
     "is_closure_gate",
     "label_args",
     "matrix_branches",
+    "merge_check_run_pages",
     "open_prs_from_payload",
     "package_branch",
     "parse_marker",

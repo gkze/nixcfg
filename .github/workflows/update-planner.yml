@@ -66,6 +66,8 @@ jobs:
           NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
           SECURITY: ${{ inputs.security || '' }}
           MAIN_FIX: ${{ inputs.main_fix || '' }}
+          GH_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
         shell: python
         run: |-
           import os
@@ -109,4 +111,5 @@ jobs:
     uses: ./.github/workflows/update-pr.yml
     with:
       branch: ${{ matrix.branch }}
+      mode: plan
     secrets: inherit

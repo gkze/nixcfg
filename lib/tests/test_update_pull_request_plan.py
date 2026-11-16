@@ -22,6 +22,7 @@ from lib.update.pull_request_plan import (
     UpdatePriority,
     _merge_same_branch,
     advance_batch,
+    artifact_namespace,
     automerge_allowed,
     batch_success_response,
     checks_from_payload,
@@ -31,6 +32,7 @@ from lib.update.pull_request_plan import (
     gate_failure_job_ids,
     label_args,
     matrix_branches,
+    merge_check_run_pages,
     open_prs_from_payload,
     package_branch,
     parse_marker,
@@ -846,6 +848,8 @@ def test_merged_single_source_stays_a_package() -> None:
     planned = plan_updates((_offer("solo"),), updaters=UPDATERS).updates[0]
     merged = _merge_same_branch([planned, replace(planned, title="again")])
     assert merged.kind == "package"
+    batched = replace(planned, kind="batch")
+    assert _merge_same_branch([batched, planned]).kind == "batch"
     labeled = replace(planned, labels=(*planned.labels, LABEL_BISECTING))
     assert LABEL_BISECTING in _merge_same_branch([labeled, planned]).labels
 
@@ -938,3 +942,39 @@ def test_batch_edges_and_untrusted_plan_documents() -> None:
     assert select_plan(document, "update/solo").offers == ()
     document["updates"][0]["offers"] = ["nope", {"name": "solo", "kind": "source"}]
     assert select_plan(document, "update/solo").offers[0].name == "solo"
+
+
+def test_artifact_namespace_rewrites_slashes_and_rejects_other_branches() -> None:
+    assert artifact_namespace("update/routine-batch") == "update-routine-batch"
+    assert artifact_namespace("update/group-codex+codex-v8") == (
+        "update-group-codex+codex-v8"
+    )
+    for branch in (
+        "main",
+        "update/",
+        "update/../main",
+        "update/a/../b",
+        "update/has space",
+        "feature/x",
+    ):
+        with pytest.raises(ValueError, match="unsafe"):
+            artifact_namespace(branch)
+
+
+def test_check_pages_fold_into_one_document() -> None:
+    pages = json.dumps({"check_runs": [{"name": "one"}]}) + json.dumps({
+        "check_runs": [{"name": "two"}]
+    })
+    assert merge_check_run_pages(pages) == {
+        "check_runs": [{"name": "one"}, {"name": "two"}]
+    }
+    assert merge_check_run_pages("") == {"check_runs": []}
+    assert merge_check_run_pages(" \n ") == {"check_runs": []}
+    assert merge_check_run_pages("{}") == {"check_runs": []}
+    assert merge_check_run_pages(json.dumps([{"name": "bare"}])) == {
+        "check_runs": [{"name": "bare"}]
+    }
+    with pytest.raises(TypeError, match="check_runs"):
+        merge_check_run_pages(json.dumps({"check_runs": {}}))
+    with pytest.raises(TypeError, match="object"):
+        merge_check_run_pages("1")

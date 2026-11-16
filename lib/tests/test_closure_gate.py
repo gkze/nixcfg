@@ -741,11 +741,13 @@ def test_pull_request_workflow_is_same_repo_and_keeps_darwin() -> None:
     assert "closure-gate" in jobs
     plan_lane = jobs["plan"]["concurrency"]
     assert plan_lane["cancel-in-progress"] == "false"
+    assert plan_lane["queue"] == "max"
     assert "matrix.system == 'aarch64-darwin'" in plan_lane["group"]
     assert "nixcfg-darwin-" in plan_lane["group"]
     assert "pr-closure-gate-plan-" in plan_lane["group"]
     darwin_lane = jobs["realize-aarch64-darwin"]["concurrency"]
     assert darwin_lane["cancel-in-progress"] == "false"
+    assert darwin_lane["queue"] == "max"
     for lane in ("main-fix", "security", "heal", "routine"):
         assert lane in darwin_lane["group"]
         assert lane in plan_lane["group"]

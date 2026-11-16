@@ -25,6 +25,7 @@ from lib.update.pull_request_plan import (
     failure_response,
     gate_failure_job_ids,
     matrix_branches,
+    merge_check_run_pages,
     open_prs_from_payload,
     parse_marker,
     plan_to_json,
@@ -107,6 +108,16 @@ def show_plan(
     sys.stdout.write(
         plan_to_json(PlanResult(updates=(selected,), deferred=(), failures=()))
     )
+
+
+@app.command("normalize-checks")
+def normalize_checks_command(
+    source: Annotated[Path, typer.Argument(help="Paginated check-run JSON.")],
+    destination: Annotated[Path, typer.Argument(help="One check-run document.")],
+) -> None:
+    """Write every paginated check page into one document."""
+    payload = merge_check_run_pages(source.read_text(encoding="utf-8"))
+    destination.write_text(json.dumps(payload), encoding="utf-8")
 
 
 @app.command("failure")

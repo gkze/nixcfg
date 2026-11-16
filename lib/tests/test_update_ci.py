@@ -3079,11 +3079,15 @@ def test_native_fault_evidence_and_artifact_contract() -> None:
         "inputs.scope == 'all'"
     )
     # A faulted runner's candidate can never be downloaded as prepare-*.
-    assert artifact.startswith("${{ format('{0}{1}', ")
-    assert artifact.endswith(
+    assert artifact.startswith("${{ format('{0}{1}{2}', ")
+    assert (
         "(steps.candidate.outputs.device_fault == 'true' || "
         "steps.storage.outputs.device_fault == 'true') && '-device-fault' || "
-        "steps.candidate.outputs.runner_fault == 'true' && '-runner-fault' || '') }}"
+        "steps.candidate.outputs.runner_fault == 'true' && '-runner-fault' || ''"
+        in artifact
+    )
+    assert artifact.endswith(
+        "inputs.artifact_namespace != '' && format('-{0}', inputs.artifact_namespace) || '') }}"
     )
 
 
