@@ -865,6 +865,18 @@ must exit 0 and the narinfo must then be 200, or the job fails. The flush step s
 fails closed. The aggregating step writes the pushed and already-cached
 store paths into the job summary.
 
+A Darwin realize whose kernel logged block-device I/O errors does not push.
+Flush clears the Cachix daemon directory so the action's post hook cannot
+drain that store; the hook then logs `Cachix Daemon not started`. The daemon
+had started. Run 44005867871's `home-manager-generation` builder reported
+`consumeEntire(): ERROR: Input null bytes, won't process` two minutes after
+239024 I/O errors, 489 of them on the Nix Store volume `disk2s7`.
+`substituteInPlace` reads the activation script in one pass, and that read
+hit the faulted volume. The tree had no NUL bytes. The realize job records
+`device_fault` and `realize-aarch64-darwin-retry` rebuilds the same outputs
+once on a fresh VM, which is the attempt allowed to push. A second fault
+fails the gate.
+
 Fork pull requests do not run the workflow's jobs. The trigger is
 `pull_request` for a head in this repository, and the Cachix token is passed
 only into the realize jobs. The gate program lives in

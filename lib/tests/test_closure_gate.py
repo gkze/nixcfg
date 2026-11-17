@@ -717,10 +717,11 @@ def test_pull_request_workflow_is_same_repo_and_keeps_darwin() -> None:
     assert "synchronize" in workflow["on"]["pull_request"]["types"]
     jobs = workflow["jobs"]
     realize_names = {f"realize-{system}" for system in _SYSTEMS}
-    assert set(jobs) == {"plan", "route", "closure-gate", *realize_names}
+    darwin_retry = "realize-aarch64-darwin-retry"
+    assert set(jobs) == {"plan", "route", "closure-gate", darwin_retry, *realize_names}
     for name, job in jobs.items():
         assert "head.repo.full_name == github.repository" in job["if"]
-        if name in realize_names:
+        if name in realize_names or name == darwin_retry:
             assert set(job["secrets"]) == {
                 "CACHIX_AUTH_TOKEN",
                 "UPDATE_SELF_HEAL_GITHUB_TOKEN",
@@ -755,6 +756,41 @@ def test_pull_request_workflow_is_same_repo_and_keeps_darwin() -> None:
     assert "concurrency" not in jobs["realize-x86_64-linux"]
     quality = (ROOT / ".github/workflows/pr-quality.yml").read_text(encoding="utf-8")
     assert "lib/tests/test_closure_gate.py" in quality
+
+
+def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -> None:
+    """44005867871: a faulted Nix Store read is not a closure result.
+
+    substituteInPlace reported null bytes after disk2s7 I/O errors. The first
+    job must not satisfy the gate. The fresh VM's result does, and only when
+    the first job recorded device_fault.
+    """
+    jobs = _workflow("pr-closure-gate.yml")["jobs"]
+    first = jobs["realize-aarch64-darwin"]
+    retry = jobs["realize-aarch64-darwin-retry"]
+    assert retry["needs"] == ["route", "realize-aarch64-darwin"]
+    assert " ".join(retry["if"].split()) == (
+        "always() && !cancelled() && "
+        "github.event.pull_request.head.repo.full_name == github.repository && "
+        "needs.route.result == 'success' && "
+        "needs.realize-aarch64-darwin.outputs.device_fault == 'true'"
+    )
+    assert retry["concurrency"] == first["concurrency"]
+    assert retry["uses"] == first["uses"]
+    assert retry["secrets"] == first["secrets"]
+    assert retry["with"] == {**first["with"], "device_fault_retry": "true"}
+    assert "realize-aarch64-darwin-retry" in jobs["closure-gate"]["needs"]
+    aggregate = next(
+        step
+        for step in jobs["closure-gate"]["steps"]
+        if step.get("name") == "Require every changed closure on gkze"
+    )
+    realized = " ".join(aggregate["env"]["REALIZE_RESULTS"].split())
+    assert (
+        "needs.realize-aarch64-darwin.outputs.device_fault == 'true' && "
+        "needs.realize-aarch64-darwin-retry.result || "
+        "needs.realize-aarch64-darwin.result"
+    ) in realized
 
 
 def test_realize_reuses_the_update_native_runner() -> None:

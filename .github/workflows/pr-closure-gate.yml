@@ -118,6 +118,36 @@ jobs:
     secrets:
       UPDATE_SELF_HEAL_GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
       CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+  # 44005867871: the Nix Store volume (disk2s7) logged I/O errors while
+  # home-manager-generation ran substituteInPlace on its activation script.
+  # consumeEntire then reported null bytes. That read is the faulted volume,
+  # not a NUL in the tree. The job records device_fault and flush refuses
+  # the untrusted store. One fresh VM rebuilds and pushes. A second fault fails.
+  realize-aarch64-darwin-retry:
+    needs:
+      - route
+      - realize-aarch64-darwin
+    if: >-
+      always() &&
+      !cancelled() &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      needs.route.result == 'success' &&
+      needs.realize-aarch64-darwin.outputs.device_fault == 'true'
+    concurrency:
+      group: ${{ format('nixcfg-darwin-{0}', contains(github.event.pull_request.labels.*.name, 'main-fix') && 'main-fix' || contains(github.event.pull_request.labels.*.name, 'security') && 'security' || contains(github.event.pull_request.labels.*.name, 'heal') && 'heal' || 'routine') }}
+      cancel-in-progress: false
+      queue: max
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: closure-gate
+      scope: gate
+      checkout_ref: ${{ github.event.pull_request.head.sha }}
+      device_fault_retry: true
+    secrets:
+      UPDATE_SELF_HEAL_GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
   realize-aarch64-linux:
     needs: route
     if: >-
@@ -155,6 +185,7 @@ jobs:
       - plan
       - route
       - realize-aarch64-darwin
+      - realize-aarch64-darwin-retry
       - realize-aarch64-linux
       - realize-x86_64-linux
     if: >-
@@ -199,7 +230,7 @@ jobs:
           REALIZE_RESULTS: >-
             ${{ format(
             '{{"aarch64-darwin":"{0}","aarch64-linux":"{1}","x86_64-linux":"{2}"}}',
-            needs.realize-aarch64-darwin.result,
+            needs.realize-aarch64-darwin.outputs.device_fault == 'true' && needs.realize-aarch64-darwin-retry.result || needs.realize-aarch64-darwin.result,
             needs.realize-aarch64-linux.result,
             needs.realize-x86_64-linux.result) }}
           CHANGED: ${{ needs.route.outputs.changed || '{}' }}
