@@ -66,16 +66,29 @@ _REQUIRED_JOBS = (
     "validate-darwin-cascade-warmup",
     "validate-darwin-cascade-warmup-faults",
     "validate-darwin-packages",
+    "validate-darwin-packages-faults",
     "validate-darwin-roots",
     "validate-darwin-roots-faults",
     "validate-darwin-closures",
+    "validate-darwin-closures-faults",
 )
-# A warmup or root -retry only runs for cells whose first attempt handed off
-# a device fault, so a clean matrix skips it. Its result is still mandatory.
+# A Darwin -retry runs for a device fault or a lost runner, so a clean job
+# skips it. Its result is still mandatory.
 _RETRY_JOBS = (
     "validate-darwin-warm-rust-retry",
     "validate-darwin-cascade-warmup-retry",
+    "validate-darwin-packages-retry",
     "validate-darwin-roots-retry",
+    "validate-darwin-closures-retry",
+)
+# A lost runner fails the first job. Coverage accepts that failure only when
+# -faults recorded it and the fresh-VM retry succeeded.
+_RECOVERABLE_JOBS = (
+    "validate-darwin-warm-rust",
+    "validate-darwin-cascade-warmup",
+    "validate-darwin-packages",
+    "validate-darwin-roots",
+    "validate-darwin-closures",
 )
 _RETRY_RESULTS = frozenset({"success", "skipped"})
 _DEVICE_FAULT_SUFFIX = "-device-fault"
@@ -83,6 +96,8 @@ _RETRIED_FAULT_ARTIFACTS = (
     "validate-aarch64-darwin-rust-warmup-",
     "validate-aarch64-darwin-cascade-warmup-",
     "validate-aarch64-darwin-closure-shard-",
+    "validate-aarch64-darwin-packages",
+    "validate-aarch64-darwin-closures",
 )
 _PACKAGE_REPORTS = (
     ("validate-aarch64-linux", "aarch64-linux"),
@@ -150,10 +165,23 @@ def parse_job_results(raw: str) -> dict[str, str]:
     return results
 
 
+def _lost_runner_recovered(name: str, results: Mapping[str, str]) -> bool:
+    """Return whether a failed Darwin job was redone after the runner was lost."""
+    return (
+        name in _RECOVERABLE_JOBS
+        and results.get(name) == "failure"
+        and results.get(f"{name}-faults") == "success"
+        and results.get(f"{name}-recovered") == "true"
+        and results.get(f"{name}-retry") == "success"
+    )
+
+
 def require_required_jobs(results: Mapping[str, str]) -> None:
     """Fail if a required validator was skipped, cancelled, or failed.
 
-    A warmup or root retry may be skipped (nothing faulted) but nothing else.
+    A Darwin retry may be skipped (nothing faulted and no runner was lost).
+    A first attempt that lost its runner is success only when ``-recovered``
+    is true and that retry succeeded.
     """
     missing = [name for name in required_coverage_jobs() if name not in results]
     if missing:
@@ -162,7 +190,7 @@ def require_required_jobs(results: Mapping[str, str]) -> None:
     bad = [
         f"{name}={results[name]}"
         for name in _REQUIRED_JOBS
-        if results[name] != "success"
+        if results[name] != "success" and not _lost_runner_recovered(name, results)
     ] + [
         f"{name}={results[name]}"
         for name in _RETRY_JOBS

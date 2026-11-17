@@ -152,7 +152,9 @@ def test_warmup_retry_may_be_skipped_but_must_report_a_result() -> None:
     for retry in (
         "validate-darwin-warm-rust-retry",
         "validate-darwin-cascade-warmup-retry",
+        "validate-darwin-packages-retry",
         "validate-darwin-roots-retry",
+        "validate-darwin-closures-retry",
     ):
         require_required_jobs({**_jobs(), retry: "skipped"})
         for result in ("failure", "cancelled", ""):
@@ -165,10 +167,35 @@ def test_warmup_retry_may_be_skipped_but_must_report_a_result() -> None:
     for detector in (
         "validate-darwin-warm-rust-faults",
         "validate-darwin-cascade-warmup-faults",
+        "validate-darwin-packages-faults",
         "validate-darwin-roots-faults",
+        "validate-darwin-closures-faults",
     ):
         with pytest.raises(CoverageError, match=f"{detector}=skipped"):
             require_required_jobs({**_jobs(), detector: "skipped"})
+
+
+def test_lost_runner_failure_is_covered_only_after_the_retry_succeeds() -> None:
+    """44052745290: the runner died with no device_fault. The retry is the result."""
+    jobs = {
+        **_jobs(),
+        "validate-darwin-cascade-warmup": "failure",
+        "validate-darwin-cascade-warmup-recovered": "true",
+        "validate-darwin-cascade-warmup-retry": "skipped",
+    }
+    with pytest.raises(CoverageError, match="validate-darwin-cascade-warmup=failure"):
+        require_required_jobs(jobs)
+    jobs["validate-darwin-cascade-warmup-retry"] = "success"
+    require_required_jobs(jobs)
+    with pytest.raises(CoverageError, match="validate-arm=failure"):
+        require_required_jobs({**_jobs(), "validate-arm": "failure"})
+    with pytest.raises(CoverageError, match="validate-darwin-roots=failure"):
+        require_required_jobs({**_jobs(), "validate-darwin-roots": "failure"})
+    jobs["validate-darwin-packages"] = "failure"
+    jobs["validate-darwin-packages-recovered"] = "true"
+    jobs["validate-darwin-packages-faults"] = "failure"
+    with pytest.raises(CoverageError, match="validate-darwin-packages"):
+        require_required_jobs(jobs)
 
 
 def test_device_faulted_warmup_slot_needs_clean_retry_evidence(tmp_path: Path) -> None:

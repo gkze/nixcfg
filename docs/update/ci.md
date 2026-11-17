@@ -335,7 +335,11 @@ Every job that passes an explicit `cachix-token` input to `update-runtime`
 ends with `flush-cachix`; read-only `repair` and `start-repair` do not. That
 step stops the daemon, then pushes and pins the job's recorded root receipts.
 A Darwin root pin uses the shard name (`darwin-argus`, `home-george`) and
-`--keep-revisions 1`. The linux-builder image uses its stable
+`--keep-revisions 1`. Only a `closure-shard` flush owns that name. Update
+44038363047 cascade-warmup slot 3 realized `home-manager-generation` with
+`NIXCFG_CLOSURE_ROOTS` empty, `cachix push` already saw the path on gkze,
+and naming the pin failed the flush. A warmup, package, or aggregate
+closure flush still pushes that wrapper and does not invent a pin. The linux-builder image uses its stable
 per-architecture name and the same one-revision keep. Hash-named pins are
 deleted before a Darwin root pin. A linux-builder pin that still keeps days
 is deleted before that image is pinned. If the pin then returns 402, flush
@@ -646,8 +650,22 @@ registered with bad bytes. A fresh VM can redo the shard exactly.
 A root shard's kernel-log query that runs past its budget fails the shard,
 as it does for a warmup slot: the shard exists to publish its paths.
 
-Canary, package, and aggregate closure validation have no retry job. They
-do not query the kernel log, and a fault there still fails the job.
+Package validation and the aggregate closure query the kernel log and hand
+a device fault to one fresh VM, the same way a warmup slot does. Canary
+validation has no retry job. It does not query the kernel log, and a fault
+there still fails the job.
+
+A hosted runner can also die without logging a block-device error and
+without setting `device_fault`. GitHub then annotates "lost communication
+with the server" and leaves the current step `in_progress`. That includes
+a loss during `update-runtime`, before the updater records anything.
+`-faults` reads the job list after the Darwin job finishes. It retries the
+lost job, and any sibling that stopped because of that loss, once. A real
+updater or flush failure is not retried: Update 44038363047 slot 3 failed
+in flush and the other cascade slots stopped for that sibling, so no slot
+was retried. Coverage accepts the first job's `failure` only when
+`-recovered` is true and the retry succeeded. The closure-gate Darwin
+realize job uses the same decision.
 
 ### Validation failures and timeouts
 
@@ -892,7 +910,11 @@ had started. Run 44005867871's `home-manager-generation` builder reported
 hit the faulted volume. The tree had no NUL bytes. The realize job records
 `device_fault` and `realize-aarch64-darwin-retry` rebuilds the same outputs
 once on a fresh VM, which is the attempt allowed to push. A second fault
-fails the gate.
+fails the gate. A runner lost with no `device_fault` flag is the same
+retry: `realize-aarch64-darwin-faults` reads the check-run annotation and
+the step left `in_progress`. The aggregating job downloads that retry's
+receipt when the first realize did not succeed. A real build failure is
+not retried.
 
 Fork pull requests do not run the workflow's jobs. The trigger is
 `pull_request` for a head in this repository, and the Cachix token is passed
