@@ -2023,9 +2023,10 @@ def _realize_cascade_paths(
     if failures:
         # 43824955314 slot 0: gnu-config's config.guess fetchurl 502'd
         # after cache.nixos.org was disabled. Retry that FOD, then the
-        # parent that needed it. A retry that still fails stays a failure.
+        # stripe. A retry that still fails stays a failure.
         failures = _retry_cascade_source_fetches(
             failures,
+            drvs,
             flake_root=flake_root,
             progress=progress,
         )
@@ -2035,16 +2036,20 @@ def _realize_cascade_paths(
 
 def _retry_cascade_source_fetches(
     failures: tuple[validation.DerivationValidationFailure, ...],
+    drvs: tuple[str, ...],
     *,
     flake_root: Path,
     progress: validation.ValidationProgress,
 ) -> tuple[validation.DerivationValidationFailure, ...]:
-    """Retry source FODs named by cascade failures, then their parents.
+    """Retry source FODs named by cascade failures, then the whole stripe.
 
-    Rust-warmup already DNS-retries a crate tarball and rebuilds the
-    parent. Cascade builds one drv at a time and used to return the
-    parent failure, or abort on an unrecognized mirror line. The fresh
-    nix invocation can substitute the FOD once the cache answers again.
+    ``realize_warmup_outputs`` returns at the first transport-tainted
+    fixed-output hash, so the rest of the stripe was never attempted.
+    Rust-warmup DNS-retries the FOD and realizes its original list again.
+    Cascade does the same: a recovered fetch must not report success
+    while cascade-canary or a later slot path is still missing. Already
+    realized outputs substitute. A retry that still fails stays a failure
+    and does not rebuild parents against the missing source.
     """
     retry = source_fetch_retry_drvs(failures)
     if not retry:
@@ -2055,32 +2060,19 @@ def _retry_cascade_source_fetches(
         flake_root=flake_root,
         progress=progress,
     )
-    kept = tuple(
-        failure
-        for failure in failures
-        if source_fetch_failure_drv(failure) not in retry_set
-    )
     if fod_failures:
-        return (*kept, *fod_failures)
-    parents = tuple(
-        dict.fromkeys(
-            failure.installable.removesuffix("^*")
+        kept = tuple(
+            failure
             for failure in failures
-            if source_fetch_failure_drv(failure) in retry_set
-            and failure.installable.removesuffix("^*") not in retry_set
+            if source_fetch_failure_drv(failure) not in retry_set
         )
-    )
-    if not parents:
-        return kept
-    return (
-        *kept,
-        *realize_warmup_outputs(
-            parents,
-            flake_root=flake_root,
-            progress=progress,
-            keep_going=True,
-            chunk=1,
-        ),
+        return (*kept, *fod_failures)
+    return realize_warmup_outputs(
+        drvs,
+        flake_root=flake_root,
+        progress=progress,
+        keep_going=True,
+        chunk=1,
     )
 
 

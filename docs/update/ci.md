@@ -112,9 +112,11 @@ reports. Certification requires both gates for every system.
 
 A cascade slot treats a gnu-config `config.guess-<rev>` or `config.sub-<rev>`
 fetchurl miss as a source fetch. It retries that fetch after DNS recovers,
-then rebuilds the parent derivation. Run 43824955314 slot 0 died on an HTTP
-502 for `config.guess-948ae97` before that retry existed. A retry that still
-fails fails the slot.
+then realizes the stripe again. The first pass stops at a transport-tainted
+fixed-output hash, so rebuilding only the failed parent would leave the
+rest of the stripe, including cascade-canary, unpublished. Run 43824955314
+slot 0 died on an HTTP 502 for `config.guess-948ae97` before that retry
+existed. A retry that still fails fails the slot.
 
 One hosted macOS job cannot realize `checks.aarch64-darwin.root-closures`
 inside the 360-minute job cap. That build is therefore a chain of shards. Each
