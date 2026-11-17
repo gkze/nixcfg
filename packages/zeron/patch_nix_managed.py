@@ -476,8 +476,126 @@ _PATCHES_138 = (
 )
 
 
+# 0.3.7 moves the channel download into download_release_file_from and the
+# cloud-aware headless stage into stage_headless_on. restart_service runs
+# the pre-restart hook before the registered relaunch. Nix owns the hook,
+# both download entries, and both stage entries. The 0.2.138 guards still
+# own fetch, apply, and relaunch.
+_PATCHES_037 = (
+    *_PATCHES_138[:3],
+    _update(
+        (
+            "pub async fn download_release_file(\n"
+            "    edge_url: &str,\n"
+            "    manifest: &Manifest,\n"
+            "    file: &str,\n"
+            "    dest: &Path,\n"
+            ") -> anyhow::Result<()> {\n"
+            "    // From the feed the manifest came from: a beta's files are beta's.\n"
+            "    download_release_file_from("
+            "&manifest.channel.base(&release_base(edge_url)?), "
+            "manifest, file, dest).await\n"
+            "}\n"
+        ),
+        (
+            "pub async fn download_release_file(\n"
+            "    edge_url: &str,\n"
+            "    manifest: &Manifest,\n"
+            "    file: &str,\n"
+            "    dest: &Path,\n"
+            ") -> anyhow::Result<()> {\n"
+            "    ensure_updates_mutable()?;\n"
+            "    // From the feed the manifest came from: a beta's files are beta's.\n"
+            "    download_release_file_from("
+            "&manifest.channel.base(&release_base(edge_url)?), "
+            "manifest, file, dest).await\n"
+            "}\n"
+        ),
+    ),
+    _update(
+        """pub(crate) async fn download_release_file_from(
+    base: &str,
+    manifest: &Manifest,
+    file: &str,
+    dest: &Path,
+) -> anyhow::Result<()> {
+    let url = format!("{base}/{file}");
+""",
+        """pub(crate) async fn download_release_file_from(
+    base: &str,
+    manifest: &Manifest,
+    file: &str,
+    dest: &Path,
+) -> anyhow::Result<()> {
+    ensure_updates_mutable()?;
+    let url = format!("{base}/{file}");
+""",
+    ),
+    _update(
+        """pub async fn stage_headless(
+    edge_url: &str,
+    manifest: &Manifest,
+    app_root: &Path,
+) -> anyhow::Result<PathBuf> {
+    stage_headless_on(edge_url, manifest, app_root, on_cloud()).await
+}
+""",
+        """pub async fn stage_headless(
+    edge_url: &str,
+    manifest: &Manifest,
+    app_root: &Path,
+) -> anyhow::Result<PathBuf> {
+    ensure_updates_mutable()?;
+    stage_headless_on(edge_url, manifest, app_root, on_cloud()).await
+}
+""",
+    ),
+    _update(
+        """async fn stage_headless_on(
+    edge_url: &str,
+    manifest: &Manifest,
+    app_root: &Path,
+    cloud: bool,
+) -> anyhow::Result<PathBuf> {
+    // Reject unsupported targets before creating a stage or making a request.
+    require_managed_update_platform()?;
+""",
+        """async fn stage_headless_on(
+    edge_url: &str,
+    manifest: &Manifest,
+    app_root: &Path,
+    cloud: bool,
+) -> anyhow::Result<PathBuf> {
+    // Reject unsupported targets before creating a stage or making a request.
+    require_managed_update_platform()?;
+    ensure_updates_mutable()?;
+""",
+    ),
+    _PATCHES_138[5],
+    _update(
+        """pub fn restart_service() -> anyhow::Result<()> {
+    before_restart();
+    if let Some(restart) = MANAGED_RESTART.get() {
+        return restart();
+    }
+    require_managed_update_platform()?;
+""",
+        """pub fn restart_service() -> anyhow::Result<()> {
+    ensure_updates_mutable()?;
+    before_restart();
+    if let Some(restart) = MANAGED_RESTART.get() {
+        return restart();
+    }
+    require_managed_update_platform()?;
+""",
+    ),
+    *_PATCHES_138[7:],
+)
+
+
 # Supported updater layouts, newest first. Exactly one must match the tree.
 _LAYOUTS = {
+    "0.3.7": _PATCHES_037,
     "0.2.138": _PATCHES_138,
     "0.2.136": _PATCHES_136,
     "0.2.115": _PATCHES_115,
