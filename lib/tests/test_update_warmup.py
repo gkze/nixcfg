@@ -2327,6 +2327,51 @@ def test_crane_cargo_src_fod_is_a_retryable_source_fetch() -> None:
     assert source_fetch_retry_drvs((timed_out,)) == (cfg_aliases,)
 
 
+def test_gnu_config_fetchurl_is_a_retryable_source_fetch() -> None:
+    """43824955314 slot 0: config.guess-948ae97 502'd and aborted cascade.
+
+    nixpkgs gnu-config names the scripts ``config.guess-<rev>`` and
+    ``config.sub-<rev>`` with no archive suffix. That mirror line must
+    reach the DNS-gated retry. A bare name and a compiler tarball stay
+    fatal.
+    """
+    guess = "/nix/store/9iifc6ayzvhlxvdf9nx14jcqbcd1jhq5-config.guess-948ae97.drv"
+    sub = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-config.sub-948ae97.drv"
+    mirror = "       > error: cannot download config.guess-948ae97 from any mirror"
+    assert is_source_fetch_store_path(guess)
+    assert is_source_fetch_store_path(guess.removesuffix(".drv"))
+    assert is_source_fetch_store_path(sub)
+    assert is_source_fetch_mirror_line(mirror)
+    assert is_source_fetch_mirror_line(
+        "error: cannot download config.sub-948ae97 from any mirror"
+    )
+    assert warmup_fatal_line(mirror) is None
+    assert warmup_fatal_line(f"error: Cannot build '{guess}'.") is None
+    assert (
+        warmup_fatal_line("error: cannot download config.guess from any mirror")
+        == "cannot download from any mirror"
+    )
+    assert (
+        warmup_fatal_line(
+            "error: cannot download bmake-20260313.tar.gz from any mirror"
+        )
+        == "cannot download from any mirror"
+    )
+    timed_out = DerivationValidationFailure(
+        source="cascade-warmup",
+        installable=(
+            "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-tree-sitter-c-neovim-1944cb3.drv^*"
+        ),
+        message=(
+            f"error: Cannot build '{guess}'.\n"
+            "       Reason: builder failed with exit code 1.\n"
+            "       > curl: (22) The requested URL returned error: 502\n"
+            f"{mirror}"
+        ),
+    )
+    assert source_fetch_retry_drvs((timed_out,)) == (guess,)
+
+
 def test_rust_cannot_build_after_source_fod_miss_is_not_fatal() -> None:
     """38359636482 slot 2: rust_markup5ever Cannot-build follows the tarball miss.
 

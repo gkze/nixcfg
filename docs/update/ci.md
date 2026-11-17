@@ -110,6 +110,14 @@ five hosted macOS runners substitute shared outputs. The
 Darwin roots embed. Package evidence and closure evidence are separate
 reports. Certification requires both gates for every system.
 
+A cascade slot treats a gnu-config `config.guess-<rev>` or `config.sub-<rev>`
+fetchurl miss as a source fetch. It retries that fetch after DNS recovers,
+then realizes the stripe again. The first pass stops at a transport-tainted
+fixed-output hash, so rebuilding only the failed parent would leave the
+rest of the stripe, including cascade-canary, unpublished. Run 43824955314
+slot 0 died on an HTTP 502 for `config.guess-948ae97` before that retry
+existed. A retry that still fails fails the slot.
+
 One hosted macOS job cannot realize `checks.aarch64-darwin.root-closures`
 inside the 360-minute job cap. That build is therefore a chain of shards. Each
 shard builds for five hours, the [Cachix](https://docs.cachix.org/) daemon
@@ -856,6 +864,18 @@ pushes only printed paths whose gkze narinfo is not 200. `cachix push`
 must exit 0 and the narinfo must then be 200, or the job fails. The flush step still runs and
 fails closed. The aggregating step writes the pushed and already-cached
 store paths into the job summary.
+
+A Darwin realize whose kernel logged block-device I/O errors does not push.
+Flush clears the Cachix daemon directory so the action's post hook cannot
+drain that store; the hook then logs `Cachix Daemon not started`. The daemon
+had started. Run 44005867871's `home-manager-generation` builder reported
+`consumeEntire(): ERROR: Input null bytes, won't process` two minutes after
+239024 I/O errors, 489 of them on the Nix Store volume `disk2s7`.
+`substituteInPlace` reads the activation script in one pass, and that read
+hit the faulted volume. The tree had no NUL bytes. The realize job records
+`device_fault` and `realize-aarch64-darwin-retry` rebuilds the same outputs
+once on a fresh VM, which is the attempt allowed to push. A second fault
+fails the gate.
 
 Fork pull requests do not run the workflow's jobs. The trigger is
 `pull_request` for a head in this repository, and the Cachix token is passed

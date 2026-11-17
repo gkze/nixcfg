@@ -5858,6 +5858,361 @@ def test_realize_cascade_paths_noops_when_filter_drops_every_drv(
     )
 
 
+def _cascade_one_drv_plan(tmp_path: Path, drv: str, *extra: str):
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    drvs = (drv, *extra)
+    outputs = tuple(item.removesuffix(".drv") for item in drvs)
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            tree="a" * 40,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(),
+            rustLayers=(),
+            cascadeOutputs=outputs,
+            cascadeLayers=(outputs,),
+            outputDrvs=dict(zip(outputs, drvs, strict=True)),
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=len(drvs),
+                    missing=len(drvs),
+                    warmup=0,
+                    remaining=len(drvs),
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=1,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    return warmup_plan
+
+
+def test_realize_cascade_paths_retries_gnu_config_then_the_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """43824955314 slot 0: retry config.guess, then rebuild its parent."""
+    parent = (
+        "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-tree-sitter-c-neovim-1944cb3.drv"
+    )
+    fod = "/nix/store/9iifc6ayzvhlxvdf9nx14jcqbcd1jhq5-config.guess-948ae97.drv"
+    message = (
+        f"error: Cannot build '{fod}'.\n"
+        "       > error: cannot download config.guess-948ae97 from any mirror"
+    )
+    calls: list[tuple[str, ...]] = []
+
+    def warmup_realize(
+        paths: tuple[str, ...], *_args: object, **_kwargs: object
+    ) -> tuple:
+        calls.append(tuple(paths))
+        if len(calls) == 1:
+            return (
+                DerivationValidationFailure(
+                    source="cascade-warmup",
+                    installable=f"{parent}^*",
+                    message=message,
+                ),
+            )
+        return ()
+
+    fetched: list[tuple[str, ...]] = []
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(
+        pipeline,
+        "realize_source_fetch_drvs",
+        lambda drvs, **_kwargs: fetched.append(tuple(drvs)) or (),
+    )
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        pipeline, "filter_cascade_realize_drvs", lambda drvs, **_k: drvs
+    )
+    monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: None)
+    assert (
+        pipeline._realize_cascade_paths(
+            _cascade_one_drv_plan(tmp_path, parent),
+            (parent.removesuffix(".drv"),),
+            flake_root=tmp_path,
+            label="cascade-warmup",
+            expected_tree="a" * 40,
+        )
+        == ()
+    )
+    assert calls == [(parent,), (parent,)]
+    assert fetched == [(fod,)]
+
+
+def test_realize_cascade_paths_keeps_a_failed_gnu_config_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A source fetch that still fails after retry fails the slot."""
+    parent = (
+        "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-tree-sitter-c-neovim-1944cb3.drv"
+    )
+    fod = "/nix/store/9iifc6ayzvhlxvdf9nx14jcqbcd1jhq5-config.guess-948ae97.drv"
+    message = f"error: Cannot build '{fod}'.\n       > error: cannot download config.guess-948ae97 from any mirror"
+    calls: list[tuple[str, ...]] = []
+    failure = DerivationValidationFailure(
+        source="cascade-warmup",
+        installable=f"{fod}^*",
+        message=message,
+    )
+
+    def warmup_realize(
+        paths: tuple[str, ...], *_args: object, **_kwargs: object
+    ) -> tuple:
+        calls.append(tuple(paths))
+        return (
+            DerivationValidationFailure(
+                source="cascade-warmup",
+                installable=f"{parent}^*",
+                message=message,
+            ),
+        )
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(
+        pipeline,
+        "realize_source_fetch_drvs",
+        lambda *_args, **_kwargs: (failure,),
+    )
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        pipeline, "filter_cascade_realize_drvs", lambda drvs, **_k: drvs
+    )
+    monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: None)
+    assert pipeline._realize_cascade_paths(
+        _cascade_one_drv_plan(tmp_path, parent),
+        (parent.removesuffix(".drv"),),
+        flake_root=tmp_path,
+        label="cascade-warmup",
+        expected_tree="a" * 40,
+    ) == (failure,)
+    assert calls == [(parent,)]
+
+
+def test_realize_cascade_paths_keeps_an_unrelated_failure_when_the_fetch_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed source retry still reports the stripe's other build failures."""
+    parent = (
+        "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-tree-sitter-c-neovim-1944cb3.drv"
+    )
+    other = "/nix/store/dddddddddddddddddddddddddddddddd-onnxruntime-1.20.1.drv"
+    fod = "/nix/store/9iifc6ayzvhlxvdf9nx14jcqbcd1jhq5-config.guess-948ae97.drv"
+    fetch_message = (
+        f"error: Cannot build '{fod}'.\n"
+        "       > error: cannot download config.guess-948ae97 from any mirror"
+    )
+    compile_failure = DerivationValidationFailure(
+        source="cascade-warmup",
+        installable=f"{other}^*",
+        message=f"error: builder for '{other}' failed with exit code 1",
+    )
+    fod_failure = DerivationValidationFailure(
+        source="cascade-warmup",
+        installable=f"{fod}^*",
+        message=fetch_message,
+    )
+    calls: list[tuple[str, ...]] = []
+
+    def warmup_realize(
+        paths: tuple[str, ...], *_args: object, **_kwargs: object
+    ) -> tuple:
+        calls.append(tuple(paths))
+        return (
+            DerivationValidationFailure(
+                source="cascade-warmup",
+                installable=f"{parent}^*",
+                message=fetch_message,
+            ),
+            compile_failure,
+        )
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(
+        pipeline,
+        "realize_source_fetch_drvs",
+        lambda *_args, **_kwargs: (fod_failure,),
+    )
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        pipeline, "filter_cascade_realize_drvs", lambda drvs, **_k: drvs
+    )
+    monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: None)
+    assert pipeline._realize_cascade_paths(
+        _cascade_one_drv_plan(tmp_path, parent, other),
+        (parent.removesuffix(".drv"), other.removesuffix(".drv")),
+        flake_root=tmp_path,
+        label="cascade-warmup",
+        expected_tree="a" * 40,
+    ) == (compile_failure, fod_failure)
+    assert calls == [(parent, other)]
+
+
+def test_realize_cascade_paths_does_not_retry_a_compile_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A parent compile error is not a source-fetch miss."""
+    parent = (
+        "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-tree-sitter-c-neovim-1944cb3.drv"
+    )
+    failure = DerivationValidationFailure(
+        source="cascade-warmup",
+        installable=f"{parent}^*",
+        message=f"error: builder for '{parent}' failed with exit code 1",
+    )
+    calls: list[tuple[str, ...]] = []
+
+    def warmup_realize(
+        paths: tuple[str, ...], *_args: object, **_kwargs: object
+    ) -> tuple:
+        calls.append(tuple(paths))
+        return (failure,)
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(
+        pipeline,
+        "realize_source_fetch_drvs",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("retried")),
+    )
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        pipeline, "filter_cascade_realize_drvs", lambda drvs, **_k: drvs
+    )
+    monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: None)
+    assert pipeline._realize_cascade_paths(
+        _cascade_one_drv_plan(tmp_path, parent),
+        (parent.removesuffix(".drv"),),
+        flake_root=tmp_path,
+        label="cascade-warmup",
+        expected_tree="a" * 40,
+    ) == (failure,)
+    assert calls == [(parent,)]
+
+
+def test_realize_cascade_paths_accepts_a_retried_fetch_with_no_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cascade drv that is itself the fetchurl succeeds once the retry does."""
+    fod = "/nix/store/9iifc6ayzvhlxvdf9nx14jcqbcd1jhq5-config.guess-948ae97.drv"
+    message = (
+        f"error: Cannot build '{fod}'.\n"
+        "       > error: cannot download config.guess-948ae97 from any mirror"
+    )
+    calls: list[tuple[str, ...]] = []
+
+    def warmup_realize(
+        paths: tuple[str, ...], *_args: object, **_kwargs: object
+    ) -> tuple:
+        calls.append(tuple(paths))
+        if len(calls) == 1:
+            return (
+                DerivationValidationFailure(
+                    source="cascade-warmup",
+                    installable=f"{fod}^*",
+                    message=message,
+                ),
+            )
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(
+        pipeline, "realize_source_fetch_drvs", lambda *_args, **_kwargs: ()
+    )
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        pipeline, "filter_cascade_realize_drvs", lambda drvs, **_k: drvs
+    )
+    monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: None)
+    assert (
+        pipeline._realize_cascade_paths(
+            _cascade_one_drv_plan(tmp_path, fod),
+            (fod.removesuffix(".drv"),),
+            flake_root=tmp_path,
+            label="cascade-warmup",
+            expected_tree="a" * 40,
+        )
+        == ()
+    )
+    assert calls == [(fod,), (fod,)]
+
+
+def test_realize_cascade_paths_resumes_the_stripe_after_a_tainted_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A recovered FOD hash must still realize paths the first pass skipped.
+
+    realize_warmup_outputs returns at the first transport-tainted hash, so
+    rebuilding only the failed parent would publish success while the tail,
+    including a cascade-canary output, never ran.
+    """
+    parent = (
+        "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-tree-sitter-c-neovim-1944cb3.drv"
+    )
+    fod = "/nix/store/9iifc6ayzvhlxvdf9nx14jcqbcd1jhq5-config.guess-948ae97.drv"
+    tail = "/nix/store/cccccccccccccccccccccccccccccccc-onnxruntime-1.20.1.drv"
+    message = f"error: hash mismatch in fixed-output derivation '{fod}'"
+    calls: list[tuple[str, ...]] = []
+
+    def warmup_realize(
+        paths: tuple[str, ...], *_args: object, **_kwargs: object
+    ) -> tuple:
+        calls.append(tuple(paths))
+        if len(calls) == 1:
+            return (
+                DerivationValidationFailure(
+                    source="cascade-warmup",
+                    installable=f"{parent}^*",
+                    message=message,
+                ),
+            )
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(
+        pipeline, "realize_source_fetch_drvs", lambda *_args, **_kwargs: ()
+    )
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        pipeline, "filter_cascade_realize_drvs", lambda drvs, **_k: drvs
+    )
+    monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: None)
+    paths = (parent.removesuffix(".drv"), tail.removesuffix(".drv"))
+    assert (
+        pipeline._realize_cascade_paths(
+            _cascade_one_drv_plan(tmp_path, parent, tail),
+            paths,
+            flake_root=tmp_path,
+            label="cascade-canary",
+            expected_tree="a" * 40,
+        )
+        == ()
+    )
+    assert calls == [(parent, tail), (parent, tail)]
+
+
 def test_validate_cli_requires_rust_warmup_plan(prepared_run, tmp_path: Path) -> None:
     candidate = _candidate_for_scope(prepared_run)
     candidate_path = tmp_path / "candidate.json"

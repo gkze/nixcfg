@@ -121,6 +121,7 @@ from lib.update.ci.warmup import (
     skip_cached_warmup_paths,
     slot_cascade_paths,
     slot_warmup_paths,
+    source_fetch_failure_drv,
     source_fetch_retry_drvs,
     unique_drvs_for_outputs,
     write_warmup_plan,
@@ -2011,15 +2012,68 @@ def _realize_cascade_paths(
     if not drvs:
         jobs.record_runner_storage(f"after-{label}")
         return ()
+    progress = _hosted_validation_progress(label, keep_going=True)
     failures = realize_warmup_outputs(
         drvs,
         flake_root=flake_root,
-        progress=_hosted_validation_progress(label, keep_going=True),
+        progress=progress,
         keep_going=True,
         chunk=1,
     )
+    if failures:
+        # 43824955314 slot 0: gnu-config's config.guess fetchurl 502'd
+        # after cache.nixos.org was disabled. Retry that FOD, then the
+        # stripe. A retry that still fails stays a failure.
+        failures = _retry_cascade_source_fetches(
+            failures,
+            drvs,
+            flake_root=flake_root,
+            progress=progress,
+        )
     jobs.record_runner_storage(f"after-{label}")
     return failures
+
+
+def _retry_cascade_source_fetches(
+    failures: tuple[validation.DerivationValidationFailure, ...],
+    drvs: tuple[str, ...],
+    *,
+    flake_root: Path,
+    progress: validation.ValidationProgress,
+) -> tuple[validation.DerivationValidationFailure, ...]:
+    """Retry source FODs named by cascade failures, then the whole stripe.
+
+    ``realize_warmup_outputs`` returns at the first transport-tainted
+    fixed-output hash, so the rest of the stripe was never attempted.
+    Rust-warmup DNS-retries the FOD and realizes its original list again.
+    Cascade does the same: a recovered fetch must not report success
+    while cascade-canary or a later slot path is still missing. Already
+    realized outputs substitute. A retry that still fails stays a failure
+    and does not rebuild parents against the missing source.
+    """
+    retry = source_fetch_retry_drvs(failures)
+    if not retry:
+        return failures
+    retry_set = set(retry)
+    fod_failures = realize_source_fetch_drvs(
+        retry,
+        flake_root=flake_root,
+        progress=progress,
+    )
+    if fod_failures:
+        kept = tuple(
+            failure
+            for failure in failures
+            if source_fetch_failure_drv(failure) not in retry_set
+        )
+        return (*kept, *fod_failures)
+    return realize_warmup_outputs(
+        drvs,
+        flake_root=flake_root,
+        progress=progress,
+        keep_going=True,
+        chunk=1,
+    )
 
 
 def _realize_cascade_warmup(

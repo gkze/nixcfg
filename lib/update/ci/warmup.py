@@ -2422,6 +2422,8 @@ def is_source_fetch_store_path(path: str) -> bool:
         return True
     if name == "source" or name.endswith(("-src", "-source")):
         return True
+    if is_gnu_config_fetch(name):
+        return True
     return name.startswith(("rusty_v8-", _CRANE_SOURCE_FETCH_PREFIX))
 
 
@@ -2446,6 +2448,16 @@ _COMPILER_MUST_SUBSTITUTE_PREFIXES = (
     "bmake-",
 )
 _MIRROR_DOWNLOAD = re.compile(r"cannot download (\S+) from any mirror", re.IGNORECASE)
+# nixpkgs gnu-config names its fetchurl scripts with a rev prefix and no
+# archive suffix: config.guess-${substring 0 7 rev}. 43824955314 slot 0
+# lost cache.nixos.org, then git.savannah.gnu.org returned HTTP 502. The
+# mirror line aborted cascade before the DNS-gated source retry.
+_GNU_CONFIG_FETCH = re.compile(r"^config\.(?:guess|sub)-[0-9a-f]{7,40}$")
+
+
+def is_gnu_config_fetch(name: str) -> bool:
+    """Return whether *name* is a nixpkgs gnu-config fetchurl script."""
+    return _GNU_CONFIG_FETCH.fullmatch(name) is not None
 
 
 def _compiler_must_substitute_name(name: str) -> bool:
@@ -2488,6 +2500,7 @@ def is_source_fetch_mirror_line(line: str) -> bool:
     mirror failure. 38344741255 slot 1: ``clang-sys-1.9.1.tar.gz`` is
     the same class; a bare ``clang-`` prefix must not hide it.
     41207662691 slot 3: crane's ``cargo-src-cfg_aliases-0.2.1`` is too.
+    43824955314 slot 0: ``config.guess-948ae97`` is gnu-config's fetchurl.
     41351558501 slot 2: ``rustc-1.98.1-aarch64-apple-darwin.tar.xz`` is
     rust-overlay's pinned fetchurl of the prebuilt toolchain, not a
     rustc source bootstrap. The VM lost DNS for under a minute, Nix
@@ -2497,7 +2510,7 @@ def is_source_fetch_mirror_line(line: str) -> bool:
     if match is None:
         return False
     name = match.group(1)
-    if is_rust_overlay_target_tarball(name):
+    if is_gnu_config_fetch(name) or is_rust_overlay_target_tarball(name):
         return True
     if _compiler_must_substitute_name(name):
         return False
