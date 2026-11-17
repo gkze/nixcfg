@@ -154,6 +154,10 @@ class _Runner:
         """Realize *installables* and return their output store paths."""
         raise NotImplementedError
 
+    def settle(self, paths: tuple[str, ...]) -> None:
+        """Root *paths*, drop leftover build dirs, then GC before the next build."""
+        raise NotImplementedError
+
     def push(self, paths: tuple[str, ...]) -> None:
         """Upload *paths* to gkze or raise when the upload does not finish."""
         raise NotImplementedError
@@ -342,6 +346,14 @@ def build_args(installables: tuple[str, ...]) -> list[str]:
     The flag prefix matches ``_batch_validation_args`` for ``mode="build"``.
     ``--print-out-paths`` is the receipt flush already uses for roots;
     ``--no-link`` keeps the runner from retaining a result symlink.
+
+    ``--max-jobs 1`` is the Darwin closure-gate limit. The hosted daemon
+    default is 2. Run 44158690416 deleted ``bb``'s pnpm tree and ``waku``'s
+    vendor tree together; APFS then logged 215161 ``IOStorageFamily`` I/O
+    errors on ``disk2s7`` in 64 seconds, with 48 GiB and 500 million inodes
+    still free. One build directory at a time keeps that teardown off a
+    second writer. ``cores`` stays at the daemon's 2: the storm is the
+    concurrent unlink, and cores 1 would serialize rustc inside one drv.
     """
     if not installables:
         msg = "build requires at least one installable"
@@ -354,6 +366,8 @@ def build_args(installables: tuple[str, ...]) -> list[str]:
         "--no-link",
         "--keep-going",
         "--fallback",
+        "--max-jobs",
+        "1",
         "--print-out-paths",
         *normalized,
     ]
@@ -567,6 +581,83 @@ def _inventory_from_changed(
     return {"packages": packages, "roots": roots}
 
 
+def retain_store_paths(
+    paths: tuple[str, ...],
+    root_dir: Path,
+    run: Callable[[list[str]], object],
+) -> None:
+    """Register *paths* as GC roots so the next ``nix store gc`` keeps them."""
+    root_dir.mkdir(parents=True, exist_ok=True)
+    for path in paths:
+        link = root_dir / Path(path).name
+        run(["nix-store", "--realise", "--add-root", str(link), path])
+
+
+def clear_nix_build_directories(root: Path) -> int:
+    """Delete leftover ``nix-*`` build directories under *root*.
+
+    Nix's own deleter uses ``std::filesystem::remove``. On APFS that reports
+    ``Illegal byte sequence`` and then ``Directory not empty`` up the tree,
+    and a second build deleting at the same time turns it into an
+    ``IOStorageFamily`` storm (44158690416). This walk unlinks the names
+    ``os.scandir`` returns, including non-UTF-8 names, before the next
+    installable starts.
+    """
+    if not root.is_dir():
+        return 0
+    removed = 0
+    for child in list(root.iterdir()):
+        if not child.name.startswith("nix-"):
+            continue
+        _delete_build_tree(child)
+        removed += 1
+    return removed
+
+
+def _delete_build_tree(path: Path) -> None:
+    if path.is_symlink() or not path.is_dir():
+        path.unlink(missing_ok=True)
+        return
+    for _attempt in (1, 2):
+        if not path.exists():
+            return
+        for dirpath, dirnames, filenames in os.walk(
+            path, topdown=False, followlinks=False
+        ):
+            directory = Path(dirpath)
+            for name in filenames:
+                _unlink_build_entry(directory / name)
+            for name in dirnames:
+                child = directory / name
+                if child.is_symlink():
+                    _unlink_build_entry(child)
+                else:
+                    _rmdir_build_entry(child)
+        try:
+            path.rmdir()
+        except FileNotFoundError:
+            return
+        except OSError:
+            continue
+        return
+    sys.stdout.write(f"closure-gate left build directory {path}\n")
+    sys.stdout.flush()
+
+
+def _unlink_build_entry(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as error:
+        sys.stdout.write(f"closure-gate could not unlink {path}: {error}\n")
+
+
+def _rmdir_build_entry(path: Path) -> None:
+    try:
+        path.rmdir()
+    except OSError:
+        return
+
+
 def realize_changed(changed: Sequence[ChangedOutput], runner: _Runner) -> RealizeResult:
     """Build the selected installables and push paths gkze does not have.
 
@@ -574,6 +665,13 @@ def realize_changed(changed: Sequence[ChangedOutput], runner: _Runner) -> Realiz
     Darwin system names a different output than that build realizes, so it
     cannot choose the push set. A path already on gkze is substituted and
     is not pushed again. A push that does not finish raises.
+
+    Each installable is its own build. 44158690416 put the pnpm and node
+    vendor trees of several Darwin roots in one ``nix build`` at
+    ``max-jobs`` 2. Their build directories were deleted together and the
+    Nix Store volume faulted. Rooting the outputs, removing leftover build
+    directories, and garbage-collecting between installables leaves one
+    teardown at a time.
     """
     for item in changed:
         instantiated = runner.instantiate(item.attr)
@@ -583,10 +681,14 @@ def realize_changed(changed: Sequence[ChangedOutput], runner: _Runner) -> Realiz
                 f"plan_drv={item.drv} build_drv={instantiated}\n"
             )
             sys.stdout.flush()
-    built = runner.build(tuple(item.installable() for item in changed))
-    if len(built) < len(changed):
-        msg = f"nix build returned {len(built)} paths for {len(changed)} installables"
-        raise GateError(msg)
+    built: list[str] = []
+    for item in changed:
+        realized = runner.build((item.installable(),))
+        if not realized:
+            msg = f"nix build returned 0 paths for {item.installable()}"
+            raise GateError(msg)
+        built.extend(realized)
+        runner.settle(realized)
     cached: list[str] = []
     to_push: list[str] = []
     seen: set[str] = set()
@@ -851,6 +953,22 @@ class _ProcessRunner(_Runner):
             if _STORE_PATH_RE.fullmatch(line.strip())
         )
         return tuple(_store_path(path, derivation=False) for path in paths)
+
+    def settle(self, paths: tuple[str, ...]) -> None:
+        temp = os.environ.get("RUNNER_TEMP")
+        if not temp:
+            msg = "RUNNER_TEMP is unset"
+            raise GateError(msg)
+        root = Path(temp) / "closure-gate-gcroots"
+        retain_store_paths(
+            paths,
+            root,
+            lambda args: _run(args, timeout=_INSTANTIATE_TIMEOUT_SECONDS),
+        )
+        removed = clear_nix_build_directories(Path("/nix/var/nix/builds"))
+        sys.stdout.write(f"closure-gate cleared {removed} leftover build directories\n")
+        sys.stdout.flush()
+        _load_jobs().reclaim_hosted_store()
 
     def push(self, paths: tuple[str, ...]) -> None:
         for start in range(0, len(paths), _PUSH_CHUNK):

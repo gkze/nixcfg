@@ -65,7 +65,10 @@ class _Runner:
         self.present: set[str] = set()
         self.presence_value = "absent"
         self.built: tuple[str, ...] | None = None
+        self.builds: list[tuple[str, ...]] = []
         self.build_result: tuple[str, ...] = ()
+        self.build_results: dict[tuple[str, ...], tuple[str, ...]] = {}
+        self.settled: list[tuple[str, ...]] = []
         self.pushed: tuple[str, ...] | None = None
         self.push_error: Exception | None = None
 
@@ -81,8 +84,12 @@ class _Runner:
         return self.presence_value
 
     def build(self, installables: tuple[str, ...]) -> tuple[str, ...]:
+        self.builds.append(installables)
         self.built = installables
-        return self.build_result
+        return self.build_results.get(installables, self.build_result)
+
+    def settle(self, paths: tuple[str, ...]) -> None:
+        self.settled.append(paths)
 
     def push(self, paths: tuple[str, ...]) -> None:
         if self.push_error is not None:
@@ -239,7 +246,13 @@ def test_build_args_match_validation_plus_the_output_receipt() -> None:
     )
     expected = _batch_validation_args(requests, flake_root=None)
     first = expected.index("path:.#packages.aarch64-darwin.tool")
-    expected = [*expected[:first], "--print-out-paths", *expected[first:]]
+    expected = [
+        *expected[:first],
+        "--max-jobs",
+        "1",
+        "--print-out-paths",
+        *expected[first:],
+    ]
     assert gate.build_args(installables) == expected
     with pytest.raises(gate.GateError, match="at least one"):
         gate.build_args(())
@@ -395,6 +408,60 @@ def test_realize_builds_the_instantiated_drv_when_ifd_changes_it() -> None:
     result = gate.realize_changed((item,), runner)
     assert runner.built == (item.installable(),)
     assert result.pushed == (output,)
+
+
+def test_realize_builds_one_installable_at_a_time() -> None:
+    """44158690416 deleted two vendor trees at once. Each root settles first."""
+    first = _changed("root", "root-closure-darwin-argus", _drv("argus"))
+    second = _changed("root", "root-closure-home-george", _drv("home"))
+    argus = _out("argus")
+    home = _out("home")
+    runner = _Runner()
+    runner.drvs[first.attr] = first.drv
+    runner.drvs[second.attr] = second.drv
+    runner.build_results = {
+        (first.installable(),): (argus,),
+        (second.installable(),): (home,),
+    }
+    result = gate.realize_changed((first, second), runner)
+    assert runner.builds == [(first.installable(),), (second.installable(),)]
+    assert runner.settled == [(argus,), (home,)]
+    assert result.pushed == (argus, home)
+
+
+def test_build_directory_cleanup_removes_only_nix_trees(tmp_path: Path) -> None:
+    """A leftover vendor tree, including a non-UTF-8 name, is removed.
+
+    A sibling that is not a Nix build directory stays. A symlink is unlinked
+    and its target is not followed.
+    """
+    builds = tmp_path / "builds"
+    tree = builds / "nix-1" / "node_modules"
+    tree.mkdir(parents=True)
+    (tree / "plain").write_text("ok")
+    (tree / "bad\udcff").write_text("name")
+    outside = tmp_path / "outside"
+    outside.write_text("keep")
+    link = builds / "nix-link"
+    link.symlink_to(outside)
+    kept = builds / "other"
+    kept.mkdir()
+    assert gate.clear_nix_build_directories(builds) == 2
+    assert not (builds / "nix-1").exists()
+    assert not link.exists()
+    assert outside.read_text() == "keep"
+    assert kept.is_dir()
+    assert gate.clear_nix_build_directories(tmp_path / "missing") == 0
+
+
+def test_retained_store_paths_are_gc_roots(tmp_path: Path) -> None:
+    """The output of one root must survive the GC before the next root."""
+    path = _out("system")
+    calls: list[list[str]] = []
+    gate.retain_store_paths((path,), tmp_path, calls.append)
+    assert calls == [
+        ["nix-store", "--realise", "--add-root", str(tmp_path / Path(path).name), path]
+    ]
 
 
 def test_realize_fails_closed_on_a_bad_build() -> None:

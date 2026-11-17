@@ -890,8 +890,13 @@ aggregate.
 Realize calls the Update reusable workflow (`update-native.yml`) with stage
 `closure-gate` on `macos-15`, `ubuntu-24.04-arm`, and `ubuntu-24.04`. The
 build flags are the validation build (`nix build --no-update-lock-file
---no-link --keep-going --fallback`) plus `--print-out-paths`. The build
-budget is the Darwin shard budget, 18000 seconds, inside the 360-minute job.
+--no-link --keep-going --fallback`) plus `--max-jobs 1` and
+`--print-out-paths`. Each selected installable is a separate build. After
+it, the gate roots the printed paths, deletes leftover `nix-*` build
+directories, and runs the hosted store GC when free space is under the
+skip threshold before the next installable.
+The build budget is the Darwin shard budget, 18000 seconds, inside the
+360-minute job.
 The receipt is `--print-out-paths`. Derivation show of a Darwin system
 names a different output than the build realizes, so it does not choose
 what gets pushed. `nix build` substitutes a path already on gkze. The gate
@@ -916,7 +921,15 @@ signal even though the job conclusion is failure. Run 44141142629 failed
 `waku` with `Directory not empty` and `Illegal byte sequence` after the
 Nix Store volume faulted, uploaded that artifact, and the retry was skipped
 because the failed step looked like a real build. A second fault fails the
-gate. A runner lost with no `device_fault` flag is the same retry:
+gate. Run 44158690416 did that on two fresh VMs, and it was not a full
+disk or a dead device: both ended with 48–60 GiB free and hundreds of
+millions of inodes free. The retry's kernel log is 215161
+`IOStorageFamily` I/O errors on `disk2s7`, all inside 64 seconds at the
+end of the build, while Nix was unlinking `bb-0.48.1-pnpm10-source` and
+`waku-0.1.20-vendor` together (`max-jobs` 2). The first attempt failed
+the same way on another `node_modules` tree. One build directory at a
+time is the fix; another retry is not. A runner lost with no
+`device_fault` flag is the same retry:
 `realize-aarch64-darwin-faults` reads the check-run annotation and the step
 left `in_progress`. The aggregating job downloads that retry's receipt when
 the first realize did not succeed. A build failure with no `-device-fault`
