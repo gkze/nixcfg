@@ -110,6 +110,12 @@ five hosted macOS runners substitute shared outputs. The
 Darwin roots embed. Package evidence and closure evidence are separate
 reports. Certification requires both gates for every system.
 
+A cascade slot treats a gnu-config `config.guess-<rev>` or `config.sub-<rev>`
+fetchurl miss as a source fetch. It retries that fetch after DNS recovers,
+then rebuilds the parent derivation. Run 43824955314 slot 0 died on an HTTP
+502 for `config.guess-948ae97` before that retry existed. A retry that still
+fails fails the slot.
+
 One hosted macOS job cannot realize `checks.aarch64-darwin.root-closures`
 inside the 360-minute job cap. That build is therefore a chain of shards. Each
 shard builds for five hours, the [Cachix](https://docs.cachix.org/) daemon
