@@ -527,9 +527,7 @@ def _cachix_daemon_pid_state() -> tuple[int | None, bool | None]:
     if not daemon_dir:
         return None, None
     try:
-        pid = int(
-            (Path(daemon_dir) / "daemon.pid").read_text(encoding="utf-8").strip()
-        )
+        pid = int((Path(daemon_dir) / "daemon.pid").read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
         return None, None
     if pid <= 0:
@@ -2711,18 +2709,14 @@ def require_cachix_daemon() -> None:
                 _refuse_unready_cachix_daemon(
                     artifacts,
                     log,
-                    _unready_cachix_daemon_message(
-                        socket, pid=daemon_pid, alive=alive
-                    ),
+                    _unready_cachix_daemon_message(socket, pid=daemon_pid, alive=alive),
                 )
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 _refuse_unready_cachix_daemon(
                     artifacts,
                     log,
-                    _unready_cachix_daemon_message(
-                        socket, pid=daemon_pid, alive=alive
-                    ),
+                    _unready_cachix_daemon_message(socket, pid=daemon_pid, alive=alive),
                 )
             time.sleep(min(_CACHIX_DAEMON_READY_POLL_SECONDS, remaining))
         _retain_cachix_daemon_evidence(artifacts, log)

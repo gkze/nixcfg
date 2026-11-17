@@ -1055,9 +1055,12 @@ def test_require_cachix_daemon_reports_a_live_process_that_never_listens(
     with pytest.raises(jobs.CachixDaemonError, match="still running") as caught:
         jobs.main("require-cachix-daemon")
     assert str(os.getpid()) in str(caught.value)
-    assert "still running" in (
-        Path(env["RUNNER_TEMP"]) / "update-artifacts" / "cachix-daemon-require.log"
-    ).read_text()
+    assert (
+        "still running"
+        in (
+            Path(env["RUNNER_TEMP"]) / "update-artifacts" / "cachix-daemon-require.log"
+        ).read_text()
+    )
 
 
 def test_require_cachix_daemon_waits_for_the_action_socket(
