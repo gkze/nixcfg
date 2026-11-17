@@ -7681,12 +7681,15 @@ def test_darwin_job_retry_covers_a_lost_realize_and_a_device_fault(
             }
         ],
     }
+    jobs.darwin_job_retry()
+    assert output.read_text() == "retry=false\nrecovered=false\n"
+    output.write_text("")
     state["artifacts"] = {
         "total_count": 1,
         "artifacts": [{"name": "closure-gate-aarch64-darwin-gate-device-fault"}],
     }
     jobs.darwin_job_retry()
-    assert output.read_text() == "retry=false\nrecovered=false\n"
+    assert output.read_text() == "retry=true\nrecovered=false\n"
     output.write_text("")
     state["artifacts"] = {"total_count": 0, "artifacts": []}
     state["jobs"] = {

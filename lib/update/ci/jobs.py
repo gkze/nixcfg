@@ -2444,6 +2444,12 @@ def darwin_job_retry() -> None:
     Packages, aggregate closures, and the closure-gate realize job are one
     cell, not a matrix. A device-fault artifact or a runner lost with no
     ``device_fault`` flag retries that cell once. A real failure does not.
+
+    Realize does not hand the fault off with exit 0 (scope ``gate`` is not
+    a warmup). The realize step fails, the storage dump uploads
+    ``-device-fault``, and flush refuses the store. 44141142629 did that
+    for ``waku`` (``Directory not empty``, then ``Illegal byte sequence``)
+    and the retry was skipped because the failed step looked real.
     """
     job_name = os.environ.get("NIXCFG_FAULT_JOB_PREFIX", "").strip()
     artifact = os.environ.get("NIXCFG_FAULT_ARTIFACT_PREFIX", "").strip()
@@ -2469,7 +2475,7 @@ def darwin_job_retry() -> None:
             kind = "lost"
         else:
             kind = "real"
-    retry = kind == "lost" or (device and kind != "real")
+    retry = kind == "lost" or device
     recovered = kind == "lost"
     sys.stdout.write(
         f"Darwin retry for {job_name}: retry={retry} recovered={recovered} kind={kind}\n"

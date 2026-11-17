@@ -909,12 +909,18 @@ had started. Run 44005867871's `home-manager-generation` builder reported
 `substituteInPlace` reads the activation script in one pass, and that read
 hit the faulted volume. The tree had no NUL bytes. The realize job records
 `device_fault` and `realize-aarch64-darwin-retry` rebuilds the same outputs
-once on a fresh VM, which is the attempt allowed to push. A second fault
-fails the gate. A runner lost with no `device_fault` flag is the same
-retry: `realize-aarch64-darwin-faults` reads the check-run annotation and
-the step left `in_progress`. The aggregating job downloads that retry's
-receipt when the first realize did not succeed. A real build failure is
-not retried.
+once on a fresh VM, which is the attempt allowed to push. The realize step
+itself exits nonzero; the storage dump uploads
+`closure-gate-aarch64-darwin-gate-device-fault`. That artifact is the retry
+signal even though the job conclusion is failure. Run 44141142629 failed
+`waku` with `Directory not empty` and `Illegal byte sequence` after the
+Nix Store volume faulted, uploaded that artifact, and the retry was skipped
+because the failed step looked like a real build. A second fault fails the
+gate. A runner lost with no `device_fault` flag is the same retry:
+`realize-aarch64-darwin-faults` reads the check-run annotation and the step
+left `in_progress`. The aggregating job downloads that retry's receipt when
+the first realize did not succeed. A build failure with no `-device-fault`
+artifact is not retried.
 
 Fork pull requests do not run the workflow's jobs. The trigger is
 `pull_request` for a head in this repository, and the Cachix token is passed
