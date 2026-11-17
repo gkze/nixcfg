@@ -301,6 +301,23 @@ Prefetches append store paths to an invocation-local JSONL receipt that stays
 with the job artifacts. Publication validates and deduplicates these paths
 without a scan of the runner's store.
 
+`require-cachix-daemon` runs after `cachix-action` and before bootstrap.
+The action returns when it spawns `cachix daemon run`. Cachix 1.11.1 logs
+`Starting Cachix Daemon` and then fetches cache metadata from `Daemon.new`.
+That fetch retries HTTP failures for 90 seconds of cumulative delay
+(`Cachix.Client.Retry.httpRetryPolicy`) before `Listen.listen` binds
+`daemon.sock`. The gate waits 180 seconds so a retry still inside that
+window can bind the socket, and it fails immediately when the recorded
+daemon pid has exited. A request that never returns still fails the gate
+at 180 seconds, before bootstrap. Update 44033920588
+`validate-darwin-warm-rust` slots 0 and 1 still had only the Starting line
+when a 60-second gate expired. The socket existed about 84 seconds after
+the action returned, `cachix daemon stop` returned 0, and the kernel log
+had no `(IOStorageFamily) diskN: I/O error.` line. Slots 2–4 stopped
+because slot 1 was a sibling failure. A kernel block-device I/O error
+remains the fresh-VM device-fault handoff. This gate's failure stays a
+job failure, and its artifact name has no `-device-fault` suffix.
+
 The Cachix client does not time out a stalled upload. Prepare's publication
 of those receipts therefore uses the same 1200-second bound as flush, three
 times. A push that is still silent fails that attempt and retries, and the

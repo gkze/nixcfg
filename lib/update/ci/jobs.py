@@ -23,7 +23,7 @@ import urllib.request
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import TextIO, cast
+from typing import NoReturn, TextIO, cast
 from urllib.parse import quote
 
 # A direct script invocation has only lib/update/ci on sys.path. The policy and
@@ -62,10 +62,20 @@ _STORE_PATH_PREFIX = Path("/nix/store")
 _CACHIX_DAEMON_DIR_ENV = "CACHIX_DAEMON_DIR"
 _CACHIX_DAEMON_SOCKET_ENV = "CACHIX_DAEMON_SOCKET"
 _CACHIX_DAEMON_SOCKET_NAME = "daemon.sock"
-# cachix-action can return before daemon.sock exists. Poll so the
-# require-before-bootstrap gate still fail-closes without racing the
-# listener. Tests disable the wait through NIXCFG_CACHIX_DAEMON_READY_SECONDS.
-_CACHIX_DAEMON_READY_SECONDS = 60.0
+# cachix-action returns when it spawns `cachix daemon run`, before the
+# socket exists. Cachix 1.11.1 `Daemon.new` logs "Starting Cachix Daemon"
+# and then fetches cache metadata. `getBinaryCache` retries that HTTP call
+# for 90s of cumulative delay (`Cachix.Client.Retry.httpRetryPolicy`, and
+# the manager's `responseTimeoutNone` does not bound one hung request).
+# `Listen.listen` binds daemon.sock only after the fetch returns. Update
+# 44033920588 warm-rust slots 0 and 1 still had only the Starting line when
+# a 60s gate expired; the socket existed ~84s after the action returned,
+# `cachix daemon stop` returned 0, and the kernel log had no
+# `(IOStorageFamily) diskN: I/O error.`. 180s covers the 90s backoff cap
+# plus the requests that do return. A hung fetch still fails this gate
+# instead of occupying the shard. A recorded pid that has exited fails
+# immediately. Tests shorten the wait through NIXCFG_CACHIX_DAEMON_READY_SECONDS.
+_CACHIX_DAEMON_READY_SECONDS = 180.0
 _CACHIX_DAEMON_READY_POLL_SECONDS = 0.1
 _CACHIX_DAEMON_READY_SECONDS_ENV = "NIXCFG_CACHIX_DAEMON_READY_SECONDS"
 # cachix (1.11.1 on the runners, unchanged through 1.13.0) builds its HTTP
@@ -503,6 +513,36 @@ def cachix_daemon_socket() -> Path | None:
     if daemon_dir := os.environ.get(_CACHIX_DAEMON_DIR_ENV, "").strip():
         return Path(daemon_dir) / _CACHIX_DAEMON_SOCKET_NAME
     return None
+
+
+def _cachix_daemon_pid_state() -> tuple[int | None, bool | None]:
+    """Return the action's daemon pid and whether that process is running.
+
+    ``(None, None)`` means the pid file is absent or not a process id yet.
+    ``(pid, False)`` means the action recorded a pid and that process is
+    gone. ``(pid, True)`` means the process is still in its startup, including
+    the cache-metadata retry that runs before the socket exists.
+    """
+    daemon_dir = os.environ.get(_CACHIX_DAEMON_DIR_ENV, "").strip()
+    if not daemon_dir:
+        return None, None
+    try:
+        pid = int(
+            (Path(daemon_dir) / "daemon.pid").read_text(encoding="utf-8").strip()
+        )
+    except (OSError, ValueError):
+        return None, None
+    if pid <= 0:
+        return None, None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return pid, False
+    except PermissionError:
+        # Signal 0 still returns EPERM when the process exists and is owned
+        # by another user. That is a running daemon, including pid 1 in tests.
+        return pid, True
+    return pid, True
 
 
 class CachixFlushError(RuntimeError):
@@ -2608,6 +2648,41 @@ def _release_cachix_daemon_dir() -> None:
     _clear_cachix_daemon_env()
 
 
+def _refuse_unready_cachix_daemon(
+    artifacts: Path, log: TextIO, message: str
+) -> NoReturn:
+    """Keep the daemon files and fail the gate with *message*."""
+    _retain_cachix_daemon_evidence(artifacts, log)
+    _write_diagnostic(log, message)
+    raise CachixDaemonError(message)
+
+
+def _unready_cachix_daemon_message(
+    socket: Path | None, *, pid: int | None, alive: bool | None
+) -> str:
+    """Describe why the post-build-hook daemon is not ready to take pushes."""
+    if socket is None:
+        return (
+            "Cachix daemon socket is unknown: "
+            f"{_CACHIX_DAEMON_DIR_ENV} and {_CACHIX_DAEMON_SOCKET_ENV} "
+            "are unset. useDaemon did not start a post-build-hook daemon."
+        )
+    if pid is not None and alive is False:
+        return (
+            f"Cachix daemon pid {pid} exited before listening on {socket}. "
+            "The process is gone, so this is outside the pre-listen "
+            "cache-info retry."
+        )
+    if pid is not None and alive is True:
+        waited = _cachix_daemon_ready_wait_seconds()
+        return (
+            f"Cachix daemon socket missing: {socket}. "
+            f"Pid {pid} is still running after {waited:.0f}s, past the "
+            "cache-info retry window, and has not listened."
+        )
+    return f"Cachix daemon socket missing: {socket}"
+
+
 def require_cachix_daemon() -> None:
     """Fail closed unless cachix-action started a live post-build-hook daemon.
 
@@ -2616,7 +2691,11 @@ def require_cachix_daemon() -> None:
     daemon never started, nothing a shard compiles reaches gkze, which
     breaks push-at-the-smallest-unit. This check runs after cachix-action
     and before bootstrap so a silent skip cannot burn a five-hour shard.
-    Evidence is copied into artifacts here so retain (before flush) keeps it.
+    The action returns before ``Listen.listen`` binds the socket: Cachix
+    fetches cache metadata first and may spend its HTTP retry budget there.
+    The wait covers that budget. A recorded pid that has exited is not in
+    the retry, so the gate fails without spending the wait. Evidence is
+    copied into artifacts here so retain (before flush) keeps it.
     """
     artifacts = _temp() / "update-artifacts"
     artifacts.mkdir(parents=True, exist_ok=True)
@@ -2627,19 +2706,24 @@ def require_cachix_daemon() -> None:
             socket = cachix_daemon_socket()
             if socket is not None and socket.exists():
                 break
+            daemon_pid, alive = _cachix_daemon_pid_state()
+            if daemon_pid is not None and alive is False:
+                _refuse_unready_cachix_daemon(
+                    artifacts,
+                    log,
+                    _unready_cachix_daemon_message(
+                        socket, pid=daemon_pid, alive=alive
+                    ),
+                )
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                _retain_cachix_daemon_evidence(artifacts, log)
-                if socket is None:
-                    msg = (
-                        "Cachix daemon socket is unknown: "
-                        f"{_CACHIX_DAEMON_DIR_ENV} and {_CACHIX_DAEMON_SOCKET_ENV} "
-                        "are unset. useDaemon did not start a post-build-hook daemon."
-                    )
-                else:
-                    msg = f"Cachix daemon socket missing: {socket}"
-                _write_diagnostic(log, msg)
-                raise CachixDaemonError(msg)
+                _refuse_unready_cachix_daemon(
+                    artifacts,
+                    log,
+                    _unready_cachix_daemon_message(
+                        socket, pid=daemon_pid, alive=alive
+                    ),
+                )
             time.sleep(min(_CACHIX_DAEMON_READY_POLL_SECONDS, remaining))
         _retain_cachix_daemon_evidence(artifacts, log)
         daemon_dir = os.environ.get(_CACHIX_DAEMON_DIR_ENV, "").strip()

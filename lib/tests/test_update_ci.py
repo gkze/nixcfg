@@ -938,6 +938,128 @@ def test_require_cachix_daemon_fails_closed_before_bootstrap(
     assert (artifacts / "cachix-daemon" / "daemon.log").read_text() == "started\n"
 
 
+def test_cachix_daemon_ready_wait_covers_the_pre_listen_cache_retry() -> None:
+    """Cachix 1.11.1 retries getBinaryCache for 90s before binding the socket.
+
+    The wait is delay plus the requests that return. Update 44033920588
+    expired a 60s gate while that retry was still running, then the socket
+    appeared at about 84s and the daemon accepted stop.
+    """
+    assert jobs._CACHIX_DAEMON_READY_SECONDS > 90
+
+
+def _absent_pid() -> int:
+    """Return a pid that is not running, without spawning a process."""
+    candidate = os.getpid() + 100_000
+    for _ in range(1_000):
+        try:
+            os.kill(candidate, 0)
+        except ProcessLookupError:
+            return candidate
+        except PermissionError:
+            pass
+        candidate += 1
+    msg = "no unused pid"
+    raise AssertionError(msg)
+
+
+def test_require_cachix_daemon_fails_when_the_startup_process_has_exited(
+    native_job, monkeypatch
+) -> None:
+    """An exited pid is outside the pre-listen cache-info retry."""
+    env, checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    monkeypatch.setenv("NIXCFG_CACHIX_DAEMON_READY_SECONDS", "30")
+    monkeypatch.delenv("CACHIX_DAEMON_SOCKET", raising=False)
+    gone = _absent_pid()
+    daemon_dir = Path(env["RUNNER_TEMP"]) / "cachix-exited"
+    daemon_dir.mkdir(parents=True)
+    (daemon_dir / "daemon.pid").write_text(f"{gone}\n")
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    slept: list[float] = []
+    monkeypatch.setattr(jobs.time, "sleep", lambda seconds: slept.append(seconds))
+    with pytest.raises(jobs.CachixDaemonError, match="exited before listening"):
+        jobs.main("require-cachix-daemon")
+    assert slept == []
+    require_log = (
+        Path(env["RUNNER_TEMP"]) / "update-artifacts" / "cachix-daemon-require.log"
+    ).read_text()
+    assert f"pid {gone} exited" in require_log
+
+
+def test_require_cachix_daemon_ignores_an_unusable_pid_file(
+    native_job, monkeypatch
+) -> None:
+    """A missing, empty, or non-numeric pid is not an exited daemon."""
+    env, checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    monkeypatch.setenv("NIXCFG_CACHIX_DAEMON_READY_SECONDS", "0")
+    monkeypatch.delenv("CACHIX_DAEMON_SOCKET", raising=False)
+    daemon_dir = Path(env["RUNNER_TEMP"]) / "cachix-pid"
+    daemon_dir.mkdir(parents=True)
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    for contents in ("not-a-pid\n", "0\n", "-3\n"):
+        (daemon_dir / "daemon.pid").write_text(contents)
+        with pytest.raises(jobs.CachixDaemonError, match="socket missing") as caught:
+            jobs.main("require-cachix-daemon")
+        assert "exited before listening" not in str(caught.value)
+        assert "still running" not in str(caught.value)
+
+
+def test_require_cachix_daemon_treats_an_unsignalable_pid_as_running(
+    native_job, monkeypatch
+) -> None:
+    """Signal 0 returning EPERM means the process exists under another user.
+
+    Root can signal pid 1, so this outcome is forced. A non-root run hits it
+    for real on that pid.
+    """
+    env, checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    monkeypatch.setenv("NIXCFG_CACHIX_DAEMON_READY_SECONDS", "0")
+    monkeypatch.delenv("CACHIX_DAEMON_SOCKET", raising=False)
+    daemon_dir = Path(env["RUNNER_TEMP"]) / "cachix-eperm"
+    daemon_dir.mkdir(parents=True)
+    (daemon_dir / "daemon.pid").write_text("1\n")
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+
+    def refuse(_pid: int, _signal: int) -> None:
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(jobs.os, "kill", refuse)
+    with pytest.raises(jobs.CachixDaemonError, match="still running") as caught:
+        jobs.main("require-cachix-daemon")
+    assert "Pid 1 is still running" in str(caught.value)
+
+
+def test_require_cachix_daemon_reports_a_live_process_that_never_listens(
+    native_job, monkeypatch
+) -> None:
+    """A process still running at the deadline has not bound the socket."""
+    env, checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    monkeypatch.setenv("NIXCFG_CACHIX_DAEMON_READY_SECONDS", "0")
+    monkeypatch.delenv("CACHIX_DAEMON_SOCKET", raising=False)
+    daemon_dir = Path(env["RUNNER_TEMP"]) / "cachix-live"
+    daemon_dir.mkdir(parents=True)
+    (daemon_dir / "daemon.pid").write_text(f"{os.getpid()}\n")
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    with pytest.raises(jobs.CachixDaemonError, match="still running") as caught:
+        jobs.main("require-cachix-daemon")
+    assert str(os.getpid()) in str(caught.value)
+    assert "still running" in (
+        Path(env["RUNNER_TEMP"]) / "update-artifacts" / "cachix-daemon-require.log"
+    ).read_text()
+
+
 def test_require_cachix_daemon_waits_for_the_action_socket(
     native_job, monkeypatch
 ) -> None:
