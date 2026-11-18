@@ -866,6 +866,12 @@ def test_pull_request_workflow_is_same_repo_and_keeps_darwin() -> None:
             assert job["with"]["runner"] == _RUNNERS[job["with"]["system"]]
             assert "head.sha" in job["with"]["checkout_ref"]
             assert "matrix" not in job["if"]
+            if name in realize_names:
+                # 44264431579: a skipped plan-darwin-retry made GitHub skip
+                # realize even though route succeeded.
+                assert " ".join(job["if"].split()).startswith(
+                    "always() && !cancelled() && "
+                )
         else:
             assert "secrets" not in job
     assert "secrets: inherit" not in text

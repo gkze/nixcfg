@@ -4452,6 +4452,9 @@ def test_repair_agent_job_holds_no_write_credentials() -> None:
     }
     assert "secrets." not in json.dumps(jobs["repair"])
     assert jobs["start-repair"]["needs"] == "repair"
+    assert jobs["start-repair"]["if"] == (
+        "always() && !cancelled() && needs.repair.result == 'success'"
+    )
     assert jobs["start-repair"]["environment"] == "update-repair-approval"
     assert jobs["start-repair"]["permissions"] == {
         "actions": "write",
@@ -6230,6 +6233,45 @@ def test_darwin_image_headroom_keeps_min_free_through_measured_peak() -> None:
         assert need - growth >= jobs._NIX_MIN_FREE_BYTES, job
     # Full reclaim on macos-15 leaves ~155.7 GB; the gate must stay reachable.
     assert need < 155_689_705_472
+
+
+def test_update_runtime_timeout_is_on_the_caller_step() -> None:
+    """Composite steps reject timeout-minutes and the action fails to load.
+
+    44264423588, 44264431251, and 44264431298 died on that key before Nix
+    started. The caller step carries the 90-minute cap instead.
+    """
+    action = (ROOT / ".github/actions/update-runtime/action.yml").read_text()
+    parsed = yaml.load(action, Loader=yaml.BaseLoader)
+    for step in parsed["runs"]["steps"]:
+        assert "timeout-minutes" not in step
+    callers: list[str] = []
+    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+        workflow = yaml.load(path.read_text(), Loader=yaml.BaseLoader)
+        for name, job in (workflow.get("jobs") or {}).items():
+            if not isinstance(job, dict):
+                continue
+            for step in job.get("steps") or []:
+                if not isinstance(step, dict):
+                    continue
+                if not str(step.get("uses", "")).startswith(
+                    "./.github/actions/update-runtime"
+                ):
+                    continue
+                assert step.get("timeout-minutes") == "90", f"{path.name}:{name}"
+                callers.append(f"{path.name}:{name}")
+    assert callers
+
+
+def test_update_pr_publish_survives_a_skipped_prepare_retry() -> None:
+    """A skipped prepare-darwin-retry must not skip a successful merge."""
+    jobs = yaml.load(
+        (ROOT / ".github/workflows/update-pr.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )["jobs"]
+    assert " ".join(jobs["publish"]["if"].split()) == (
+        "always() && !cancelled() && needs.prepare-merge.result == 'success'"
+    )
 
 
 def test_hosted_update_runtime_reserves_store_headroom_for_root_closures() -> None:

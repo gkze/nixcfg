@@ -121,6 +121,7 @@ jobs:
           ref: ${{ inputs.checkout_ref || github.event.inputs.repair_commit || github.sha }}
           persist-credentials: false
       - uses: ./.github/actions/update-runtime
+        timeout-minutes: 90
         id: runtime
         with:
           github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}

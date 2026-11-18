@@ -22,6 +22,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/update-runtime
+        timeout-minutes: 90
         with:
           github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
           cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
@@ -131,6 +132,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/update-runtime
+        timeout-minutes: 90
         with:
           github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
           cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}

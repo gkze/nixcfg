@@ -1503,6 +1503,7 @@ jobs:
           ref: ${{ github.event.inputs.repair_commit || github.sha }}
           persist-credentials: false
       - uses: ./.github/actions/update-runtime
+        timeout-minutes: 90
         id: runtime
         with:
           github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
@@ -1707,6 +1708,7 @@ jobs:
           ref: ${{ github.event.inputs.repair_commit || github.sha }}
           persist-credentials: false
       - uses: ./.github/actions/update-runtime
+        timeout-minutes: 90
         id: runtime
         with:
           github-token: ${{ github.token }}
@@ -1759,7 +1761,7 @@ jobs:
           retention-days: 30
   start-repair:
     needs: repair
-    if: needs.repair.result == 'success'
+    if: always() && !cancelled() && needs.repair.result == 'success'
     # This environment must have required reviewers in GitHub settings. The
     # approval gates this exact artifact before any write or credentialed run.
     environment: update-repair-approval
@@ -1775,6 +1777,7 @@ jobs:
           ref: ${{ github.event.inputs.repair_commit || github.sha }}
           persist-credentials: false
       - uses: ./.github/actions/update-runtime
+        timeout-minutes: 90
         id: runtime
         with:
           github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}

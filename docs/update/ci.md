@@ -676,8 +676,9 @@ the other cascade slots stopped for that sibling, so no slot was retried.
 Coverage accepts the first job's `failure` only when `-recovered` is true
 and the retry succeeded. The closure-gate Darwin plan cell and realize job
 use the same decision. Publish, repair, and the self-heal agent are not
-redone: a second writer can publish twice. Their `update-runtime` steps
-still time out on their own.
+redone: a second writer can publish twice. Each caller gives the
+`update-runtime` step 90 minutes. A composite action cannot set
+`timeout-minutes` on its own steps; that key makes the action fail to load.
 
 ### Validation failures and timeouts
 
@@ -951,7 +952,10 @@ time is the fix; another retry is not. A runner lost with no
 `realize-aarch64-darwin-faults` reads the check-run annotation, the step
 left `in_progress`, the job conclusion, and the step conclusions.
 The Darwin plan cell uses that decision too: a lost plan retries once and
-uploads `closure-gate-plan-aarch64-darwin` for route. The aggregating job
+uploads `closure-gate-plan-aarch64-darwin` for route. The realize jobs opt
+into `always()`: `plan-darwin-retry` is skipped on a clean plan, and GitHub
+then skips every later job that does not, even after route succeeds. Run
+44264431579 skipped all three realize jobs that way. The aggregating job
 downloads that retry's receipt when
 the first realize did not succeed. A build failure with no `-device-fault`
 artifact is not retried.

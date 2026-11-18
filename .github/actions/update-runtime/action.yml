@@ -26,10 +26,11 @@ outputs:
     value: ${{ steps.runtime.outputs.nixpkgs }}
 runs:
   using: composite
+  # Composite steps cannot set timeout-minutes. The key fails the
+  # action load (44264423588). Each caller step sets 90 minutes.
   steps:
     - name: Reclaim unused hosted image tools
       id: reclaim
-      timeout-minutes: 15
       shell: python
       env:
         NIXCFG_CI_STAGE: clean-image
@@ -39,7 +40,6 @@ runs:
         runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
     # Determinate Nix v3.22.5
     - uses: DeterminateSystems/determinate-nix-action@8d87e8d5e5b8a8309d4281094560f127d9a265f1
-      timeout-minutes: 20
       with:
         github-token: ${{ inputs.github-token }}
         extra-conf: |
@@ -49,7 +49,6 @@ runs:
           min-free = ${{ steps.reclaim.outputs.nix_min_free }}
           max-free = ${{ steps.reclaim.outputs.nix_max_free }}
     - name: Record disk after Nix install
-      timeout-minutes: 5
       shell: python
       env:
         NIXCFG_CI_STAGE: record-storage
@@ -58,14 +57,12 @@ runs:
         import runpy
         runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
     - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
-      timeout-minutes: 15
       with:
         name: gkze
         extraPullNames: zed
         authToken: ${{ inputs.cachix-token }}
         useDaemon: true
     - name: Record disk after Cachix daemon
-      timeout-minutes: 5
       shell: python
       env:
         NIXCFG_CI_STAGE: record-storage
@@ -75,7 +72,6 @@ runs:
         runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
     - name: Require Cachix daemon
       if: inputs.cachix-token != ''
-      timeout-minutes: 10
       shell: python
       env:
         NIXCFG_CI_STAGE: require-cachix-daemon
@@ -84,7 +80,6 @@ runs:
         runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
     - name: Restore generator downloads and verified receipts
       if: inputs.cache-generators == 'true'
-      timeout-minutes: 10
       uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
       with:
         path: |
@@ -98,7 +93,6 @@ runs:
           nixcfg-gen-v1-${{ runner.os }}-${{ runner.arch }}-
     - name: Build pinned runtime
       id: runtime
-      timeout-minutes: 30
       shell: python
       run: |
         import runpy
