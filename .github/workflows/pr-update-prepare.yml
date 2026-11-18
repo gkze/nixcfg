@@ -140,13 +140,56 @@ jobs:
     secrets: inherit
   # Same fresh-VM rerun as Update: a kernel block-device fault or a runner
   # Nix daemon/store fault retries. A package-scoped daemon crash does not.
+  # Device and runner faults are shard outputs. A lost runner, a job
+  # that hits its timeout, or a failed update-runtime step sets neither.
+  # This job emits those shard indexes. The retry if unions both signals.
+  prepare-darwin-faults:
+    needs:
+      - prepare-darwin-0
+      - prepare-darwin-1
+      - prepare-darwin-2
+      - prepare-darwin-3
+      - prepare-darwin-4
+    if: |-
+      always() && !cancelled() &&
+      (needs.prepare-darwin-0.result == 'success' ||
+      needs.prepare-darwin-0.result == 'failure' ||
+      needs.prepare-darwin-1.result == 'success' ||
+      needs.prepare-darwin-1.result == 'failure' ||
+      needs.prepare-darwin-2.result == 'success' ||
+      needs.prepare-darwin-2.result == 'failure' ||
+      needs.prepare-darwin-3.result == 'success' ||
+      needs.prepare-darwin-3.result == 'failure' ||
+      needs.prepare-darwin-4.result == 'success' ||
+      needs.prepare-darwin-4.result == 'failure')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      slots: ${{ steps.faults.outputs.slots }}
+      recovered: ${{ steps.faults.outputs.recovered }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: List Darwin prepare retries
+        id: faults
+        env:
+          NIXCFG_ACTIONS_TOKEN: ${{ github.token }}
+          NIXCFG_FAULT_SLOTS: 0 1 2 3 4
+          NIXCFG_CI_STAGE: prepare-darwin-retries
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
   prepare-darwin-retry-0:
-    needs: [targets, prepare-pins, prepare-darwin-0]
+    needs: [targets, prepare-pins, prepare-darwin-faults, prepare-darwin-0]
     if: |-
       always() && !cancelled() &&
       needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin-faults.result == 'success' &&
       (needs.prepare-darwin-0.outputs.device_fault == 'true' ||
-      needs.prepare-darwin-0.outputs.runner_fault == 'true')
+      needs.prepare-darwin-0.outputs.runner_fault == 'true' ||
+      contains(fromJSON(needs.prepare-darwin-faults.outputs.slots || '[]'), '0'))
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -158,12 +201,14 @@ jobs:
       prepare_shard_count: "5"
     secrets: inherit
   prepare-darwin-retry-1:
-    needs: [targets, prepare-pins, prepare-darwin-1]
+    needs: [targets, prepare-pins, prepare-darwin-faults, prepare-darwin-1]
     if: |-
       always() && !cancelled() &&
       needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin-faults.result == 'success' &&
       (needs.prepare-darwin-1.outputs.device_fault == 'true' ||
-      needs.prepare-darwin-1.outputs.runner_fault == 'true')
+      needs.prepare-darwin-1.outputs.runner_fault == 'true' ||
+      contains(fromJSON(needs.prepare-darwin-faults.outputs.slots || '[]'), '1'))
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -175,12 +220,14 @@ jobs:
       prepare_shard_count: "5"
     secrets: inherit
   prepare-darwin-retry-2:
-    needs: [targets, prepare-pins, prepare-darwin-2]
+    needs: [targets, prepare-pins, prepare-darwin-faults, prepare-darwin-2]
     if: |-
       always() && !cancelled() &&
       needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin-faults.result == 'success' &&
       (needs.prepare-darwin-2.outputs.device_fault == 'true' ||
-      needs.prepare-darwin-2.outputs.runner_fault == 'true')
+      needs.prepare-darwin-2.outputs.runner_fault == 'true' ||
+      contains(fromJSON(needs.prepare-darwin-faults.outputs.slots || '[]'), '2'))
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -192,12 +239,14 @@ jobs:
       prepare_shard_count: "5"
     secrets: inherit
   prepare-darwin-retry-3:
-    needs: [targets, prepare-pins, prepare-darwin-3]
+    needs: [targets, prepare-pins, prepare-darwin-faults, prepare-darwin-3]
     if: |-
       always() && !cancelled() &&
       needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin-faults.result == 'success' &&
       (needs.prepare-darwin-3.outputs.device_fault == 'true' ||
-      needs.prepare-darwin-3.outputs.runner_fault == 'true')
+      needs.prepare-darwin-3.outputs.runner_fault == 'true' ||
+      contains(fromJSON(needs.prepare-darwin-faults.outputs.slots || '[]'), '3'))
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -209,12 +258,14 @@ jobs:
       prepare_shard_count: "5"
     secrets: inherit
   prepare-darwin-retry-4:
-    needs: [targets, prepare-pins, prepare-darwin-4]
+    needs: [targets, prepare-pins, prepare-darwin-faults, prepare-darwin-4]
     if: |-
       always() && !cancelled() &&
       needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin-faults.result == 'success' &&
       (needs.prepare-darwin-4.outputs.device_fault == 'true' ||
-      needs.prepare-darwin-4.outputs.runner_fault == 'true')
+      needs.prepare-darwin-4.outputs.runner_fault == 'true' ||
+      contains(fromJSON(needs.prepare-darwin-faults.outputs.slots || '[]'), '4'))
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -247,7 +298,9 @@ jobs:
     secrets: inherit
   prepare-darwin-merge:
     needs:
+      - targets
       - prepare-pins
+      - prepare-darwin-faults
       - prepare-darwin-0
       - prepare-darwin-1
       - prepare-darwin-2
@@ -261,6 +314,7 @@ jobs:
     if: |-
       always() && !cancelled() &&
       needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin-faults.result == 'success' &&
       (needs.prepare-darwin-0.result == 'success' &&
       needs.prepare-darwin-0.outputs.device_fault != 'true' &&
       needs.prepare-darwin-0.outputs.runner_fault != 'true' ||

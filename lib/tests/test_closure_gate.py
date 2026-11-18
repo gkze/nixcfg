@@ -14,6 +14,8 @@ import yaml
 
 from lib.system_policy import supported_systems
 from lib.update.derivation_validation import (
+    HOSTED_BUILD_DERIVATION_TIMEOUT_SECONDS,
+    HOSTED_BUILD_MAX_SILENT_SECONDS,
     DerivationValidationRequest,
     _batch_validation_args,
 )
@@ -232,6 +234,58 @@ def test_plan_roundtrip_keeps_changed_drvs_only() -> None:
         )
 
 
+def test_nix_timeout_keeps_the_captured_tail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """44191046002 hid five hours of Nix output until the budget fired."""
+
+    def explode(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(
+            ["nix"],
+            float(kwargs["timeout"]),
+            output="early\n" * 25 + "still writing the store\n",
+            stderr="no kernel fault\n",
+        )
+
+    assert gate._process_text(b"bytes\n") == "bytes\n"
+    assert gate._process_text(None) == ""
+    monkeypatch.setattr(gate.subprocess, "run", explode)
+    monkeypatch.setattr(gate, "_executable", lambda name: name)
+    with pytest.raises(gate.GateError, match="still writing the store") as caught:
+        gate._run(["nix", "build"], timeout=12)
+    message = str(caught.value)
+    assert "timed out after 12s" in message
+    assert "no kernel fault" in message
+    assert message.count("early") <= 19
+
+    def silent(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(["nix"], float(kwargs["timeout"]))
+
+    monkeypatch.setattr(gate.subprocess, "run", silent)
+    with pytest.raises(gate.GateError, match="timed out after 3s$"):
+        gate._run(["nix", "eval"], timeout=3)
+
+
+def test_retry_realize_uses_the_shorter_installable_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fresh VM must not spend another 18000s on one installable."""
+    seen: dict[str, float] = {}
+
+    def run(args: list[str], *, timeout: float, cwd: Path | None = None) -> str:
+        del args, cwd
+        seen["timeout"] = timeout
+        return "/nix/store/" + "a" * 32 + "-tool\n"
+
+    monkeypatch.setattr(gate, "_run", run)
+    monkeypatch.setenv("NIXCFG_DEVICE_FAULT_RETRY", "true")
+    assert gate._ProcessRunner().build((".#packages.aarch64-darwin.tool",)) == (
+        "/nix/store/" + "a" * 32 + "-tool",
+    )
+    assert seen["timeout"] == gate.RETRY_BUILD_BUDGET_SECONDS
+    monkeypatch.setenv("NIXCFG_DEVICE_FAULT_RETRY", "false")
+    gate._ProcessRunner().build((".#packages.aarch64-darwin.tool",))
+    assert seen["timeout"] == gate.BUILD_BUDGET_SECONDS
+
+
 def test_build_args_match_validation_plus_the_output_receipt() -> None:
     """The gate must not grow a second build command."""
     installables = (
@@ -254,6 +308,10 @@ def test_build_args_match_validation_plus_the_output_receipt() -> None:
         *expected[first:],
     ]
     assert gate.build_args(installables) == expected
+    assert gate.BUILD_MAX_SILENT_SECONDS == HOSTED_BUILD_MAX_SILENT_SECONDS
+    assert gate.BUILD_DERIVATION_TIMEOUT_SECONDS == (
+        HOSTED_BUILD_DERIVATION_TIMEOUT_SECONDS
+    )
     with pytest.raises(gate.GateError, match="at least one"):
         gate.build_args(())
 
@@ -788,6 +846,8 @@ def test_pull_request_workflow_is_same_repo_and_keeps_darwin() -> None:
     darwin_faults = "realize-aarch64-darwin-faults"
     assert set(jobs) == {
         "plan",
+        "plan-darwin-faults",
+        "plan-darwin-retry",
         "route",
         "closure-gate",
         darwin_faults,
@@ -868,7 +928,11 @@ def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -
     assert retry["concurrency"] == first["concurrency"]
     assert retry["uses"] == first["uses"]
     assert retry["secrets"] == first["secrets"]
-    assert retry["with"] == {**first["with"], "device_fault_retry": "true"}
+    assert retry["with"] == {
+        **first["with"],
+        "device_fault_retry": "true",
+        "timeout_minutes": "240",
+    }
     assert "realize-aarch64-darwin-retry" in jobs["closure-gate"]["needs"]
     download = next(
         step

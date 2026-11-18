@@ -83,6 +83,10 @@ on:
         description: Fresh-VM rerun of a device-faulted warmup or root cell; a second fault fails
         default: false
         type: boolean
+      timeout_minutes:
+        description: Job cap. The closure-gate retry is shorter than a first attempt
+        default: 360
+        type: number
     outputs:
       darwin_closure_shards:
         description: Generated always-run Darwin closure matrix
@@ -104,7 +108,7 @@ permissions:
 jobs:
   native:
     runs-on: ${{ inputs.runner }}
-    timeout-minutes: 360
+    timeout-minutes: ${{ inputs.timeout_minutes }}
     outputs:
       darwin_closure_shards: ${{ steps.candidate.outputs.darwin_closure_shards }}
       device_fault: |-
@@ -197,6 +201,7 @@ jobs:
         env:
           NIXCFG_CLOSURE_GATE_COMMAND: realize
           NIXCFG_CLOSURE_GATE_PLAN: ${{ runner.temp }}/closure-gate/plan.json
+          NIXCFG_DEVICE_FAULT_RETRY: ${{ inputs.device_fault_retry }}
           SYSTEM: ${{ inputs.system }}
         shell: python
         run: |

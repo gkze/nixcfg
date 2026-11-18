@@ -3600,7 +3600,11 @@ def _assert_device_fault_retry(jobs: dict) -> None:
         retry_name = f"prepare-darwin-retry-{index}"
         shard = jobs[shard_name]
         retry = jobs[retry_name]
-        assert retry["needs"] == ["prepare-pins", shard_name]
+        assert retry["needs"] == [
+            "prepare-pins",
+            "prepare-darwin-faults",
+            shard_name,
+        ]
         assert retry["uses"] == shard["uses"]
         assert retry["with"] == shard["with"]
         assert retry["secrets"] == "inherit"
@@ -3609,8 +3613,11 @@ def _assert_device_fault_retry(jobs: dict) -> None:
         assert shard["with"]["runner"] == "macos-15"
         assert " ".join(retry["if"].split()) == (
             "always() && !cancelled() && needs.prepare-pins.result == 'success' && "
+            "needs.prepare-darwin-faults.result == 'success' && "
             f"(needs.{shard_name}.outputs.device_fault == 'true' || "
-            f"needs.{shard_name}.outputs.runner_fault == 'true')"
+            f"needs.{shard_name}.outputs.runner_fault == 'true' || "
+            "contains(fromJSON(needs.prepare-darwin-faults.outputs.slots || '[]'), "
+            f"'{index}'))"
         )
         assert (
             f"(needs.{shard_name}.result == 'success' && "
@@ -3685,6 +3692,8 @@ def _assert_canary_jobs(workflow_jobs: dict) -> None:
         "prepare-merge",
         "plan-darwin-closures",
         "canary-darwin-fods",
+        "canary-darwin-fods-faults",
+        "canary-darwin-fods-retry",
     }
     assert "prepare-merge.result == 'success'" in canary["if"]
     assert "canary-darwin-fods.result == 'success'" in canary["if"]
@@ -3724,6 +3733,8 @@ def _assert_cascade_warmup_job(workflow_jobs: dict) -> None:
         "prepare-merge",
         "plan-darwin-closures",
         "canary-darwin-fods",
+        "canary-darwin-fods-faults",
+        "canary-darwin-fods-retry",
         "canary-warm-rust",
     }
     assert "validate-darwin-warm-rust" not in canary["needs"]
@@ -3781,6 +3792,8 @@ def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
         "prepare-merge",
         "plan-darwin-closures",
         "canary-darwin-fods",
+        "canary-darwin-fods-faults",
+        "canary-darwin-fods-retry",
     }
     assert "canary-warm-rust" not in rust["needs"]
     rust_if = " ".join(rust["if"].split())
@@ -4001,7 +4014,12 @@ def _assert_coverage_and_publish(workflow_jobs: dict) -> None:
     assert "inputs.canary_warm_rust" in coverage_if
     assert set(publish["needs"]) == {
         "prepare-merge",
+        "prepare-darwin-faults",
         "plan-darwin-closures",
+        "canary-darwin-fods-faults",
+        "prebuild-darwin-leaves-faults",
+        "canary-warm-rust-faults",
+        "canary-warm-cascade-faults",
         "validate-arm",
         "validate-x86",
         "validate-darwin-warm-rust",
@@ -4241,6 +4259,7 @@ def test_cachix_flush_is_last_step_of_every_update_runtime_cachix_job() -> None:
         "cachix-flush-proof.yml:fail-after-push",
         "cachix-flush-proof.yml:fork-read-only",
         "rebuild-bun-fixed-outputs.yml:rebuild",
+        "rebuild-bun-fixed-outputs.yml:rebuild-retry",
         "update-automerge.yml:merge",
         "update-native.yml:native",
         "update-planner.yml:discover",
@@ -4389,12 +4408,20 @@ def test_canary_dispatch_event_graph_produces_current_plan_and_skips_publish() -
         "prepare-merge",
         "plan-darwin-closures",
         "canary-darwin-fods",
+        "canary-darwin-fods-faults",
+        "canary-darwin-fods-retry",
     }
     # Model the dispatch with every declared producer succeeding. The canary
     # has all required inputs and therefore executes rather than going green
-    # as a skipped job with missing artifacts.
+    # as a skipped job with missing artifacts. A clean FOD canary skips its
+    # fresh-VM retry; that skip still lets the rust canary run.
     results = dict.fromkeys(producers, "success")
-    assert all(results[need] == "success" for need in canary["needs"])
+    results["canary-darwin-fods-faults"] = "success"
+    results["canary-darwin-fods-retry"] = "skipped"
+    assert all(
+        results[need] == "success" or need.endswith("-retry")
+        for need in canary["needs"]
+    )
     assert "needs.prepare-merge.result == 'success'" in canary["if"]
     assert "needs.canary-slots.outputs.enabled == 'true'" in canary["if"]
     assert canary["with"]["previous"] == "prepare-x86_64-linux"
@@ -6502,10 +6529,16 @@ def test_kernel_log_window_spans_the_native_job_cap() -> None:
         (ROOT / ".github/workflows/update-native.yml").read_text(),
         Loader=yaml.BaseLoader,
     )
-    cap_minutes = int(native["jobs"]["native"]["timeout-minutes"])
+    cap_minutes = int(
+        native["on"]["workflow_call"]["inputs"]["timeout_minutes"]["default"]
+    )
+    assert (
+        native["jobs"]["native"]["timeout-minutes"] == "${{ inputs.timeout_minutes }}"
+    )
     window = jobs._KERNEL_LOG_WINDOW
     assert window.endswith("h")
     assert int(window.removesuffix("h")) * 60 > cap_minutes
+    assert cap_minutes == 360
 
 
 def test_hosted_device_faults_query_the_kernel_log_since_boot(
@@ -7080,7 +7113,17 @@ def _finish_faulted_validate(
 
 @pytest.mark.parametrize(
     "scope",
-    ["rust-warmup", "cascade-warmup", "closure-shard", "packages", "closures"],
+    [
+        "rust-warmup",
+        "cascade-warmup",
+        "closure-shard",
+        "packages",
+        "closures",
+        "fod-canary",
+        "leaf-prebuild",
+        "cascade-canary",
+        "zed-warmup",
+    ],
 )
 @pytest.mark.parametrize("returncode", [0, 1])
 def test_faulted_validate_cell_hands_off_to_a_fresh_vm(
@@ -7108,7 +7151,17 @@ def test_faulted_validate_cell_hands_off_to_a_fresh_vm(
 
 @pytest.mark.parametrize(
     "scope",
-    ["cascade-warmup", "closure-shard", "packages", "closures"],
+    [
+        "rust-warmup",
+        "cascade-warmup",
+        "closure-shard",
+        "packages",
+        "closures",
+        "fod-canary",
+        "leaf-prebuild",
+        "cascade-canary",
+        "zed-warmup",
+    ],
 )
 @pytest.mark.parametrize("returncode", [0, 9])
 def test_device_fault_on_a_validate_retry_fails_the_cell(
@@ -7137,14 +7190,14 @@ def test_device_fault_on_a_validate_retry_fails_the_cell(
 @pytest.mark.parametrize(
     "env",
     [
-        {"NIXCFG_VALIDATE_SCOPE": "rust-warmup", "NIXCFG_CANARY": "true"},
-        {"NIXCFG_VALIDATE_SCOPE": "cascade-canary"},
+        {"NIXCFG_VALIDATE_SCOPE": "all"},
+        {"NIXCFG_VALIDATE_SCOPE": "all", "NIXCFG_CANARY": "true"},
     ],
 )
 def test_validation_without_a_retry_job_keeps_its_result(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env: dict[str, str]
 ) -> None:
-    """Canary validation has no fresh-VM rerun to hand off to."""
+    """A scope with no fresh-VM retry keeps the updater's result."""
 
     def unexpected() -> list[str]:
         raise AssertionError("this scope must not query device faults")
@@ -7437,6 +7490,71 @@ def test_retry_job_kind_separates_a_lost_runner_from_a_real_failure() -> None:
         jobs.retry_job_kind(failed, ["CachixFlushError: home roots=<unset>"]) == "real"
     )
     assert jobs.retry_job_kind({"conclusion": "success", "steps": []}, []) == "ok"
+    timed_out = {
+        "conclusion": "timed_out",
+        "steps": [
+            {
+                "name": "Realize changed outputs and root closures",
+                "conclusion": "failure",
+                "status": "completed",
+            }
+        ],
+    }
+    runtime = {
+        "conclusion": "failure",
+        "steps": [
+            {
+                "name": "Run ./.github/actions/update-runtime",
+                "conclusion": "failure",
+                "status": "completed",
+            }
+        ],
+    }
+    runtime_and_build = {
+        "conclusion": "failure",
+        "steps": [
+            {
+                "name": "Run ./.github/actions/update-runtime",
+                "conclusion": "failure",
+                "status": "completed",
+            },
+            {
+                "name": "Prepare or validate candidate",
+                "conclusion": "failure",
+                "status": "completed",
+            },
+        ],
+    }
+    assert jobs.retry_job_kind(timed_out, []) == "lost"
+    assert jobs.retry_job_kind(runtime, []) == "runtime"
+    assert jobs.retry_job_kind(runtime_and_build, []) == "real"
+    assert jobs.retry_job_kind({"conclusion": "timed_out", "steps": "nope"}, []) == (
+        "lost"
+    )
+    assert jobs._step_name("nope") == ""
+    assert jobs._step_name({"name": 1}) == ""
+    assert not jobs._is_update_runtime_step({"name": "Flush Cachix daemon"})
+    assert jobs._lost_runner_selection({"2": "runtime", "0": "sibling"}, ["1"]) == (
+        ["0", "1", "2"],
+        True,
+    )
+    assert jobs._lost_runner_selection({"2": "runtime", "4": "real"}, []) == ([], False)
+    assert jobs._watched_job({"name": "plan"}, "plan", "")
+    assert jobs._watched_job(
+        {"name": "plan (aarch64-darwin, macos-15)"}, "plan", ""
+    ) is (False)
+    assert jobs._watched_job(
+        {"name": "plan (aarch64-darwin, macos-15)"}, "plan", "aarch64-darwin"
+    )
+    assert (
+        jobs._watched_job(
+            {"name": "plan (aarch64-linux, ubuntu-24.04-arm)"},
+            "plan",
+            "aarch64-darwin",
+        )
+        is False
+    )
+    assert jobs._prepare_darwin_token({"name": "prepare-darwin-retry-0"}) is None
     assert not jobs._runner_abandoned({"conclusion": "success"})
     assert not jobs._runner_abandoned({"conclusion": "failure", "steps": "nope"})
     assert not jobs._runner_abandoned(failed)
@@ -7732,6 +7850,151 @@ def test_darwin_job_retry_covers_a_lost_realize_and_a_device_fault(
     monkeypatch.setenv("NIXCFG_FAULT_ARTIFACT_PREFIX", "")
     with pytest.raises(RuntimeError, match="darwin-job-retry requires"):
         jobs.darwin_job_retry()
+
+
+def test_darwin_job_retry_covers_runtime_timeout_and_a_namespaced_fault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A namespaced fault artifact, a runtime step, and a timed-out matrix cell retry."""
+    output = _artifact_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("NIXCFG_FAULT_JOB_PREFIX", "realize-aarch64-darwin")
+    monkeypatch.setenv(
+        "NIXCFG_FAULT_ARTIFACT_PREFIX", "closure-gate-aarch64-darwin-gate"
+    )
+    state: dict[str, object] = {
+        "artifacts": {
+            "total_count": 1,
+            "artifacts": [
+                {"name": "closure-gate-aarch64-darwin-gate-device-fault-pr421"}
+            ],
+        },
+        "jobs": {
+            "total_count": 1,
+            "jobs": [
+                {
+                    "name": "realize-aarch64-darwin / native",
+                    "conclusion": "success",
+                    "steps": [],
+                }
+            ],
+        },
+        "notes": [],
+    }
+
+    def urlopen(request: urllib.request.Request, timeout: float) -> _ArtifactPage:
+        del timeout
+        url = request.full_url
+        if "/artifacts" in url:
+            return _ArtifactPage(state["artifacts"])
+        if "/jobs" in url:
+            return _ArtifactPage(state["jobs"])
+        return _ArtifactPage(state["notes"])
+
+    monkeypatch.setattr(jobs.urllib.request, "urlopen", urlopen)
+    jobs.darwin_job_retry()
+    assert output.read_text() == "retry=true\nrecovered=false\n"
+    output.write_text("")
+    state["artifacts"] = {"total_count": 0, "artifacts": []}
+    state["jobs"] = {
+        "total_count": 1,
+        "jobs": [
+            {
+                "name": "realize-aarch64-darwin / native",
+                "conclusion": "failure",
+                "check_run_url": "https://api.github.com/repos/gkze/nixcfg/check-runs/9",
+                "steps": [
+                    {
+                        "name": "Run ./.github/actions/update-runtime",
+                        "conclusion": "failure",
+                        "status": "completed",
+                    }
+                ],
+            }
+        ],
+    }
+    jobs.darwin_job_retry()
+    assert output.read_text() == "retry=true\nrecovered=true\n"
+    output.write_text("")
+    monkeypatch.setenv("NIXCFG_FAULT_JOB_PREFIX", "plan")
+    monkeypatch.setenv("NIXCFG_FAULT_MATRIX_SYSTEM", "aarch64-darwin")
+    state["jobs"] = {
+        "total_count": 1,
+        "jobs": [
+            {
+                "name": "plan (aarch64-darwin, macos-15)",
+                "conclusion": "timed_out",
+                "steps": [
+                    {
+                        "name": "Compare drv paths with the merge base",
+                        "status": "in_progress",
+                    }
+                ],
+            }
+        ],
+    }
+    jobs.darwin_job_retry()
+    assert output.read_text() == "retry=true\nrecovered=true\n"
+
+
+def test_prepare_darwin_retries_emits_lost_and_runtime_shards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Shard outputs miss a lost runner and a failed update-runtime step."""
+    output = _artifact_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("NIXCFG_FAULT_SLOTS", "0 1 2 3 4")
+    lost = {
+        "name": "prepare-darwin-2 / native",
+        "conclusion": "timed_out",
+        "steps": [
+            {"name": "Run ./.github/actions/update-runtime", "status": "in_progress"}
+        ],
+    }
+    runtime = {
+        "name": "prepare-darwin-4 / native",
+        "conclusion": "failure",
+        "check_run_url": "https://api.github.com/repos/gkze/nixcfg/check-runs/4",
+        "steps": [
+            {
+                "name": "Run ./.github/actions/update-runtime",
+                "conclusion": "failure",
+                "status": "completed",
+            }
+        ],
+    }
+    ignored = {
+        "name": "prepare-darwin-retry-0 / native",
+        "conclusion": "failure",
+        "steps": [{"conclusion": "failure", "status": "completed"}],
+    }
+    pages = {
+        "jobs": {"total_count": 3, "jobs": [lost, runtime, ignored]},
+        "https://api.github.com/repos/gkze/nixcfg/check-runs/4/annotations": [
+            {"message": "determinate-nix failed"}
+        ],
+    }
+
+    def urlopen(request: urllib.request.Request, timeout: float) -> _ArtifactPage:
+        del timeout
+        url = request.full_url
+        if "/jobs" in url:
+            return _ArtifactPage(pages["jobs"])
+        return _ArtifactPage(pages[url])
+
+    monkeypatch.setattr(jobs.urllib.request, "urlopen", urlopen)
+    jobs.prepare_darwin_retries()
+    text = output.read_text()
+    assert "slots=" in text
+    slots = text.split("slots=", 1)[1].split("\n", 1)[0]
+    assert json.loads(slots) == ["2", "4"]
+    assert "recovered=true\n" in text
+    assert jobs._prepare_darwin_token({"name": "prepare-darwin-9 / native"}) is None
+    assert jobs._prepare_darwin_token({"name": None}) is None
+    monkeypatch.setenv("NIXCFG_FAULT_SLOTS", "")
+    with pytest.raises(RuntimeError, match="prepare-darwin-retries requires"):
+        jobs.prepare_darwin_retries()
+    monkeypatch.setenv("NIXCFG_FAULT_SLOTS", "zero")
+    with pytest.raises(RuntimeError, match="prepare-darwin-retries requires"):
+        jobs.prepare_darwin_retries()
 
 
 def test_run_job_list_fails_closed(

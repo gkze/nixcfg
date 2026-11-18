@@ -591,9 +591,15 @@ One device error makes the runner's store untrusted:
   its retry succeeded without a device fault. `prepare-merge` then folds that
   one Darwin candidate with Linux.
 
-Any other preparation failure is still a failure. A device fault on the retry
+A lost runner, a job that reaches its timeout, or an `update-runtime` step
+that fails with no other failed step sets neither output. `prepare-darwin-faults`
+reads the job list and emits those shard indexes. The retry `if` unions that
+list with the shard outputs. A real updater or flush failure is still a
+failure, including the siblings it stopped. A device fault on the retry
 also leaves preparation incomplete, so the run fails. The PR update-prepare
-check uses the same retry.
+check uses the same retry. The single-job `update-pr` Darwin prepare matches
+a namespaced `prepare-aarch64-darwin-device-fault-<namespace>` artifact, not
+only the exact suffix.
 
 A Darwin prepare shard that loses the Nix daemon or the store, and whose
 failure is not one package's derivation eval, uses the same retry jobs.
@@ -651,21 +657,27 @@ A root shard's kernel-log query that runs past its budget fails the shard,
 as it does for a warmup slot: the shard exists to publish its paths.
 
 Package validation and the aggregate closure query the kernel log and hand
-a device fault to one fresh VM, the same way a warmup slot does. Canary
-validation has no retry job. It does not query the kernel log, and a fault
-there still fails the job.
+a device fault to one fresh VM, the same way a warmup slot does. The FOD
+canary, the rust canary, the cascade canary, the leaf prebuild, and the
+Zed family job do too. Each has a fresh-VM retry. A faulted FOD canary is
+not success for the rust stripe until that retry succeeds or is skipped.
+`NIXCFG_CANARY` does not turn the kernel query off.
 
 A hosted runner can also die without logging a block-device error and
 without setting `device_fault`. GitHub then annotates "lost communication
-with the server" and leaves the current step `in_progress`. That includes
-a loss during `update-runtime`, before the updater records anything.
-`-faults` reads the job list after the Darwin job finishes. It retries the
-lost job, and any sibling that stopped because of that loss, once. A real
-updater or flush failure is not retried: Update 44038363047 slot 3 failed
-in flush and the other cascade slots stopped for that sibling, so no slot
-was retried. Coverage accepts the first job's `failure` only when
-`-recovered` is true and the retry succeeded. The closure-gate Darwin
-realize job uses the same decision.
+with the server" and leaves the current step `in_progress`, or the job
+conclusion is `timed_out` after the runner sits until the job cap. A
+completed `update-runtime` step that fails alone is the same fresh VM: the
+Nix install or the Cachix daemon never became usable. `-faults` reads the
+job list after the Darwin job finishes. It retries that job, and any
+sibling that stopped because of that loss, once. A real updater, flush, or
+build failure is not retried: Update 44038363047 slot 3 failed in flush and
+the other cascade slots stopped for that sibling, so no slot was retried.
+Coverage accepts the first job's `failure` only when `-recovered` is true
+and the retry succeeded. The closure-gate Darwin plan cell and realize job
+use the same decision. Publish, repair, and the self-heal agent are not
+redone: a second writer can publish twice. Their `update-runtime` steps
+still time out on their own.
 
 ### Validation failures and timeouts
 
@@ -890,13 +902,18 @@ aggregate.
 Realize calls the Update reusable workflow (`update-native.yml`) with stage
 `closure-gate` on `macos-15`, `ubuntu-24.04-arm`, and `ubuntu-24.04`. The
 build flags are the validation build (`nix build --no-update-lock-file
---no-link --keep-going --fallback`) plus `--max-jobs 1` and
-`--print-out-paths`. Each selected installable is a separate build. After
+--no-link --keep-going --fallback`) plus `--max-silent-time 1200`,
+`--timeout 7200`, `--max-jobs 1`, and `--print-out-paths`. Twenty minutes
+of builder silence, or two hours for one derivation, fails that derivation.
+Each selected installable is a separate build. After
 it, the gate roots the printed paths, deletes leftover `nix-*` build
 directories, and runs the hosted store GC when free space is under the
 skip threshold before the next installable.
-The build budget is the Darwin shard budget, 18000 seconds, inside the
-360-minute job.
+The first-attempt budget is the Darwin shard budget, 18000 seconds, inside
+the 360-minute job. The fresh-VM retry uses 7200 seconds per installable
+and a 240-minute job. Run 44191046002's retry wrote the store for five
+hours with no client log and no kernel I/O error, then died on the 18000s
+budget. A timeout keeps the last 20 lines Nix had already printed.
 The receipt is `--print-out-paths`. Derivation show of a Darwin system
 names a different output than the build realizes, so it does not choose
 what gets pushed. `nix build` substitutes a path already on gkze. The gate
@@ -929,9 +946,13 @@ end of the build, while Nix was unlinking `bb-0.48.1-pnpm10-source` and
 `waku-0.1.20-vendor` together (`max-jobs` 2). The first attempt failed
 the same way on another `node_modules` tree. One build directory at a
 time is the fix; another retry is not. A runner lost with no
-`device_fault` flag is the same retry:
-`realize-aarch64-darwin-faults` reads the check-run annotation and the step
-left `in_progress`. The aggregating job downloads that retry's receipt when
+`device_fault` flag is the same retry, as is a job that times out or an
+`update-runtime` step that fails alone.
+`realize-aarch64-darwin-faults` reads the check-run annotation, the step
+left `in_progress`, the job conclusion, and the step conclusions.
+The Darwin plan cell uses that decision too: a lost plan retries once and
+uploads `closure-gate-plan-aarch64-darwin` for route. The aggregating job
+downloads that retry's receipt when
 the first realize did not succeed. A build failure with no `-device-fault`
 artifact is not retried.
 

@@ -43,6 +43,12 @@ if str(_REPO_ROOT) not in sys.path:
 # Same budget as Update's Darwin closure shards: the reusable job is 360
 # minutes, and flush needs the remainder after this build stops.
 BUILD_BUDGET_SECONDS = 18000
+# Duplicated from derivation validation. This module cannot import it.
+BUILD_MAX_SILENT_SECONDS = 20 * 60
+BUILD_DERIVATION_TIMEOUT_SECONDS = 2 * 60 * 60
+# The fresh VM already spent an attempt. One installable may not consume
+# another five hours (44191046002 retry, 18000s of silence).
+RETRY_BUILD_BUDGET_SECONDS = 2 * 60 * 60
 _INVENTORY_EVAL_TIMEOUT_SECONDS = 50 * 60
 _INSTANTIATE_TIMEOUT_SECONDS = 50 * 60
 _PUSH_TIMEOUT_SECONDS = 1200.0
@@ -366,6 +372,10 @@ def build_args(installables: tuple[str, ...]) -> list[str]:
         "--no-link",
         "--keep-going",
         "--fallback",
+        "--max-silent-time",
+        str(BUILD_MAX_SILENT_SECONDS),
+        "--timeout",
+        str(BUILD_DERIVATION_TIMEOUT_SECONDS),
         "--max-jobs",
         "1",
         "--print-out-paths",
@@ -867,6 +877,15 @@ def _git(repo: Path, *args: str) -> str:
     return result.stdout
 
 
+def _process_text(value: object) -> str:
+    """Return captured process text. TimeoutExpired stubs hide the real type."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return ""
+
+
 def _run(args: list[str], *, timeout: float, cwd: Path | None = None) -> str:
     try:
         result = subprocess.run(  # noqa: S603 -- nix or cachix argv, never a shell
@@ -878,7 +897,13 @@ def _run(args: list[str], *, timeout: float, cwd: Path | None = None) -> str:
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as error:
-        msg = f"{args[0]} timed out after {timeout:.0f}s"
+        captured = "\n".join([
+            _process_text(error.stdout),
+            _process_text(error.stderr),
+        ]).strip()
+        tail = "\n".join(captured.splitlines()[-20:])
+        detail = f"\n{tail}" if tail else ""
+        msg = f"{args[0]} timed out after {timeout:.0f}s{detail}"
         raise GateError(msg) from error
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
@@ -946,7 +971,12 @@ class _ProcessRunner(_Runner):
         return gkze_presence(path, _http_status, time.sleep)
 
     def build(self, installables: tuple[str, ...]) -> tuple[str, ...]:
-        stdout = _run(build_args(installables), timeout=BUILD_BUDGET_SECONDS)
+        budget = (
+            RETRY_BUILD_BUDGET_SECONDS
+            if os.environ.get("NIXCFG_DEVICE_FAULT_RETRY") == "true"
+            else BUILD_BUDGET_SECONDS
+        )
+        stdout = _run(build_args(installables), timeout=budget)
         paths = tuple(
             line.strip()
             for line in stdout.splitlines()

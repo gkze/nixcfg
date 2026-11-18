@@ -9,6 +9,7 @@ on:
       - .github/workflows/rebuild-bun-fixed-outputs.yml
 permissions:
   contents: read
+  actions: read
 jobs:
   rebuild:
     # These fixed outputs are aarch64-darwin. A Linux --rebuild cannot
@@ -40,6 +41,10 @@ jobs:
                       "build",
                       "--print-build-logs",
                       "--no-link",
+                      "--max-silent-time",
+                      "1200",
+                      "--timeout",
+                      "7200",
                       target,
                   ],
                   check=True,
@@ -51,6 +56,119 @@ jobs:
                       "--rebuild",
                       "--print-build-logs",
                       "--no-link",
+                      "--max-silent-time",
+                      "1200",
+                      "--timeout",
+                      "7200",
+                      target,
+                  ],
+                  check=True,
+              )
+      - name: Dump hosted storage-fault evidence
+        id: storage
+        if: failure()
+        env:
+          NIXCFG_CI_STAGE: dump-storage-fault
+        shell: python
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+      - name: Retain device-fault evidence
+        if: failure() && steps.storage.outputs.device_fault == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: rebuild-bun-fixed-outputs-device-fault
+          path: ${{ runner.temp }}/update-artifacts
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Flush Cachix daemon
+        if: always()
+        timeout-minutes: 45
+        env:
+          NIXCFG_CI_STAGE: flush-cachix
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+  rebuild-faults:
+    needs: rebuild
+    if: |-
+      always() && !cancelled() &&
+      (needs.rebuild.result == 'success' ||
+      needs.rebuild.result == 'failure')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      retry: ${{ steps.faults.outputs.retry }}
+      recovered: ${{ steps.faults.outputs.recovered }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Decide a fresh-VM rebuild retry
+        id: faults
+        env:
+          NIXCFG_ACTIONS_TOKEN: ${{ github.token }}
+          NIXCFG_FAULT_ARTIFACT_PREFIX: rebuild-bun-fixed-outputs
+          NIXCFG_FAULT_JOB_PREFIX: rebuild
+          NIXCFG_CI_STAGE: darwin-job-retry
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+  rebuild-retry:
+    needs:
+      - rebuild
+      - rebuild-faults
+    if: |-
+      always() && !cancelled() &&
+      needs.rebuild-faults.result == 'success' &&
+      needs.rebuild-faults.outputs.retry == 'true'
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/update-runtime
+        with:
+          github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Rebuild pkgs.bun fixed outputs
+        shell: python
+        run: |
+          import subprocess
+
+          targets = [
+              ".#pkgs.aarch64-darwin.t3code.node_modules",
+              ".#pkgs.aarch64-darwin.t3code-desktop.node_modules",
+          ]
+          for target in targets:
+              subprocess.run(
+                  [
+                      "nix",
+                      "build",
+                      "--print-build-logs",
+                      "--no-link",
+                      "--max-silent-time",
+                      "1200",
+                      "--timeout",
+                      "7200",
+                      target,
+                  ],
+                  check=True,
+              )
+              subprocess.run(
+                  [
+                      "nix",
+                      "build",
+                      "--rebuild",
+                      "--print-build-logs",
+                      "--no-link",
+                      "--max-silent-time",
+                      "1200",
+                      "--timeout",
+                      "7200",
                       target,
                   ],
                   check=True,

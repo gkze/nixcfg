@@ -256,7 +256,13 @@ _DEVICE_FAULT_RETRY_SCOPES = frozenset({
     "closure-shard",
     "packages",
     "closures",
+    "fod-canary",
+    "leaf-prebuild",
+    "cascade-canary",
+    "zed-warmup",
 })
+_PREPARE_DARWIN_JOB = re.compile(r"prepare-darwin-(\d+)$")
+_RECOVERABLE_KINDS = frozenset({"lost", "runtime"})
 # Only a planned root shard owns a stable Cachix pin. Cascade warmup can
 # realize the same home-manager-generation.drv (44038363047 slot 3 built it,
 # push already saw it on gkze) and has no NIXCFG_CLOSURE_ROOTS. Pinning that
@@ -1954,16 +1960,17 @@ def _finish_native_stage(
 def _hands_off_device_faults(stage: str) -> bool:
     """Return whether a fresh-VM retry job can redo this stage's exact work.
 
-    Prepare shards, the rust/cascade warmup slots, the planned root
-    shards, package validation and the aggregate closure have one. Canary
-    validation does not, so a fault there still fails the job.
+    Prepare shards and every Darwin validate scope that has a ``-retry`` job
+    hand a faulted store off. Scope ``all`` and the closure-gate realize step
+    do not: realize fails the step and the storage dump is the retry signal.
+    ``NIXCFG_CANARY`` does not disable the hand-off. The canary jobs have
+    their own fresh VM.
     """
     if stage == "prepare":
         return True
     return (
         stage == "validate"
         and os.environ.get("NIXCFG_VALIDATE_SCOPE", "all") in _DEVICE_FAULT_RETRY_SCOPES
-        and os.environ.get("NIXCFG_CANARY") != "true"
     )
 
 
@@ -2115,20 +2122,52 @@ def run_artifact_names() -> set[str]:
     raise RuntimeError(msg)
 
 
+def _step_name(step: object) -> str:
+    if isinstance(step, Mapping) and isinstance(step.get("name"), str):
+        return step["name"]
+    return ""
+
+
+def _is_update_runtime_step(step: object) -> bool:
+    return "update-runtime" in _step_name(step)
+
+
 def retry_job_kind(job: Mapping[str, object], annotations: Sequence[str]) -> str:
     """Classify one completed Actions job for a fresh-VM retry.
 
     ``lost`` is a runner that died without recording ``device_fault``. GitHub
     leaves the in-progress step without a conclusion and annotates
     "lost communication with the server" (PR closure-gate realize on
-    44052745290). ``sibling`` stopped because that loss already blocks
-    publish. ``real`` is an updater or flush failure and is not retried.
+    44052745290). A job conclusion of ``timed_out`` is the same loss when
+    the runner sits until the job cap and never sets the flag.
+    ``runtime`` is a completed ``update-runtime`` step failure with no other
+    failed step: the Nix install or the Cachix daemon never became usable.
+    ``sibling`` stopped because that loss already blocks publish. ``real``
+    is an updater, flush, or build failure and is not retried.
     """
     text = "\n".join(annotations)
+    raw_steps = job.get("steps")
+    steps = [
+        step
+        for step in (raw_steps if isinstance(raw_steps, list) else [])
+        if isinstance(step, Mapping)
+    ]
     if _LOST_RUNNER_TEXT in text or _runner_abandoned(job):
         return "lost"
     if _SIBLING_STOP_TEXT in text:
         return "sibling"
+    if job.get("conclusion") == "timed_out":
+        return "lost"
+    runtime_failed = any(
+        _is_update_runtime_step(step) and step.get("conclusion") in _STEP_FAILURES
+        for step in steps
+    )
+    other_failed = any(
+        not _is_update_runtime_step(step) and step.get("conclusion") in _STEP_FAILURES
+        for step in steps
+    )
+    if runtime_failed and not other_failed:
+        return "runtime"
     if job.get("conclusion") in _STEP_FAILURES:
         return "real"
     return "ok"
@@ -2259,7 +2298,7 @@ def _classify_watched_jobs(
         url = job.get("check_run_url")
         notes = _annotation_messages(url) if isinstance(url, str) and url else []
         if not isinstance(url, str) or not url:
-            if _runner_abandoned(job):
+            if job.get("conclusion") == "timed_out" or _runner_abandoned(job):
                 kinds[token] = "lost"
                 continue
             kinds[token] = "real"
@@ -2276,15 +2315,16 @@ def _lost_runner_selection(
     A real updater failure is not retried, and neither are the siblings it
     stopped. 44038363047 slot 3 failed in flush; slots 0-2 and 4 stopped
     for that sibling. That is not a lost runner. A runner that dies with no
-    ``device_fault`` flag, plus the siblings that then stop, is retried once.
+    ``device_fault`` flag, a job that times out, or an ``update-runtime``
+    step that fails alone, plus the siblings that then stop, is retried once.
     """
-    lost = [token for token, kind in kinds.items() if kind == "lost"]
+    recoverable = [token for token, kind in kinds.items() if kind in _RECOVERABLE_KINDS]
     sibling = [token for token, kind in kinds.items() if kind == "sibling"]
     real = [token for token, kind in kinds.items() if kind == "real"]
-    if real or (sibling and not lost):
+    if real or (sibling and not recoverable):
         return [], False
-    if lost:
-        return sorted(set(device) | set(lost) | set(sibling)), True
+    if recoverable:
+        return sorted(set(device) | set(recoverable) | set(sibling)), True
     return sorted(set(device)), False
 
 
@@ -2312,6 +2352,17 @@ def _merge_lost_runner_slots(
     return [int(slot) for slot in selected], recovered
 
 
+def _device_fault_artifact_present(names: set[str], prefix: str) -> bool:
+    """Return whether *prefix* was uploaded as a device-fault artifact.
+
+    The suffix is inserted before ``artifact_namespace``, so a namespaced
+    prepare is ``<prefix>-device-fault-<namespace>`` and an exact
+    ``<prefix>-device-fault`` match misses it.
+    """
+    marker = f"{prefix}{_DEVICE_FAULT_ARTIFACT_SUFFIX}"
+    return any(name == marker or name.startswith(f"{marker}-") for name in names)
+
+
 def device_fault_slots() -> None:
     """Emit the warmup slots whose first attempt must rerun on a fresh VM.
 
@@ -2327,7 +2378,7 @@ def device_fault_slots() -> None:
     faulted = [
         int(slot)
         for slot in slots
-        if f"{prefix}{slot}{_DEVICE_FAULT_ARTIFACT_SUFFIX}" in names
+        if _device_fault_artifact_present(names, f"{prefix}{slot}")
     ]
     job_prefix = os.environ.get("NIXCFG_FAULT_JOB_PREFIX", "").strip()
     recovered = False
@@ -2386,7 +2437,7 @@ def device_fault_shards() -> None:
     faulted = [
         entry
         for entry in shards
-        if f"{prefix}{entry['shard']}{_DEVICE_FAULT_ARTIFACT_SUFFIX}" in names
+        if _device_fault_artifact_present(names, f"{prefix}{entry['shard']}")
     ]
     job_prefix = os.environ.get("NIXCFG_FAULT_JOB_PREFIX", "").strip()
     recovered = False
@@ -2438,6 +2489,55 @@ def _merge_lost_runner_shards(
     return [by_shard[shard] for shard in selected], recovered
 
 
+def _watched_job(job: Mapping[str, object], job_name: str, system: str) -> bool:
+    """Return whether *job* is the watched caller, including one matrix cell.
+
+    A matrix job is ``plan (aarch64-darwin, macos-15)``. The cell is selected
+    by the system token so the Linux plan cells are not the Darwin retry.
+    """
+    caller = _job_caller(job.get("name"))
+    if caller == job_name:
+        return True
+    if not system or not caller.startswith(f"{job_name} ("):
+        return False
+    return system in caller
+
+
+def _prepare_darwin_token(job: Mapping[str, object]) -> str | None:
+    """Return the prepare shard index, never a retry, merge, or faults job."""
+    match = _PREPARE_DARWIN_JOB.fullmatch(_job_caller(job.get("name")))
+    if match is None:
+        return None
+    token = match.group(1)
+    slots = os.environ.get("NIXCFG_FAULT_SLOTS", "").split()
+    if token not in slots:
+        return None
+    return token
+
+
+def prepare_darwin_retries() -> None:
+    """Emit prepare shards a lost runner or a failed runtime must redo.
+
+    Device-fault and runner-fault exits are already job outputs. This stage
+    adds the forms that set no output: a lost runner, a job that times out,
+    and an ``update-runtime`` step that fails alone. A real updater failure
+    emits no slots.
+    """
+    slots = os.environ.get("NIXCFG_FAULT_SLOTS", "").split()
+    if not slots or not all(slot.isdigit() for slot in slots):
+        msg = "prepare-darwin-retries requires numeric NIXCFG_FAULT_SLOTS"
+        raise RuntimeError(msg)
+    selected, recovered = _lost_runner_selection(
+        _classify_watched_jobs(_run_jobs(), match=_prepare_darwin_token),
+        [],
+    )
+    sys.stdout.write(f"Darwin prepare retries: {selected} recovered={recovered}\n")
+    _outputs(
+        slots=json.dumps(selected, separators=(",", ":")),
+        recovered=str(recovered).lower(),
+    )
+
+
 def darwin_job_retry() -> None:
     """Emit whether one Darwin job must rerun, and whether a lost runner is why.
 
@@ -2460,8 +2560,9 @@ def darwin_job_retry() -> None:
         )
         raise RuntimeError(msg)
     names = run_artifact_names()
-    device = f"{artifact}{_DEVICE_FAULT_ARTIFACT_SUFFIX}" in names
-    matched = [job for job in _run_jobs() if _job_caller(job.get("name")) == job_name]
+    device = _device_fault_artifact_present(names, artifact)
+    system = os.environ.get("NIXCFG_FAULT_MATRIX_SYSTEM", "").strip()
+    matched = [job for job in _run_jobs() if _watched_job(job, job_name, system)]
     if len(matched) != 1:
         msg = f"expected one Actions job named {job_name}, found {len(matched)}"
         raise RuntimeError(msg)
@@ -2471,12 +2572,12 @@ def darwin_job_retry() -> None:
         url = job.get("check_run_url")
         if isinstance(url, str) and url:
             kind = retry_job_kind(job, _annotation_messages(url))
-        elif _runner_abandoned(job):
+        elif job.get("conclusion") == "timed_out" or _runner_abandoned(job):
             kind = "lost"
         else:
             kind = "real"
-    retry = kind == "lost" or device
-    recovered = kind == "lost"
+    retry = kind in _RECOVERABLE_KINDS or device
+    recovered = kind in _RECOVERABLE_KINDS
     sys.stdout.write(
         f"Darwin retry for {job_name}: retry={retry} recovered={recovered} kind={kind}\n"
     )
@@ -4437,6 +4538,7 @@ def main(stage: str) -> int:
         "device-fault-slots": device_fault_slots,
         "device-fault-shards": device_fault_shards,
         "darwin-job-retry": darwin_job_retry,
+        "prepare-darwin-retries": prepare_darwin_retries,
         "require-cachix-daemon": require_cachix_daemon,
         "bootstrap": bootstrap,
         "quality": quality,

@@ -96,7 +96,7 @@ def test_pr_update_prepare_runs_the_update_prepare_stages() -> None:
     stages = {
         name: (job["with"]["runner"], job["with"]["system"], job["with"]["stage"])
         for name, job in jobs.items()
-        if name != "targets"
+        if name not in {"targets", "prepare-darwin-faults"}
     }
     expected = {
         name: (
@@ -107,6 +107,12 @@ def test_pr_update_prepare_runs_the_update_prepare_stages() -> None:
         for name in stages
     }
     assert stages == expected
+    assert jobs["prepare-darwin-faults"]["steps"][-1]["env"]["NIXCFG_CI_STAGE"] == (
+        "prepare-darwin-retries"
+    )
+    assert update["jobs"]["prepare-darwin-faults"]["steps"][-1]["env"][
+        "NIXCFG_CI_STAGE"
+    ] == ("prepare-darwin-retries")
     assert set(stages) == {
         "prepare-pins",
         *(f"prepare-darwin-{index}" for index in range(5)),
@@ -127,11 +133,15 @@ def test_pr_update_prepare_runs_the_update_prepare_stages() -> None:
             update["jobs"][name]["if"].split()
         )
     for name, job in jobs.items():
-        if name == "targets":
+        if name in {"targets", "prepare-darwin-faults"}:
             continue
         assert job["uses"] == "./.github/workflows/update-native.yml"
         assert job["secrets"] == "inherit"
-        if name not in {"prepare-merge", "prepare-darwin-merge"}:
+        if name not in {
+            "prepare-merge",
+            "prepare-darwin-merge",
+            "prepare-darwin-faults",
+        }:
             assert job["with"]["targets"] == "${{ needs.targets.outputs.targets }}"
     assert (
         jobs["prepare-merge"]["with"]
