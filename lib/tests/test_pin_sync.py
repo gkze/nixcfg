@@ -17,6 +17,7 @@ from lib.update.ci.pin_sync import (
     rewind_unpaired_inputs,
 )
 from lib.update.ci.superset_hold import FileBlob
+from lib.update.flake_inputs import input_declaration_text
 from lib.update.paths import get_repo_root
 from lib.update.updaters import Updater
 
@@ -79,6 +80,11 @@ def _tree(**files: str) -> dict[str, FileBlob]:
     return {path: _blob(content) for path, content in files.items()}
 
 
+def _declaration(blob: FileBlob, name: str) -> str | None:
+    """Return one input attrset from a flake blob."""
+    return input_declaration_text(blob.content.decode(), name)
+
+
 def _revs(blob: FileBlob) -> dict[str, str]:
     payload = json.loads(blob.content)
     return {
@@ -106,8 +112,12 @@ def test_rewind_restores_one_input_and_leaves_the_other() -> None:
     )
 
     assert changed
-    assert 'ref = "v1.55.0"' in restored["flake.nix"].content.decode()
-    assert 'url = "v2"' in restored["flake.nix"].content.decode()
+    assert _declaration(restored["flake.nix"], "goose") == _declaration(
+        base["flake.nix"], "goose"
+    )
+    assert _declaration(restored["flake.nix"], "codex") == _declaration(
+        merged["flake.nix"], "codex"
+    )
     assert _revs(restored["flake.lock"]) == {"goose": _BASE, "codex": _BASE}
     assert restored[_SOURCES] == merged[_SOURCES]
 
@@ -130,7 +140,12 @@ def test_rewind_splices_a_declaration_whose_lock_node_already_matches() -> None:
     )
 
     assert changed
-    assert restored["flake.nix"].content == base["flake.nix"].content
+    assert _declaration(restored["flake.nix"], "goose") == _declaration(
+        base["flake.nix"], "goose"
+    )
+    assert _declaration(restored["flake.nix"], "codex") == _declaration(
+        base["flake.nix"], "codex"
+    )
     assert restored["flake.lock"] == merged["flake.lock"]
 
 
@@ -441,6 +456,106 @@ def test_rewind_discards_a_tree_when_the_declaration_restore_refuses(
     )
 
 
+def _aliased_lock(*, pin: str, decoy: str) -> str:
+    """Return a lock whose root ``rust-overlay`` edge names ``rust-overlay_2``."""
+    node = {
+        "lastModified": 1,
+        "narHash": "sha256-aaaaaaaa",
+        "owner": "o",
+        "type": "github",
+    }
+    return json.dumps(
+        {
+            "nodes": {
+                "root": {"inputs": {"rust-overlay": "rust-overlay_2"}},
+                "rust-overlay_2": {
+                    "locked": {**node, "repo": "rust-overlay", "rev": pin},
+                    "original": {
+                        "owner": "o",
+                        "ref": "master",
+                        "repo": "rust-overlay",
+                        "type": "github",
+                    },
+                },
+                "rust-overlay": {
+                    "locked": {**node, "repo": "decoy", "rev": decoy},
+                    "original": {"owner": "o", "repo": "decoy", "type": "github"},
+                },
+            },
+            "root": "root",
+            "version": 7,
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _overlay_flake() -> str:
+    return """{
+  inputs = {
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      ref = "master";
+      flake = false;
+    };
+  };
+  outputs = { self, ... }: { };
+}
+"""
+
+
+def test_rewind_follows_a_disambiguated_lock_node() -> None:
+    """A root edge to ``rust-overlay_2`` is the pin, not the decoy node."""
+    sources = "overlays/zed-editor-nightly/sources.json"
+    entry = _entry()
+    base = _tree(**{
+        "flake.nix": _overlay_flake(),
+        "flake.lock": _aliased_lock(pin=_BASE, decoy=_BASE),
+        sources: entry,
+    })
+    moved = _tree(**{
+        "flake.nix": _overlay_flake(),
+        "flake.lock": _aliased_lock(pin=_PIN, decoy=_BASE),
+        sources: entry,
+    })
+
+    restored, changed = rewind_unpaired_inputs(
+        base, moved, {"rust-overlay": frozenset({sources})}
+    )
+
+    assert changed
+    payload = json.loads(restored["flake.lock"].content)
+    assert payload["nodes"]["root"]["inputs"]["rust-overlay"] == "rust-overlay_2"
+    assert payload["nodes"]["rust-overlay_2"]["locked"]["rev"] == _BASE
+    assert "rust-overlay" not in payload["nodes"]
+    assert _declaration(restored["flake.nix"], "rust-overlay") == _declaration(
+        base["flake.nix"], "rust-overlay"
+    )
+
+
+def test_rewind_ignores_a_node_the_root_edge_does_not_name() -> None:
+    """A same-named node that the root edge does not use is not the pin."""
+    sources = "overlays/zed-editor-nightly/sources.json"
+    entry = _entry()
+    base = _tree(**{
+        "flake.nix": _overlay_flake(),
+        "flake.lock": _aliased_lock(pin=_BASE, decoy=_BASE),
+        sources: entry,
+    })
+    moved = _tree(**{
+        "flake.nix": _overlay_flake(),
+        "flake.lock": _aliased_lock(pin=_BASE, decoy=_PIN),
+        sources: entry,
+    })
+
+    restored, changed = rewind_unpaired_inputs(
+        base, moved, {"rust-overlay": frozenset({sources})}
+    )
+
+    assert not changed
+    assert restored is moved
+
+
 def test_rewind_reads_a_missing_or_unreadable_lock_node() -> None:
     """Comparing pins still inspects a lock that is absent or not a node map."""
     sources = _blob(_entry())
@@ -452,7 +567,29 @@ def test_rewind_reads_a_missing_or_unreadable_lock_node() -> None:
         base, missing_flake, {"goose": frozenset({_SOURCES})}
     ) == (missing_flake, False)
 
-    for content in (b"\xff", b"[]", b'{"nodes": [], "root": "root", "version": 7}'):
+    missing_root = json.dumps({
+        "nodes": {
+            "codex": {
+                "locked": {
+                    "lastModified": 1,
+                    "narHash": "sha256-aaaaaaaa",
+                    "owner": "o",
+                    "repo": "codex",
+                    "rev": _PIN,
+                    "type": "github",
+                },
+                "original": {"owner": "o", "repo": "codex", "type": "github"},
+            }
+        },
+        "root": "root",
+        "version": 7,
+    }).encode()
+    for content in (
+        b"\xff",
+        b"[]",
+        b'{"nodes": [], "root": "root", "version": 7}',
+        missing_root,
+    ):
         merged = {
             "flake.nix": nix,
             _SOURCES: sources,

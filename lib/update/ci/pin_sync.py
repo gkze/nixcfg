@@ -21,6 +21,7 @@ from lib.update import artifacts as update_artifacts
 from lib.update import crate2nix as update_crate2nix
 from lib.update import planner as update_planner
 from lib.update.ci.superset_hold import FileBlob
+from lib.update.flake import resolve_root_input_node
 from lib.update.flake_inputs import input_declaration_text, restore_input_declaration
 from lib.update.lock_policy import LockRollback, render_lock, rollback_input_locks
 from lib.update.paths import package_file_map_in, sources_file_for_updater
@@ -191,19 +192,20 @@ def _declaration(blob: FileBlob | None, name: str) -> str | None:
 
 
 def _lock_node(blob: FileBlob | None, name: str) -> object:
-    """Return one lock node, or None when the lock does not name it."""
+    """Return the node a root input edge names, or None when it cannot.
+
+    The edge can point at a disambiguated id (``rust-overlay`` to
+    ``rust-overlay_2``). Comparing ``nodes[name]`` misses that pin and can
+    leave it advanced while the source files stay on the baseline.
+    """
     if blob is None:
         return None
     try:
-        payload = json.loads(blob.content)
-    except UnicodeError, json.JSONDecodeError:
+        lock = FlakeLock.model_validate_json(blob.content)
+        node, _follows = resolve_root_input_node(lock, name)
+    except UnicodeError, ValidationError, KeyError:
         return None
-    if not isinstance(payload, dict):
-        return None
-    nodes = payload.get("nodes")
-    if not isinstance(nodes, dict):
-        return None
-    return nodes.get(name)
+    return node
 
 
 def _can_splice(
