@@ -289,7 +289,7 @@ jobs:
       scope: gate
       checkout_ref: ${{ github.event.pull_request.head.sha }}
       device_fault_retry: true
-      timeout_minutes: 240
+      timeout_minutes: 360
     secrets:
       UPDATE_SELF_HEAL_GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
       CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}

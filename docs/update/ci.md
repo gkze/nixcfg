@@ -910,11 +910,14 @@ Each selected installable is a separate build. After
 it, the gate roots the printed paths, deletes leftover `nix-*` build
 directories, and runs the hosted store GC when free space is under the
 skip threshold before the next installable.
-The first-attempt budget is the Darwin shard budget, 18000 seconds, inside
-the 360-minute job. The fresh-VM retry uses 7200 seconds per installable
-and a 240-minute job. Run 44191046002's retry wrote the store for five
-hours with no client log and no kernel I/O error, then died on the 18000s
-budget. A timeout keeps the last 20 lines Nix had already printed.
+The installable budget is the Darwin shard budget, 18000 seconds, inside
+the 360-minute job, on the first attempt and on the fresh-VM retry.
+`--max-silent-time 1200` is what stops a silent builder. Run 44191046002's
+retry wrote the store for five hours with no client log and no kernel I/O
+error. Run 44268930857's retry was still compiling argus, the store having
+grown from 8 GiB to 98 GiB with rust and bun shards in progress, when a
+7200-second cap killed that build. A timeout keeps the last 20 lines Nix
+had already printed.
 The receipt is `--print-out-paths`. Derivation show of a Darwin system
 names a different output than the build realizes, so it does not choose
 what gets pushed. `nix build` substitutes a path already on gkze. The gate

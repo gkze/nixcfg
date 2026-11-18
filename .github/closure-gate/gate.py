@@ -46,9 +46,9 @@ BUILD_BUDGET_SECONDS = 18000
 # Duplicated from derivation validation. This module cannot import it.
 BUILD_MAX_SILENT_SECONDS = 20 * 60
 BUILD_DERIVATION_TIMEOUT_SECONDS = 2 * 60 * 60
-# The fresh VM already spent an attempt. One installable may not consume
-# another five hours (44191046002 retry, 18000s of silence).
-RETRY_BUILD_BUDGET_SECONDS = 2 * 60 * 60
+# A shorter installable budget is not the hang brake. 44268930857's retry
+# was still compiling argus (store 8 GiB to 98 GiB, rust and bun shards
+# in progress) when 7200s killed it. Builder silence is --max-silent-time.
 _INVENTORY_EVAL_TIMEOUT_SECONDS = 50 * 60
 _INSTANTIATE_TIMEOUT_SECONDS = 50 * 60
 _PUSH_TIMEOUT_SECONDS = 1200.0
@@ -971,12 +971,7 @@ class _ProcessRunner(_Runner):
         return gkze_presence(path, _http_status, time.sleep)
 
     def build(self, installables: tuple[str, ...]) -> tuple[str, ...]:
-        budget = (
-            RETRY_BUILD_BUDGET_SECONDS
-            if os.environ.get("NIXCFG_DEVICE_FAULT_RETRY") == "true"
-            else BUILD_BUDGET_SECONDS
-        )
-        stdout = _run(build_args(installables), timeout=budget)
+        stdout = _run(build_args(installables), timeout=BUILD_BUDGET_SECONDS)
         paths = tuple(
             line.strip()
             for line in stdout.splitlines()

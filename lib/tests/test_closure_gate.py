@@ -264,10 +264,14 @@ def test_nix_timeout_keeps_the_captured_tail(monkeypatch: pytest.MonkeyPatch) ->
         gate._run(["nix", "eval"], timeout=3)
 
 
-def test_retry_realize_uses_the_shorter_installable_budget(
+def test_retry_realize_keeps_the_installable_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The fresh VM must not spend another 18000s on one installable."""
+    """A device-fault retry still has to finish the closure.
+
+    44268930857's retry was compiling argus, store 8 GiB to 98 GiB, when a
+    7200s cap killed it. Silence is bounded by --max-silent-time.
+    """
     seen: dict[str, float] = {}
 
     def run(args: list[str], *, timeout: float, cwd: Path | None = None) -> str:
@@ -280,7 +284,7 @@ def test_retry_realize_uses_the_shorter_installable_budget(
     assert gate._ProcessRunner().build((".#packages.aarch64-darwin.tool",)) == (
         "/nix/store/" + "a" * 32 + "-tool",
     )
-    assert seen["timeout"] == gate.RETRY_BUILD_BUDGET_SECONDS
+    assert seen["timeout"] == gate.BUILD_BUDGET_SECONDS
     monkeypatch.setenv("NIXCFG_DEVICE_FAULT_RETRY", "false")
     gate._ProcessRunner().build((".#packages.aarch64-darwin.tool",))
     assert seen["timeout"] == gate.BUILD_BUDGET_SECONDS
@@ -937,7 +941,7 @@ def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -
     assert retry["with"] == {
         **first["with"],
         "device_fault_retry": "true",
-        "timeout_minutes": "240",
+        "timeout_minutes": "360",
     }
     assert "realize-aarch64-darwin-retry" in jobs["closure-gate"]["needs"]
     download = next(
