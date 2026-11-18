@@ -1490,6 +1490,54 @@ def _input_backed_targets(
     )
 
 
+def _inputs_restored_with_sources(
+    plan: _RunPlan,
+    updaters: Mapping[str, UpdaterClass],
+    statuses: Mapping[str, str],
+    closure: set[str],
+    rolled_back_inputs: frozenset[str],
+    *,
+    global_flake_revert: bool,
+) -> set[str]:
+    """Return inputs whose restored source files must keep the baseline pin.
+
+    A whole-file flake revert already names both flake files, so it does not
+    also name individual inputs. Otherwise every failed source and every
+    updated source in the failure closure contributes its inputs, including a
+    pin this shard inherited from the pins seed and did not move again.
+    """
+    paired = set(rolled_back_inputs)
+    if global_flake_revert:
+        return paired
+    for name, status in statuses.items():
+        if status == "error" or (status == "updated" and name in closure):
+            paired.update(_target_input_names(name, plan, updaters))
+    return paired
+
+
+def _sources_left_on_held_inputs(
+    plan: _RunPlan,
+    updaters: Mapping[str, UpdaterClass],
+    statuses: Mapping[str, str],
+    paired_inputs: set[str],
+    *,
+    global_flake_revert: bool,
+) -> list[str]:
+    """Return sources this shard did not update that still name a held input.
+
+    The pins seed may already have rewritten those files. Restoring them with
+    the input keeps the baseline pin from landing beside the seed's metadata.
+    """
+    if not paired_inputs or global_flake_revert:
+        return []
+    return [
+        name
+        for name in plan.resolved.source_names
+        if statuses.get(name) != "updated"
+        and _target_input_names(name, plan, updaters) & paired_inputs
+    ]
+
+
 def _withhold_failed_clusters(
     workspace: update_persistence.IsolatedUpdateWorkspace,
     plan: _RunPlan,
@@ -1509,6 +1557,13 @@ def _withhold_failed_clusters(
     generated for it, stay. A ref that is not an attribute set still reverts
     both flake files and every input-backed candidate, because splitting that
     pin across the two files cannot be proven.
+
+    A source whose files are restored also records its backing inputs on the
+    hold, even when this workspace inherited the bump from the pins seed and
+    the lock did not move again. The fold restores those files to the original
+    baseline, so the pin has to travel with them (Update 44258507999). A
+    source still being promoted does not use one of those inputs: sharing the
+    input withholds that source too. Unrelated pins stay.
     """
     statuses = outcome.summary.statuses
     failed = [name for name, status in statuses.items() if status == "error"]
@@ -1535,6 +1590,14 @@ def _withhold_failed_clusters(
         )
         if global_flake_revert:
             closure.update(_input_backed_targets(plan, updaters))
+    paired_inputs = _inputs_restored_with_sources(
+        plan,
+        updaters,
+        statuses,
+        closure,
+        rolled_back_inputs,
+        global_flake_revert=global_flake_revert,
+    )
     dropped = update_planner.withheld_targets(
         plan.order,
         statuses=statuses,
@@ -1545,9 +1608,9 @@ def _withhold_failed_clusters(
             name: frozenset(_target_input_names(name, plan, updaters))
             for name in plan.order
         }
-        if rolled_back_inputs
+        if paired_inputs
         else {},
-        rolled_back_inputs=rolled_back_inputs,
+        rolled_back_inputs=frozenset(paired_inputs),
         flake_culprit=touched[0] if touched else None,
     )
     outcome.summary.accumulate(dict.fromkeys(dropped, "dropped"))
@@ -1584,12 +1647,27 @@ def _withhold_failed_clusters(
                 update_persistence.planned_update_paths(revert_sources, updaters),
             )
         )
+    inherited = _sources_left_on_held_inputs(
+        plan,
+        updaters,
+        statuses,
+        paired_inputs,
+        global_flake_revert=global_flake_revert,
+    )
+    if inherited:
+        held.update(
+            _workspace_relative_paths(
+                workspace.root,
+                update_persistence.planned_update_paths(inherited, updaters),
+            )
+        )
     if touched and global_flake_revert:
         held.update(_FLAKE_FILES)
     restore.update(held)
+    held_inputs = rolled_back_inputs if global_flake_revert else paired_inputs
     outcome.quarantine_hold = QuarantineHold(
         paths=tuple(sorted(path.as_posix() for path in held)),
-        inputs=tuple(sorted(rolled_back_inputs)),
+        inputs=tuple(sorted(held_inputs)),
     )
     if restore:
         workspace.restore_baseline(sorted(restore))

@@ -726,6 +726,63 @@ def test_held_declarations_leave_a_flake_they_cannot_splice() -> None:
     assert held["flake.nix"] == bare
 
 
+def test_fold_rewinds_a_pin_whose_source_entry_stayed_on_the_baseline(
+    tmp_path: Path,
+) -> None:
+    """Update 44258507999: goose moved in the pins seed and sources.json did not.
+
+    The rewind restores that input after the fold and does not quarantine the
+    package. Codex, whose source files are not part of the goose entry, stays
+    on the candidate pin.
+    """
+    root = tmp_path / "repo"
+    sources = json.dumps({
+        "commit": "a" * 40,
+        "hashes": [],
+        "version": "1.55.0",
+    })
+    baseline_nix = _input_flake(desktop="v1.55.0", codex="v1").replace(
+        "github-desktop", "goose"
+    )
+    pinned_nix = _input_flake(desktop="v1.60.1", codex="v2").replace(
+        "github-desktop", "goose"
+    )
+    init_update_workspace_repo(
+        root,
+        tracked_files={
+            "flake.nix": baseline_nix,
+            "flake.lock": _lock(goose="a" * 40, codex="b" * 40),
+            "overlays/goose-cli/sources.json": sources + "\n",
+        },
+    )
+    merged = pipeline.fold_prepared_candidates(
+        _candidate(
+            root,
+            {
+                "flake.nix": pinned_nix,
+                "flake.lock": _lock(goose="d" * 40, codex="e" * 40),
+            },
+            systems=_X86,
+        ),
+        repo=root,
+    )
+
+    merged.apply(root)
+    flake = (root / "flake.nix").read_text(encoding="utf-8")
+    assert input_declaration_text(flake, "goose") == input_declaration_text(
+        baseline_nix, "goose"
+    )
+    assert input_declaration_text(flake, "codex") == input_declaration_text(
+        pinned_nix, "codex"
+    )
+    assert _locked_revs(root)["goose"] == "a" * 40
+    assert _locked_revs(root)["codex"] == "e" * 40
+    assert merged.quarantines == ()
+    assert (root / "overlays/goose-cli/sources.json").read_text(
+        encoding="utf-8"
+    ) == sources + "\n"
+
+
 def test_candidate_without_a_recorded_hold_still_loads(tmp_path: Path) -> None:
     """Artifacts written before holds existed parse with an empty hold."""
     root = tmp_path / "repo"

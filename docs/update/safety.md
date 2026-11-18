@@ -225,10 +225,14 @@ flowchart TD
 
 1. **A quarantine on one platform holds the package on all of them.** The
    prepare records its hold on the candidate: the files it restored for
-   failed and withheld packages, the inputs whose lock nodes it rolled back,
-   and both flake files only when a ref declaration cannot be restored on its
-   own. A ref declared as an attribute set is restored in place, with the lock
-   nodes its flake reaches. A dependency node another pin still uses is copied
+   failed and withheld packages, the inputs those restored sources pin,
+   including a pin this shard inherited from the pins seed and did not move
+   again, and both flake files only when a ref declaration cannot be restored
+   on its own. The fold puts that inherited pin back with the files, so a
+   baseline ``sources.json`` cannot land beside the seed's revision (Update
+   44258507999). A source that shares the input is withheld with it.
+   Unrelated pins stay. A ref declared as an attribute set is restored in
+   place, with the lock nodes its flake reaches. A dependency node another pin still uses is copied
    aside, so that pin keeps the candidate revision and a crate2nix source pin
    stays with the artifacts generated for it. Scratch writes restored only as
    cleanup are not held. Both native
@@ -269,19 +273,24 @@ flowchart TD
    graph.** `copyBunWorkspacePathToStore` copies a `bun.nix` workspace only
    when that path exists in the locked input. A workspace upstream removed
    is omitted, so flake evaluation does not abort Darwin closure planning.
-   The cross-platform merge then holds the package at the baseline pin when
-   the merged `sources.json` has no hashes, or when the flake input moved
-   while `sources.json` and `bun.nix` stayed on the baseline. That decision
-   uses the tree after every native candidate has been folded. Restoring the
-   Superset input during an earlier pairwise merge rewrites `flake.nix`
-   before the remaining candidate, which still carries the same pin beside
-   the other input bumps, and the whole-file merge rejects the file (Update
-   42057077242). Materialized hashes are a completed regeneration, so an
-   identical `bun.nix` still promotes. Other inputs in the same flake files
-   stay.
+   The cross-platform merge restores any flake input whose owned source
+   files, including a parsed ``sources.json``, all stayed on the baseline.
+   That rewind does not quarantine the package. It runs on the tree after
+   every native candidate has been folded, and it is what puts ``goose`` and
+   ``superset`` back when the pins seed moved the input and a later restore
+   left the source metadata behind (Update 44258507999). The Superset hold
+   still quarantines a ``sources.json`` that changed with no hashes, and it
+   remains the fallback when that input's declaration cannot be restored on
+   its own. Restoring the Superset input during an earlier pairwise merge
+   rewrites `flake.nix` before the remaining candidate, which still carries
+   the same pin beside the other input bumps, and the whole-file merge
+   rejects the file (Update 42057077242). Materialized hashes are a completed
+   regeneration, so an identical `bun.nix` still promotes. Other inputs in
+   the same flake files stay.
    Materializing the bump hashes a snapshot of the locked tree, not the
    live store path, and names any workspace path the pin removed.
    (`packages/superset/workspace-path.nix`,
+   `lib/update/ci/pin_sync.py`,
    `lib/update/ci/superset_hold.py`,
    `packages/superset/update_bun_lock.py`)
 
