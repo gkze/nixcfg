@@ -78,6 +78,7 @@ extend-include = ["home/george/bin/git-ignore", "modules/home/zen/zentool"]
 [tool.ruff.per-file-target-version]
 # Actions invokes this bootstrap before Nix supplies the Python 3.14 runtime.
 # sibling_failfast is imported by that entrypoint, so it stays on 3.12 too.
+".github/closure-gate/gate.py" = "py312"
 "lib/update/ci/jobs.py" = "py312"
 "lib/update/prepare_shard.py" = "py312"
 "lib/update/sibling_failfast.py" = "py312"
@@ -246,12 +247,12 @@ all = "error"
 missing-override-decorator = "ignore"
 missing-type-argument = "ignore"
 unsound-assignment = "ignore"
-unsound-return-statement = "ignore"
+unsound-return = "ignore"
 # These override and truthiness strictness families arrived with Ty 0.0.91. They
 # stay opted out under the same policy above until the affected class hierarchies
 # and optionality checks are migrated deliberately.
-invalid-attribute-override = "ignore"
-invalid-mutable-override = "ignore"
+incompatible-attribute-override = "ignore"
+incompatible-mutable-override = "ignore"
 truthiness-test-of-none-union = "ignore"
 
 [[tool.ty.overrides]]
@@ -266,16 +267,32 @@ include = [
 
 [tool.ty.overrides.rules]
 invalid-argument-type = "ignore"
-invalid-key = "ignore"
-invalid-method-override = "ignore"
-invalid-return-type = "ignore"
+invalid-explicit-return = "ignore"
+invalid-implicit-return = "ignore"
+invalid-typed-dict-key = "ignore"
+incompatible-method-override = "ignore"
+lost-keyword-for-regular-parameter = "ignore"
 missing-argument = "ignore"
+missing-attribute = "ignore"
 missing-typed-dict-key = "ignore"
+missing-union-attribute = "ignore"
 not-iterable = "ignore"
 not-subscriptable = "ignore"
 unknown-argument = "ignore"
-unresolved-attribute = "ignore"
 unsupported-operator = "ignore"
+
+[[tool.ty.overrides]]
+# pyobjc resolves framework symbols dynamically: these modules import nothing on
+# non-Darwin platforms and their Darwin stubs omit many runtime symbols. Scope
+# the two module-resolution rules to the files that cross that boundary.
+include = [
+  "lib/macos/tcc_audit/accessibility.py",
+  "lib/macos/tcc_audit/settings.py",
+]
+
+[tool.ty.overrides.rules]
+import-not-found = "ignore"
+missing-module-member = "ignore"
 
 [tool.ty.terminal]
 # Return non-zero when Ty emits warnings.

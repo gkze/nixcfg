@@ -141,12 +141,12 @@ def test_partition_keeps_a_prerequisite_component_on_one_shard() -> None:
 
 def test_partition_spreads_slow_updaters_instead_of_counting_names() -> None:
     """A slow updater fills its shard; quick names go to the lighter shard."""
-    plan = ("alpha", "openchamber", "beta", "paseo", "gamma")
+    plan = ("alpha", "openchamber", "beta", "mux", "gamma")
     assert partition_prepare_targets(plan, shard=0, count=2) == ("openchamber",)
     assert partition_prepare_targets(plan, shard=1, count=2) == (
         "alpha",
         "beta",
-        "paseo",
+        "mux",
         "gamma",
     )
 

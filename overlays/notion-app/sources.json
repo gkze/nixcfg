@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-o72tdFd72mDBJakJiz73lRPQI90EzhAYaoVpbzIi/Dk="
+    "aarch64-darwin": "sha256-sXdyeraqBzaqK4LxBwQFJd2UuEA5Zx6KZq3laYfJPPY="
   },
   "urls": {
-    "aarch64-darwin": "https://desktop-release.notion-static.com/Notion-arm64-7.43.0.zip"
+    "aarch64-darwin": "https://desktop-release.notion-static.com/Notion-arm64-7.44.0.zip"
   },
-  "version": "7.43.0"
+  "version": "7.44.0"
 }

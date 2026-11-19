@@ -49,7 +49,6 @@ from lib.update.ci.warmup import (
     command_store_drv,
     compiler_input_drvs,
     darwin_fod_canary_installables,
-    darwin_leaf_prebuild_installables,
     darwin_output_paths,
     darwin_package_installable,
     default_cache_present,
@@ -3032,7 +3031,6 @@ def test_warmup_fatal_skips_cannot_build_during_substitute_only() -> None:
         "path:.#pkgs.aarch64-darwin.emdash.pnpmDeps",
         "path:.#pkgs.aarch64-darwin.comet.src",
     )
-    assert darwin_leaf_prebuild_installables() == ("path:.#pkgs.aarch64-darwin.zeron",)
 
 
 def test_warmup_fatal_skips_tainted_source_fod_hash_mismatch() -> None:

@@ -58,11 +58,18 @@ index.
 
 ## Install and apply
 
-1. Install vanilla Nix with the official multi-user installer:
+1. Install Nix with the daemon. Argus and Rocinante use vanilla Nix:
 
    ```bash
    curl -L https://nixos.org/nix/install | sh -s -- --daemon
    ```
+
+   Zeus uses Determinate Nix instead, and its host configuration therefore sets
+   `nix.enable = false` so nix-darwin does not compete with `determinate-nixd`
+   for the daemon and `/etc/nix/nix.conf`. Install Determinate Nix there with
+   the CLI installer (`curl -fsSL https://install.determinate.systems/nix | sh -s -- install`)
+   and keep repository policy in `/etc/nix/nix.custom.conf`, which
+   [`darwin/zeus.nix`](darwin/zeus.nix) generates.
 
    Then open a new terminal, or load the daemon profile in the current shell:
 
@@ -71,6 +78,17 @@ index.
    ```
 
 1. Clone this repository to [`~/.config/nixcfg`](.).
+
+1. On Zeus, move aside the `/etc/nix/nix.custom.conf` that the Determinate
+   installer created. nix-darwin replaces it with the generated file, and its
+   activation check aborts on an existing `/etc` file with unrecognized content:
+
+   ```bash
+   sudo mv /etc/nix/nix.custom.conf /etc/nix/nix.custom.conf.before-nix-darwin
+   ```
+
+   The check runs before activation changes anything. If it reports other
+   files, inspect them and rename each one the same way.
 
 1. Bootstrap nix-darwin with an explicit host. The pre-switch macOS hostname is
    not declarative yet:

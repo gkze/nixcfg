@@ -55,9 +55,6 @@ let
           builtins.unsafeDiscardStringContext system.system.activationScripts.preActivation.text
         )
       ))
-      (assertEq "${hostName} trusts george for per-invocation builders" true (
-        builtins.elem "george" system.nix.settings.trusted-users
-      ))
       (assertEq "${hostName} Bun link" (home.lib.file.mkOutOfStoreSymlink env.BUN_INSTALL)
         home.home.file.".bun".source
       )

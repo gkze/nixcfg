@@ -44,7 +44,6 @@ let
     mach-studio = systemApp pkgs.mach-studio;
     onepassword = systemApp pkgs.onepassword;
     openchamber = systemApp pkgs.openchamber;
-    paseo = systemApp pkgs.paseo;
     reflect = systemApp pkgs.reflect-open;
     screen-studio = systemApp pkgs.screen-studio;
     # macOS requires the system extension's parent app in /Applications.
@@ -65,7 +64,6 @@ let
     waku = systemApp pkgs.waku;
     "warp-preview".package = pkgs.warp-preview;
     writer-computer = systemApp pkgs.writer-computer;
-    zeron = systemApp pkgs.zeron;
     zo = systemApp pkgs.zo;
   };
   projection = macApps.managedMacAppRoutingProjection routing;

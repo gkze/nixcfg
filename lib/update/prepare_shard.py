@@ -29,7 +29,6 @@ _COVERAGE_KEYS = frozenset({"plan", "hashed", "shard", "count"})
 # leave a name unhashed.
 _PREPARE_SOURCE_COST: Mapping[str, int] = {
     "openchamber": 36,
-    "paseo": 19,
     "bb": 16,
     "gooeypi": 14,
     "mux": 14,
@@ -45,7 +44,6 @@ _PREPARE_SOURCE_COST: Mapping[str, int] = {
     "zed-editor-nightly": 8,
     "t3code-desktop": 7,
     "t3code-workspace": 7,
-    "zeron": 6,
     "buzz": 5,
     "neutils": 5,
     "sentry-cli": 5,

@@ -215,7 +215,10 @@ jobs:
       stage: prepare-pins
       targets: ${{ needs.resolve.outputs.targets }}
       artifact_namespace: ${{ needs.resolve.outputs.artifact_namespace }}
-      checkout_ref: ${{ needs.resolve.outputs.from_default == 'true' && github.event.repository.default_branch || (needs.resolve.outputs.action == 'update' && inputs.branch || '') }}
+      checkout_ref: >-
+        ${{ needs.resolve.outputs.from_default == 'true' &&
+        github.event.repository.default_branch ||
+        (needs.resolve.outputs.action == 'update' && inputs.branch || '') }}
     secrets: inherit
   prepare-darwin:
     needs: [resolve, prepare-pins]
@@ -235,7 +238,10 @@ jobs:
       previous: prepare-pins
       artifact_namespace: ${{ needs.resolve.outputs.artifact_namespace }}
       targets: ${{ needs.resolve.outputs.targets }}
-      checkout_ref: ${{ needs.resolve.outputs.from_default == 'true' && github.event.repository.default_branch || (needs.resolve.outputs.action == 'update' && inputs.branch || '') }}
+      checkout_ref: >-
+        ${{ needs.resolve.outputs.from_default == 'true' &&
+        github.event.repository.default_branch ||
+        (needs.resolve.outputs.action == 'update' && inputs.branch || '') }}
     secrets: inherit
   prepare-arm:
     needs: [resolve, prepare-pins]
@@ -248,7 +254,10 @@ jobs:
       previous: prepare-pins
       artifact_namespace: ${{ needs.resolve.outputs.artifact_namespace }}
       targets: ${{ needs.resolve.outputs.targets }}
-      checkout_ref: ${{ needs.resolve.outputs.from_default == 'true' && github.event.repository.default_branch || (needs.resolve.outputs.action == 'update' && inputs.branch || '') }}
+      checkout_ref: >-
+        ${{ needs.resolve.outputs.from_default == 'true' &&
+        github.event.repository.default_branch ||
+        (needs.resolve.outputs.action == 'update' && inputs.branch || '') }}
     secrets: inherit
   prepare-x86:
     needs: [resolve, prepare-pins]
@@ -261,7 +270,10 @@ jobs:
       previous: prepare-pins
       artifact_namespace: ${{ needs.resolve.outputs.artifact_namespace }}
       targets: ${{ needs.resolve.outputs.targets }}
-      checkout_ref: ${{ needs.resolve.outputs.from_default == 'true' && github.event.repository.default_branch || (needs.resolve.outputs.action == 'update' && inputs.branch || '') }}
+      checkout_ref: >-
+        ${{ needs.resolve.outputs.from_default == 'true' &&
+        github.event.repository.default_branch ||
+        (needs.resolve.outputs.action == 'update' && inputs.branch || '') }}
     secrets: inherit
   prepare-merge:
     needs: [resolve, prepare-darwin, prepare-arm, prepare-x86]
@@ -275,11 +287,20 @@ jobs:
       runner: ubuntu-24.04
       system: x86_64-linux
       stage: merge-candidates
-      previous: ${{ needs.resolve.outputs.touches_darwin == 'true' && 'prepare-aarch64-darwin' || 'prepare-aarch64-linux' }}
-      previous_extra: ${{ needs.resolve.outputs.touches_darwin == 'true' && 'prepare-aarch64-linux' || 'prepare-x86_64-linux' }}
-      previous_third: ${{ needs.resolve.outputs.touches_darwin == 'true' && 'prepare-x86_64-linux' || '' }}
+      previous: >-
+        ${{ needs.resolve.outputs.touches_darwin == 'true' &&
+        'prepare-aarch64-darwin' || 'prepare-aarch64-linux' }}
+      previous_extra: >-
+        ${{ needs.resolve.outputs.touches_darwin == 'true' &&
+        'prepare-aarch64-linux' || 'prepare-x86_64-linux' }}
+      previous_third: >-
+        ${{ needs.resolve.outputs.touches_darwin == 'true' &&
+        'prepare-x86_64-linux' || '' }}
       artifact_namespace: ${{ needs.resolve.outputs.artifact_namespace }}
-      checkout_ref: ${{ needs.resolve.outputs.from_default == 'true' && github.event.repository.default_branch || (needs.resolve.outputs.action == 'update' && inputs.branch || '') }}
+      checkout_ref: >-
+        ${{ needs.resolve.outputs.from_default == 'true' &&
+        github.event.repository.default_branch ||
+        (needs.resolve.outputs.action == 'update' && inputs.branch || '') }}
     secrets: inherit
   publish:
     needs: [resolve, prepare-merge]
@@ -289,7 +310,10 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ (needs.resolve.outputs.from_default == 'true' || needs.resolve.outputs.action == 'update') && inputs.branch || github.sha }}
+          ref: >-
+            ${{ (needs.resolve.outputs.from_default == 'true' ||
+            needs.resolve.outputs.action == 'update') && inputs.branch ||
+            github.sha }}
           persist-credentials: false
           fetch-depth: 0
       - uses: ./.github/actions/update-runtime
@@ -433,6 +457,6 @@ jobs:
           NIXCFG_CI_STAGE: flush-cachix
           CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
         shell: python
-        run: |
+        run: |-
           import runpy
           runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
