@@ -10,6 +10,10 @@ _TEST_PATHS = [
     "packages/*/updater_test.py",
     "overlays/*/updater_test.py",
 ]
+_PYOBJC_PATHS = [
+    "lib/macos/tcc_audit/accessibility.py",
+    "lib/macos/tcc_audit/settings.py",
+]
 _RUFF_TEST_GLOB = f"{{{','.join(_TEST_PATHS)}}}"
 _COVERAGE_TEST_PATHS = [
     "lib/tests/*",
@@ -61,21 +65,30 @@ def test_test_type_exceptions_are_rule_scoped() -> None:
     rules = test_override["rules"]
     assert "all" not in rules
     assert set(rules) == {
+        "incompatible-method-override",
         "invalid-argument-type",
-        "invalid-key",
-        "invalid-method-override",
-        "invalid-return-type",
+        "invalid-explicit-return",
+        "invalid-implicit-return",
+        "invalid-typed-dict-key",
+        "lost-keyword-for-regular-parameter",
         "missing-argument",
+        "missing-attribute",
         "missing-typed-dict-key",
+        "missing-union-attribute",
         "not-iterable",
         "not-subscriptable",
         "unknown-argument",
-        "unresolved-attribute",
         "unsupported-operator",
     }
     assert [override["include"] for override in config["tool"]["ty"]["overrides"]] == [
-        _TEST_PATHS
+        _TEST_PATHS,
+        _PYOBJC_PATHS,
     ]
+    # The pyobjc seam may suppress only the two module-resolution rules.
+    assert set(config["tool"]["ty"]["overrides"][1]["rules"]) == {
+        "import-not-found",
+        "missing-module-member",
+    }
 
 
 def test_sibling_updater_tests_use_standard_tooling_boundaries() -> None:

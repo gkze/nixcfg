@@ -200,7 +200,6 @@
       managedMacAppRouting = {
         agentastic-dev.package = pkgs.agentastic-dev;
         airfoil.package = pkgs.airfoil;
-        antigravity.package = pkgs.antigravity;
         appcleaner.package = pkgs.appcleaner;
         betterdisplay = {
           package = pkgs.betterdisplay;
@@ -322,7 +321,6 @@
       # because a foreign derivation cannot carry our `passthru`.
       topgrade = {
         disabledSteps = [
-          "antigravity_cli" # pkgs.antigravity-cli, installed via programs below
           "brew_cask"
           "brew_formula"
           "home_manager"
@@ -769,7 +767,6 @@
     };
 
     # Simple enable-only programs (alphabetical)
-    antigravity-cli.enable = true;
     awscli = {
       enable = true;
       package =

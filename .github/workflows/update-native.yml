@@ -125,17 +125,26 @@ jobs:
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         if: inputs.previous != ''
         with:
-          name: ${{ inputs.artifact_namespace != '' && format('{0}-{1}', inputs.previous, inputs.artifact_namespace) || inputs.previous }}
+          name: >-
+            ${{ inputs.artifact_namespace != '' &&
+            format('{0}-{1}', inputs.previous, inputs.artifact_namespace) ||
+            inputs.previous }}
           path: ${{ runner.temp }}/previous
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         if: inputs.previous_extra != ''
         with:
-          name: ${{ inputs.artifact_namespace != '' && format('{0}-{1}', inputs.previous_extra, inputs.artifact_namespace) || inputs.previous_extra }}
+          name: >-
+            ${{ inputs.artifact_namespace != '' &&
+            format('{0}-{1}', inputs.previous_extra, inputs.artifact_namespace) ||
+            inputs.previous_extra }}
           path: ${{ runner.temp }}/previous-extra
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         if: inputs.previous_third != ''
         with:
-          name: ${{ inputs.artifact_namespace != '' && format('{0}-{1}', inputs.previous_third, inputs.artifact_namespace) || inputs.previous_third }}
+          name: >-
+            ${{ inputs.artifact_namespace != '' &&
+            format('{0}-{1}', inputs.previous_third, inputs.artifact_namespace) ||
+            inputs.previous_third }}
           path: ${{ runner.temp }}/previous-third
       # Exact names, not a glob: a faulted attempt uploads
       # prepare-aarch64-darwin-shard-N-device-fault and must not be folded.

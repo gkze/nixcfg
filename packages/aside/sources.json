@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-Ds0/GSSC3PdscrdIjQH8M92Yn8dm6G4MgyuXQru8ZQ4=",
-    "x86_64-darwin": "sha256-/Zu+Yz2hiY42DyYagVy3AUi+jaQBZoQ8/GWIMLC4P6U="
+    "aarch64-darwin": "sha256-LB+ajWfoH4TWqsgD1v3AjmK3jdnwwryL2egxgajxzXE=",
+    "x86_64-darwin": "sha256-yICh5R4iPzHw2jb8FQUALYT0Gy5TQGFRYnwt8CCMndM="
   },
   "urls": {
-    "aarch64-darwin": "https://releases.aside.com/dev-updater/Aside-1.0.1022.1-arm64.dmg",
-    "x86_64-darwin": "https://releases.aside.com/dev-updater/Aside-1.0.1022.1-x64.dmg"
+    "aarch64-darwin": "https://releases.aside.com/dev-updater/Aside-1.0.1116.2-arm64.dmg",
+    "x86_64-darwin": "https://releases.aside.com/dev-updater/Aside-1.0.1116.2-x64.dmg"
   },
-  "version": "1.0.1022.1"
+  "version": "1.0.1116.2"
 }

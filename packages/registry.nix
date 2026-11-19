@@ -120,7 +120,6 @@ let
         "gh-current"
         "agentastic-dev"
         "agentlog"
-        "antigravity"
         "bb"
         "buzz"
         "claude-code"
@@ -147,7 +146,6 @@ let
         "nordvpn"
         "onepassword"
         "openchamber"
-        "paseo"
         "pica"
         "reason"
         "reflect-open"
@@ -168,7 +166,6 @@ let
         "wave"
         "writer-computer"
         "yaak-beta"
-        "zeron"
       ];
       darwinLinuxPackages = [
         "codex"

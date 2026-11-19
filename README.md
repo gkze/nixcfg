@@ -58,11 +58,18 @@ index.
 
 ## Install and apply
 
-1. Install vanilla Nix with the official multi-user installer:
+1. Install Nix with the daemon. Argus and Rocinante use vanilla Nix:
 
    ```bash
    curl -L https://nixos.org/nix/install | sh -s -- --daemon
    ```
+
+   Zeus uses Determinate Nix instead, and its host configuration therefore sets
+   `nix.enable = false` so nix-darwin does not compete with `determinate-nixd`
+   for the daemon and `/etc/nix/nix.conf`. Install Determinate Nix there with
+   the CLI installer (`curl -fsSL https://install.determinate.systems/nix | sh -s -- install`)
+   and keep repository policy in `/etc/nix/nix.custom.conf`, which
+   [`darwin/zeus.nix`](darwin/zeus.nix) generates.
 
    Then open a new terminal, or load the daemon profile in the current shell:
 

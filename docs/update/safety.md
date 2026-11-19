@@ -251,19 +251,7 @@ flowchart TD
    (`quarantine.plan_issue_sync`, `coverage.require_package_inventory`,
    `ci.jobs.sync_quarantines`)
 
-## Reviewed native inventory (27)
-
-1. **Paseo promotion cannot outrun its reviewed native inventory.**
-   `PaseoUpdater.fetch_latest` selects the newest published release whose
-   version is a key of `releases` in `packages/paseo/native-manifest.nix`.
-   A newer GitHub release stays unselected until that key, its inventory
-   paths, and the signature profile land together. Evaluation still throws
-   for an unreviewed version. The updater must not write one: that throw
-   fails Darwin closure planning instead of withholding the package. A
-   truncated release list fails closed rather than guessing.
-   (`packages/paseo/updater.py`, `packages/paseo/updater_test.py`)
-
-## Superset workspace graph (28)
+## Superset workspace graph (27)
 
 1. **A Superset input bump cannot land ahead of its generated workspace
    graph.** `copyBunWorkspacePathToStore` copies a `bun.nix` workspace only

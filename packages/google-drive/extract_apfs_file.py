@@ -116,7 +116,7 @@ def read_stream(
 
 def extract(image_path: Path, inner_path: str, output: Path) -> None:
     """Copy ``inner_path`` from the sole APFS volume in ``image_path``."""
-    from dissect.apfs import APFS  # noqa: PLC0415 # ty: ignore[unresolved-import] -- build-time dependency only
+    from dissect.apfs import APFS  # noqa: PLC0415 # ty: ignore[import-not-found] -- build-time dependency only
 
     with image_path.open("rb") as image:
         container = APFS(image)

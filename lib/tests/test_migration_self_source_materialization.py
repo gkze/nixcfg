@@ -79,7 +79,7 @@ def _assert_sibling_source_fallback(formal: Identifier) -> None:
     assert expect_instance(read_file.argument, NixPath).path == "./sources.json"
 
 
-@pytest.mark.parametrize("package_name", ["paseo", "unsloth"])
+@pytest.mark.parametrize("package_name", ["unsloth"])
 def test_source_migration_uses_shared_self_source_materialization(
     package_name: str,
 ) -> None:

@@ -4,6 +4,7 @@ import ast
 from pathlib import Path
 
 import yaml
+import yaml.resolver
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github" / "workflows"

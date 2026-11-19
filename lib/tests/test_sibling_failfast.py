@@ -71,7 +71,6 @@ def _job(
         ("validate", "aarch64-darwin", "packages", False, ""),
         ("validate", "aarch64-darwin", "closures", False, ""),
         ("validate", "aarch64-darwin", "fod-canary", False, ""),
-        ("validate", "aarch64-darwin", "leaf-prebuild", False, ""),
         ("validate", "aarch64-darwin", "cascade-canary", False, ""),
         ("validate", "aarch64-darwin", "zed-warmup", True, ""),
     ],
@@ -215,7 +214,6 @@ def test_matrix_cell_failure_stops_that_matrix_only() -> None:
     assert sibling_stop("canary-rust", [rust]) is None
     assert sibling_stop("rust", [_job("canary-warm-rust (0) / native")]) is None
     assert sibling_stop("cascade", [_job("canary-warm-cascade / native")]) is None
-    assert sibling_stop("rust", [_job("prebuild-darwin-leaves / native")]) is None
 
 
 @pytest.mark.parametrize(

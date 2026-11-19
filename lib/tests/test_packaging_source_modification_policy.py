@@ -932,13 +932,6 @@ _ALLOWED_NIX_SUBSTITUTE_SITES: Final = (
         "packages/mole-app/default.nix",
         r'''substituteInPlace "$out/bin/mole" --replace-fail 'SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"' "SCRIPT_DIR='$out/libexec/mole'"''',
     ),
-    # These exact anchors must interpolate the realized derivation output path;
-    # a static patch cannot know `$out`, while --replace-fail keeps drift fail-closed.
-    *_nix_sites(
-        "packages/paseo/onnxruntime-source.nix",
-        r'''substituteInPlace onnxruntime/core/platform/env.h --replace-fail "GetRuntimePath() const { return PathString(); }" "GetRuntimePath() const { return PathString(\"$out/lib/\"); }"''',
-        r'''substituteInPlace cmake/onnxruntime.cmake --replace-fail "INSTALL_NAME_DIR @rpath" "INSTALL_NAME_DIR $out/lib"''',
-    ),
     *_nix_sites(
         "packages/scratch/default.nix",
         r"""substituteInPlace "$out/nix-support/setup-hook" --replace-fail '"x86_64-unknown-linux-gnu"' '"${rustTarget}"' --replace-fail 'target/x86_64-unknown-linux-gnu' 'target/${rustTarget}' --replace-fail 'CC_X86_64_UNKNOWN_LINUX_GNU' 'CC_${rustTargetEnv}' --replace-fail 'CXX_X86_64_UNKNOWN_LINUX_GNU' 'CXX_${rustTargetEnv}' --replace-fail 'CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER' 'CARGO_TARGET_${rustTargetEnv}_LINKER'""",
@@ -1013,22 +1006,6 @@ def test_package_overlay_substitute_in_place_sites_are_baselined() -> None:
     assert Counter(actual) == Counter(_NIX_SUBSTITUTE_AUDIT.allowed_sites), (
         _format_site_delta(actual, _NIX_SUBSTITUTE_AUDIT.allowed_sites)
     )
-
-
-def test_paseo_only_retains_realized_output_path_substitutions() -> None:
-    """Keep Paseo's narrow output-path debt separate from other migrations."""
-    actual = tuple(
-        site
-        for site in _NIX_SUBSTITUTE_AUDIT.current_sites()
-        if site[0].startswith("packages/paseo/")
-    )
-    allowed = tuple(
-        site
-        for site in _NIX_SUBSTITUTE_AUDIT.allowed_sites
-        if site[0].startswith("packages/paseo/")
-    )
-
-    assert Counter(actual) == Counter(allowed), _format_site_delta(actual, allowed)
 
 
 def test_package_overlay_python_ad_hoc_rewrite_sites_are_baselined() -> None:

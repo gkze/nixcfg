@@ -22,7 +22,6 @@ PORTABLE_SOURCES = frozenset({
     "turso-cli",
 })
 DARWIN_SOURCES = frozenset({
-    "antigravity",
     "awscli2-current",
     "baseten-switch",
     "bb",
@@ -35,7 +34,6 @@ DARWIN_SOURCES = frozenset({
     "hq",
     "mach-studio",
     "openchamber",
-    "paseo",
     "reason",
     "reflect-open",
     "rio",
@@ -43,7 +41,6 @@ DARWIN_SOURCES = frozenset({
     "waku",
     "writer-computer",
     "zen-twilight",
-    "zeron",
 })
 NON_X86_SOURCES = frozenset({"emdash"})
 # Sources that declare several platforms validate every declared platform when
