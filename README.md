@@ -79,6 +79,17 @@ index.
 
 1. Clone this repository to [`~/.config/nixcfg`](.).
 
+1. On Zeus, move aside the `/etc/nix/nix.custom.conf` that the Determinate
+   installer created. nix-darwin replaces it with the generated file, and its
+   activation check aborts on an existing `/etc` file with unrecognized content:
+
+   ```bash
+   sudo mv /etc/nix/nix.custom.conf /etc/nix/nix.custom.conf.before-nix-darwin
+   ```
+
+   The check runs before activation changes anything. If it reports other
+   files, inspect them and rename each one the same way.
+
 1. Bootstrap nix-darwin with an explicit host. The pre-switch macOS hostname is
    not declarative yet:
 
