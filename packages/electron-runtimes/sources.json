@@ -151,31 +151,6 @@
       "platform": "43.4.0:x86_64-linux"
     },
     {
-      "hash": "sha256-+Qbf9dBUsbkuVxF4GxPMIG/XE5zmZGdQO50KPm+8mwI=",
-      "hashType": "sha256",
-      "platform": "44.2.0:aarch64-darwin"
-    },
-    {
-      "hash": "sha256-hpP9ZzMtQXd13C/8Rw9MBe2p0O0awynkhm4Qivqk3do=",
-      "hashType": "sha256",
-      "platform": "44.2.0:aarch64-linux"
-    },
-    {
-      "hash": "sha256-CCM/IQ3oW3ojnxhJoRgqfolYWfFmh7IOZEwMFUcvUU0=",
-      "hashType": "sha256",
-      "platform": "44.2.0:headers"
-    },
-    {
-      "hash": "sha256-DFgFfuvSOFk4ni66FVWXW8vIrevMWql/82wDYSXisho=",
-      "hashType": "sha256",
-      "platform": "44.2.0:x86_64-darwin"
-    },
-    {
-      "hash": "sha256-V099jNKoLXeBKElymigrhmObBQ3hINWLE4oSbRa0hpI=",
-      "hashType": "sha256",
-      "platform": "44.2.0:x86_64-linux"
-    },
-    {
       "hash": "sha256-Ethzpa6YplmOcwQC6SeMXRMul+oaRAWncTvsKj6Dkh8=",
       "hashType": "sha256",
       "platform": "44.9.0:aarch64-darwin"
@@ -257,11 +232,6 @@
     "43.4.0:headers": "https://artifacts.electronjs.org/headers/dist/v43.4.0/node-v43.4.0-headers.tar.gz",
     "43.4.0:x86_64-darwin": "https://github.com/electron/electron/releases/download/v43.4.0/electron-v43.4.0-darwin-x64.zip",
     "43.4.0:x86_64-linux": "https://github.com/electron/electron/releases/download/v43.4.0/electron-v43.4.0-linux-x64.zip",
-    "44.2.0:aarch64-darwin": "https://github.com/electron/electron/releases/download/v44.2.0/electron-v44.2.0-darwin-arm64.zip",
-    "44.2.0:aarch64-linux": "https://github.com/electron/electron/releases/download/v44.2.0/electron-v44.2.0-linux-arm64.zip",
-    "44.2.0:headers": "https://artifacts.electronjs.org/headers/dist/v44.2.0/node-v44.2.0-headers.tar.gz",
-    "44.2.0:x86_64-darwin": "https://github.com/electron/electron/releases/download/v44.2.0/electron-v44.2.0-darwin-x64.zip",
-    "44.2.0:x86_64-linux": "https://github.com/electron/electron/releases/download/v44.2.0/electron-v44.2.0-linux-x64.zip",
     "44.9.0:aarch64-darwin": "https://github.com/electron/electron/releases/download/v44.9.0/electron-v44.9.0-darwin-arm64.zip",
     "44.9.0:aarch64-linux": "https://github.com/electron/electron/releases/download/v44.9.0/electron-v44.9.0-linux-arm64.zip",
     "44.9.0:headers": "https://artifacts.electronjs.org/headers/dist/v44.9.0/node-v44.9.0-headers.tar.gz",
