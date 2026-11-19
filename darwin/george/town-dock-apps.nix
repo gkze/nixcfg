@@ -37,7 +37,7 @@ dock.mkDockModule {
     (appPath "town-assistant" "Town.app")
     (appPath "capy-nightly" "Capy Nightly.app")
     (appPath "ghostty" "Ghostty.app")
-    (appPath "rex-beta" "Rex Beta.app")
+    (appPath "rex-beta" "Rex.app")
     (appPath "code-cursor" "Cursor.app")
     (appPath "devin" "Devin.app")
     (appPath "zed" "Zed Nightly.app")

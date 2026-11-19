@@ -64,7 +64,7 @@ let
   # sweep; the store normalizes modes again on the way out.
   #
   # `-s` sweeps symlinks in place instead of following them. Vendors ship
-  # dangling links: Rex Beta's Sparkle.framework links `XPCServices` to a
+  # dangling links: Rex's Sparkle.framework links `XPCServices` to a
   # `Versions/B/XPCServices` directory it does not actually contain, and
   # following that link aborts the whole install. Regular files lose their
   # attributes exactly as before; only the symlink target lookup changes.
