@@ -765,6 +765,21 @@ def _git(repo: Path, *args: str) -> str:
     return result.stdout
 
 
+def _retain_process_failure(detail: str) -> None:
+    """Keep a nix failure in the artifact uploaded before the action post.
+
+    44388423654's Darwin retry lost its job log: the realize step had already
+    failed, then the action post hung until the job was cancelled. The
+    artifact upload happens before that post.
+    """
+    temp = os.environ.get("RUNNER_TEMP", "").strip()
+    if not temp:
+        return
+    directory = Path(temp) / "update-artifacts"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "realize-error.txt").write_text(detail, encoding="utf-8")
+
+
 def _run(args: list[str], *, timeout: float, cwd: Path | None = None) -> str:
     try:
         result = subprocess.run(  # noqa: S603 -- nix or cachix argv, never a shell
@@ -776,12 +791,21 @@ def _run(args: list[str], *, timeout: float, cwd: Path | None = None) -> str:
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as error:
+        stderr = error.stderr
+        text = (
+            stderr.decode("utf-8", "replace") if isinstance(stderr, bytes) else stderr
+        )
+        tail = "\n".join((text or "").splitlines()[-20:])
         msg = f"{args[0]} timed out after {timeout:.0f}s"
+        if tail:
+            msg = f"{msg}: {tail}"
+        _retain_process_failure(msg)
         raise GateError(msg) from error
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
         tail = "\n".join(detail.splitlines()[-20:])
         msg = f"{' '.join(args[:4])} failed: {tail}"
+        _retain_process_failure(msg)
         raise GateError(msg)
     return result.stdout
 

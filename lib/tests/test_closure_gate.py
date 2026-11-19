@@ -818,3 +818,43 @@ def test_realize_reuses_the_update_native_runner() -> None:
     assert budgets
     assert set(budgets) == {"18000"}
     assert gate.BUILD_BUDGET_SECONDS == 18000
+
+
+def test_realize_failure_is_kept_for_the_uploaded_artifact(
+    tmp_path, monkeypatch
+) -> None:
+    """A wedged action post can drop the job log after realize already failed."""
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setattr(gate, "_executable", lambda name: name)
+
+    def time_out(args, **_kwargs):
+        raise subprocess.TimeoutExpired(args, 18000, stderr="error: signal 10\n")
+
+    monkeypatch.setattr(gate.subprocess, "run", time_out)
+    with pytest.raises(gate.GateError, match="signal 10"):
+        gate._run(["nix", "build"], timeout=18000)
+    assert (
+        "signal 10" in (tmp_path / "update-artifacts" / "realize-error.txt").read_text()
+    )
+
+    def fail(args, **_kwargs):
+        return subprocess.CompletedProcess(
+            args, 1, stdout="", stderr="error: hash mismatch\n"
+        )
+
+    monkeypatch.setattr(gate.subprocess, "run", fail)
+    with pytest.raises(gate.GateError, match="hash mismatch"):
+        gate._run(["nix", "build"], timeout=30)
+    assert (
+        "hash mismatch"
+        in (tmp_path / "update-artifacts" / "realize-error.txt").read_text()
+    )
+
+    monkeypatch.delenv("RUNNER_TEMP")
+
+    def time_out_quietly(args, **_kwargs):
+        raise subprocess.TimeoutExpired(args, 1)
+
+    monkeypatch.setattr(gate.subprocess, "run", time_out_quietly)
+    with pytest.raises(gate.GateError, match="nix timed out after 1s"):
+        gate._run(["nix"], timeout=1)
