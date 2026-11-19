@@ -87,6 +87,98 @@ def rewind_unpaired_inputs(
     return restored, restored != merged
 
 
+_ELECTRON_INVENTORY = "packages/electron-runtimes/versions.json"
+
+
+def rewind_unpackaged_electron(
+    base: dict[str, FileBlob],
+    merged: dict[str, FileBlob],
+    owned_by_input: Mapping[str, frozenset[str]],
+) -> tuple[dict[str, FileBlob], tuple[str, ...]]:
+    """Restore a consumer that names an Electron the restored inventory lacks.
+
+    Update 44479330250 kept ``packages/superset/sources.json`` on 2.0.10
+    (``electronVersion`` 44.10.0) after the fold put
+    ``packages/electron-runtimes/versions.json`` back on the baseline, whose
+    newest runtime is 44.9.3. Darwin evaluation then throws
+    ``nixcfgElectron: missing packaged Electron runtime``. The consumer's
+    owned files and its flake input go back together. Nothing is quarantined.
+    An inventory that already contains the version, or a declaration that
+    cannot be spliced, stays as folded.
+    """
+    inventory = _packaged_electron_versions(merged.get(_ELECTRON_INVENTORY))
+    if inventory is None:
+        return merged, ()
+    ahead = tuple(
+        name
+        for name, paths in sorted(owned_by_input.items())
+        if _electron_ahead(base, merged, paths, inventory)
+        and _can_splice(base, merged, name)
+    )
+    if not ahead:
+        return merged, ()
+    restored = dict(merged)
+    for name in ahead:
+        for path in owned_by_input[name]:
+            blob = base.get(path)
+            if blob is None:
+                restored.pop(path, None)
+            else:
+                restored[path] = blob
+    if not _restore_declarations(base, restored, ahead):
+        return merged, ()
+    if not _restore_lock(base, restored, ahead):
+        return merged, ()
+    return restored, ahead
+
+
+def _packaged_electron_versions(blob: FileBlob | None) -> frozenset[str] | None:
+    """Return the runtime versions the folded inventory actually packages."""
+    if blob is None:
+        return None
+    try:
+        payload = json.loads(blob.content)
+    except UnicodeError, ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    versions = payload.get("versions")
+    if not isinstance(versions, list) or not all(
+        isinstance(item, str) for item in versions
+    ):
+        return None
+    return frozenset(versions)
+
+
+def _electron_ahead(
+    base: Mapping[str, FileBlob],
+    merged: Mapping[str, FileBlob],
+    paths: frozenset[str],
+    inventory: frozenset[str],
+) -> bool:
+    """Return whether a changed source entry names an unpackaged runtime."""
+    for path in paths:
+        if path != "sources.json" and not path.endswith("/sources.json"):
+            continue
+        version = _electron_version(merged.get(path))
+        unchanged = base.get(path) == merged.get(path)
+        if version is None or version in inventory or unchanged:
+            continue
+        return True
+    return False
+
+
+def _electron_version(blob: FileBlob | None) -> str | None:
+    """Return a source entry's Electron version, or None when it has none."""
+    if blob is None:
+        return None
+    try:
+        entry = SourceEntry.model_validate(json.loads(blob.content))
+    except UnicodeError, ValueError:
+        return None
+    return entry.electron_version
+
+
 def _input_names(name: str, updater: type[Updater]) -> tuple[str, ...]:
     """Return the flake inputs one source's files are checked against."""
     backing = update_planner.source_backing_input_name(name, updater)
@@ -273,5 +365,6 @@ def _restore_lock(
 
 __all__ = [
     "owned_paths_by_input",
+    "rewind_unpackaged_electron",
     "rewind_unpaired_inputs",
 ]

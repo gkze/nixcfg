@@ -14,6 +14,7 @@ from lib.update.ci.pin_sync import (
     _restore_declarations,
     _restore_lock,
     owned_paths_by_input,
+    rewind_unpackaged_electron,
     rewind_unpaired_inputs,
 )
 from lib.update.ci.superset_hold import FileBlob
@@ -627,6 +628,270 @@ def test_owned_paths_drop_files_outside_the_repository(
     )
 
     assert relative == frozenset({"inside.nix"})
+
+
+_SUPERSET = "packages/superset/sources.json"
+_BUN = "packages/superset/bun.nix"
+_EXTRA = "packages/superset/extra.nix"
+_INVENTORY = "packages/electron-runtimes/versions.json"
+_CODEX = "packages/codex-cli/sources.json"
+
+
+def _electron_entry(version: str, electron: str | None, commit: str) -> str:
+    payload: dict[str, object] = {
+        "hashes": [],
+        "version": version,
+        "commit": commit,
+    }
+    if electron is not None:
+        payload["electronVersion"] = electron
+    return json.dumps(payload)
+
+
+def _inventory(*versions: str) -> str:
+    return json.dumps({"schemaVersion": 1, "versions": list(versions)})
+
+
+def _attr_flake(ref: str) -> str:
+    return f"""{{
+  inputs = {{
+    superset = {{
+      type = "github";
+      owner = "superset-sh";
+      repo = "superset";
+      ref = "{ref}";
+      flake = false;
+    }};
+    codex = {{
+      type = "github";
+      owner = "openai";
+      repo = "codex";
+      ref = "v1";
+      flake = false;
+    }};
+  }};
+  outputs = {{ self, ... }}: {{ }};
+}}
+"""
+
+
+def _named_lock(revs: dict[str, str]) -> str:
+    nodes: dict[str, object] = {
+        "root": {"inputs": {name: name for name in revs}},
+    }
+    for name, rev in revs.items():
+        nodes[name] = {
+            "locked": {
+                "lastModified": 1,
+                "narHash": "sha256-aaaaaaaa",
+                "owner": "o",
+                "repo": name,
+                "rev": rev,
+                "type": "github",
+            },
+            "original": {"owner": "o", "ref": "v1", "repo": name, "type": "github"},
+        }
+    return json.dumps(
+        {"nodes": nodes, "root": "root", "version": 7}, indent=2, sort_keys=True
+    )
+
+
+def test_rewind_restores_a_consumer_ahead_of_the_electron_inventory() -> None:
+    """Update 44479330250: Superset 2.0.10 names Electron 44.10.0, inventory does not.
+
+    The consumer's source files and its flake input return to the baseline.
+    Codex, whose Electron is still packaged, keeps its candidate files. A
+    file the candidate added under the consumer is removed with the rest.
+    """
+    inventory = _inventory("41.10.3", "44.9.3")
+    base_sources = _electron_entry("1.30.2", "41.10.3", _BASE)
+    pin_sources = _electron_entry("2.0.10", "44.10.0", _PIN)
+    codex_base = _electron_entry("1.0.0", "44.9.3", _BASE)
+    codex_pin = _electron_entry("1.1.0", "44.9.3", _PIN)
+    owned = {
+        "superset": frozenset({_SUPERSET, _BUN, _EXTRA, "sources.json"}),
+        "codex": frozenset({_CODEX}),
+    }
+    base = _tree(**{
+        "flake.nix": _attr_flake("v1.30.2"),
+        "flake.lock": _named_lock({"superset": _BASE, "codex": _BASE}),
+        _SUPERSET: base_sources,
+        _BUN: "bun-base\n",
+        "sources.json": _entry(),
+        _INVENTORY: inventory,
+        _CODEX: codex_base,
+    })
+    merged = _tree(**{
+        "flake.nix": _attr_flake("v2.0.10"),
+        "flake.lock": _named_lock({"superset": _PIN, "codex": _PIN}),
+        _SUPERSET: pin_sources,
+        _BUN: "bun-pin\n",
+        _EXTRA: "added\n",
+        "sources.json": _entry(),
+        _INVENTORY: inventory,
+        _CODEX: codex_pin,
+    })
+
+    restored, names = rewind_unpackaged_electron(base, merged, owned)
+
+    assert names == ("superset",)
+    assert restored[_SUPERSET].content == base[_SUPERSET].content
+    assert restored[_BUN].content == base[_BUN].content
+    assert _EXTRA not in restored
+    assert restored["sources.json"].content == base["sources.json"].content
+    assert restored[_CODEX].content == merged[_CODEX].content
+    assert restored[_INVENTORY].content == merged[_INVENTORY].content
+    assert input_declaration_text(
+        restored["flake.nix"].content.decode(), "superset"
+    ) == input_declaration_text(base["flake.nix"].content.decode(), "superset")
+    assert input_declaration_text(
+        restored["flake.nix"].content.decode(), "codex"
+    ) == input_declaration_text(merged["flake.nix"].content.decode(), "codex")
+    assert (
+        json.loads(restored["flake.lock"].content)["nodes"]["superset"]["locked"]["rev"]
+        == _BASE
+    )
+    assert (
+        json.loads(restored["flake.lock"].content)["nodes"]["codex"]["locked"]["rev"]
+        == _PIN
+    )
+
+
+def test_rewind_leaves_electron_consumers_the_inventory_can_still_build() -> None:
+    """A packaged runtime, an unchanged entry, and a bad inventory all stay."""
+    sources = _electron_entry("2.0.10", "44.10.0", _PIN)
+    owned = {"superset": frozenset({_SUPERSET, _BUN})}
+    base = _tree(**{
+        "flake.nix": _attr_flake("v1.30.2"),
+        "flake.lock": _named_lock({"superset": _BASE, "codex": _BASE}),
+        _SUPERSET: sources,
+        _BUN: "bun\n",
+        _INVENTORY: _inventory("44.10.0"),
+    })
+    merged = _tree(**{
+        "flake.nix": _attr_flake("v2.0.10"),
+        "flake.lock": _named_lock({"superset": _PIN, "codex": _BASE}),
+        _SUPERSET: sources,
+        _BUN: "bun-pin\n",
+        _INVENTORY: _inventory("44.10.0"),
+    })
+
+    restored, names = rewind_unpackaged_electron(base, merged, owned)
+
+    assert names == ()
+    assert restored is merged
+
+    unchanged = _tree(**{
+        "flake.nix": _attr_flake("v2.0.10"),
+        "flake.lock": _named_lock({"superset": _PIN, "codex": _BASE}),
+        _SUPERSET: sources,
+        _INVENTORY: _inventory("41.10.3"),
+    })
+    assert rewind_unpackaged_electron(unchanged, unchanged, owned) == (unchanged, ())
+
+    bare = dict(merged)
+    bare[_SUPERSET] = _blob(_electron_entry("2.0.10", None, _PIN))
+    bare[_INVENTORY] = _blob(_inventory())
+    assert rewind_unpackaged_electron(base, bare, owned) == (bare, ())
+
+    for content in (
+        b"\xff",
+        b"[",
+        b"[]",
+        b"null",
+        b'{"versions": [1]}',
+        b'{"versions": "44"}',
+    ):
+        broken = dict(merged)
+        broken[_INVENTORY] = FileBlob("100644", content)
+        broken[_SUPERSET] = _blob(sources)
+        assert rewind_unpackaged_electron(base, broken, owned)[1] == ()
+
+    missing = dict(merged)
+    del missing[_INVENTORY]
+    assert rewind_unpackaged_electron(base, missing, owned) == (missing, ())
+
+    malformed = dict(merged)
+    malformed[_SUPERSET] = _blob("{")
+    malformed[_INVENTORY] = _blob(_inventory())
+    assert rewind_unpackaged_electron(base, malformed, owned) == (malformed, ())
+
+    absent = dict(merged)
+    del absent[_SUPERSET]
+    assert rewind_unpackaged_electron(
+        base, absent, {"superset": frozenset({_SUPERSET})}
+    ) == (absent, ())
+
+
+def test_rewind_skips_an_unpackaged_electron_whose_declaration_cannot_splice() -> None:
+    """A URL binding stays, and a lock that cannot roll back keeps the files."""
+    url = '{ inputs.superset.url = "github:superset-sh/superset/v2.0.10"; }\n'
+    base_url = '{ inputs.superset.url = "github:superset-sh/superset/v1.30.2"; }\n'
+    sources = _electron_entry("2.0.10", "44.10.0", _PIN)
+    base_sources = _electron_entry("1.30.2", "41.10.3", _BASE)
+    owned = {"superset": frozenset({_SUPERSET})}
+    base = _tree(**{
+        "flake.nix": base_url,
+        "flake.lock": _named_lock({"superset": _BASE}),
+        _SUPERSET: base_sources,
+        _INVENTORY: _inventory("41.10.3"),
+    })
+    merged = _tree(**{
+        "flake.nix": url,
+        "flake.lock": _named_lock({"superset": _PIN}),
+        _SUPERSET: sources,
+        _INVENTORY: _inventory("41.10.3"),
+    })
+
+    restored, names = rewind_unpackaged_electron(base, merged, owned)
+
+    assert names == ()
+    assert restored[_SUPERSET].content == merged[_SUPERSET].content
+
+    unreadable = _tree(**{
+        "flake.nix": _attr_flake("v2.0.10"),
+        "flake.lock": _named_lock({"superset": _PIN, "codex": _BASE}),
+        _SUPERSET: sources,
+        _INVENTORY: _inventory("41.10.3"),
+    })
+    unreadable["flake.lock"] = FileBlob("100644", b"\xff")
+    baseline = _tree(**{
+        "flake.nix": _attr_flake("v1.30.2"),
+        "flake.lock": _named_lock({"superset": _BASE, "codex": _BASE}),
+        _SUPERSET: base_sources,
+        _INVENTORY: _inventory("41.10.3"),
+    })
+    kept, kept_names = rewind_unpackaged_electron(baseline, unreadable, owned)
+    assert kept_names == ()
+    assert kept[_SUPERSET].content == sources.encode()
+
+
+def test_rewind_discards_an_electron_restore_when_the_declaration_refuses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A refused declaration splice does not leave the source files half-restored."""
+    monkeypatch.setattr(
+        "lib.update.ci.pin_sync._restore_declarations", lambda *_args: False
+    )
+    sources = _electron_entry("2.0.10", "44.10.0", _PIN)
+    owned = {"superset": frozenset({_SUPERSET})}
+    base = _tree(**{
+        "flake.nix": _attr_flake("v1.30.2"),
+        "flake.lock": _named_lock({"superset": _BASE, "codex": _BASE}),
+        _SUPERSET: _electron_entry("1.30.2", "41.10.3", _BASE),
+        _INVENTORY: _inventory("41.10.3"),
+    })
+    merged = _tree(**{
+        "flake.nix": _attr_flake("v2.0.10"),
+        "flake.lock": _named_lock({"superset": _PIN, "codex": _BASE}),
+        _SUPERSET: sources,
+        _INVENTORY: _inventory("41.10.3"),
+    })
+
+    restored, names = rewind_unpackaged_electron(base, merged, owned)
+
+    assert names == ()
+    assert restored is merged
 
 
 def test_parsed_source_entry_rejects_malformed_payloads() -> None:

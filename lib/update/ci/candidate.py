@@ -39,7 +39,11 @@ from lib.update.ci.coverage import (
     root_store_paths,
     write_root_out_path_cache,
 )
-from lib.update.ci.pin_sync import owned_paths_by_input, rewind_unpaired_inputs
+from lib.update.ci.pin_sync import (
+    owned_paths_by_input,
+    rewind_unpackaged_electron,
+    rewind_unpaired_inputs,
+)
 from lib.update.ci.shard_plan import (
     ClosureShardReceipt,
     costs_for_tree,
@@ -923,8 +927,11 @@ def _with_superset_hold(candidate: Candidate, *, repo: Path) -> Candidate:
     The rewind puts an input back when every file its sources own is still the
     baseline. That is the goose and superset split from Update 44258507999:
     the pins seed moved the input, and a later restore put ``sources.json``
-    back without it. It does not quarantine the package. The Superset hold
-    still covers a sources entry that moved with no materialized hashes.
+    back without it. It does not quarantine the package. A consumer whose
+    ``electronVersion`` is absent from the folded Electron inventory is put
+    back the same way (Update 44479330250 kept Superset 2.0.10 against a
+    restored inventory that stops at 44.9.3). The Superset hold still covers
+    a sources entry that moved with no materialized hashes.
     """
     with IsolatedUpdateWorkspace(repo) as workspace:
         base = _index_files(workspace.root)
@@ -935,11 +942,11 @@ def _with_superset_hold(candidate: Candidate, *, repo: Path) -> Candidate:
     current_blobs = {
         path: FileBlob(blob.mode, blob.content) for path, blob in current.items()
     }
-    rewound, rewound_changed = rewind_unpaired_inputs(
-        base_blobs, current_blobs, owned_paths_by_input(repo)
-    )
-    held_files, superset_held = hold_unmaterialized_superset_pin(base_blobs, rewound)
-    if not superset_held and not rewound_changed:
+    owned = owned_paths_by_input(repo)
+    rewound, rewound_changed = rewind_unpaired_inputs(base_blobs, current_blobs, owned)
+    aligned, electron_inputs = rewind_unpackaged_electron(base_blobs, rewound, owned)
+    held_files, superset_held = hold_unmaterialized_superset_pin(base_blobs, aligned)
+    if not superset_held and not rewound_changed and not electron_inputs:
         return candidate
     merged_files = {
         path: _IndexBlob(blob.mode, blob.content) for path, blob in held_files.items()
@@ -947,6 +954,8 @@ def _with_superset_hold(candidate: Candidate, *, repo: Path) -> Candidate:
     tree, patch = _materialize_merged_index(repo, base, merged_files)
     quarantines = candidate.quarantines
     resolutions = dict(candidate.resolutions)
+    for name in electron_inputs:
+        resolutions.pop(name, None)
     if superset_held and not any(entry.package == "superset" for entry in quarantines):
         quarantines = merge_quarantine_entries((
             *quarantines,

@@ -278,10 +278,14 @@ flowchart TD
    That rewind does not quarantine the package. It runs on the tree after
    every native candidate has been folded, and it is what puts ``goose`` and
    ``superset`` back when the pins seed moved the input and a later restore
-   left the source metadata behind (Update 44258507999). The Superset hold
-   still quarantines a ``sources.json`` that changed with no hashes, and it
-   remains the fallback when that input's declaration cannot be restored on
-   its own. Restoring the Superset input during an earlier pairwise merge
+   left the source metadata behind (Update 44258507999). The same merge
+   restores a consumer, and the flake input it pins, when that consumer's
+   ``electronVersion`` is not in the Electron inventory the fold kept.
+   Update 44479330250 left Superset at 2.0.10 (Electron 44.10.0) after the
+   inventory returned to a baseline that stops at 44.9.3. That restore does
+   not quarantine the package either. The Superset hold still quarantines a
+   ``sources.json`` that changed with no hashes, and it remains the fallback
+   when that input's declaration cannot be restored on its own. Restoring the Superset input during an earlier pairwise merge
    rewrites `flake.nix` before the remaining candidate, which still carries
    the same pin beside the other input bumps, and the whole-file merge
    rejects the file (Update 42057077242). Materialized hashes are a completed
