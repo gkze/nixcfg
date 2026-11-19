@@ -516,6 +516,17 @@ def test_build_directory_cleanup_removes_only_nix_trees(tmp_path: Path) -> None:
     assert gate.clear_nix_build_directories(tmp_path / "missing") == 0
 
 
+def test_off_store_build_directory_is_only_the_data_volume() -> None:
+    """A stray path must not become a directory the gate deletes."""
+    assert gate.build_directories("") == (Path("/nix/var/nix/builds"),)
+    assert gate.build_directories("/private/tmp/nix-builds") == (
+        Path("/nix/var/nix/builds"),
+        Path("/private/tmp/nix-builds"),
+    )
+    with pytest.raises(gate.GateError, match="off-store build directory"):
+        gate.build_directories("/private/tmp")
+
+
 def test_retained_store_paths_are_gc_roots(tmp_path: Path) -> None:
     """The output of one root must survive the GC before the next root."""
     path = _out("system")
@@ -1007,6 +1018,18 @@ def test_realize_reuses_the_update_native_runner() -> None:
     assert candidate["if"] == "inputs.stage != 'closure-gate'"
     assert flush["if"] == "always()"
     assert realize["env"]["NIXCFG_CLOSURE_GATE_COMMAND"] == "realize"
+    assert realize["env"]["NIXCFG_BUILD_DIR"] == (
+        "${{ inputs.system == 'aarch64-darwin' && '/private/tmp/nix-builds' || '' }}"
+    )
+    runtime = next(
+        step
+        for step in steps
+        if str(step.get("uses", "")).startswith("./.github/actions/update-runtime")
+    )
+    assert runtime["with"]["off-store-build-dir"] == (
+        "${{ inputs.system == 'aarch64-darwin' && inputs.stage == 'closure-gate' "
+        "&& 'true' || 'false' }}"
+    )
     update = _workflow("update.yml")
     budgets = [
         job["with"]["closure_budget_seconds"]

@@ -127,6 +127,7 @@ jobs:
           github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
           cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           cache-generators: ${{ inputs.stage == 'prepare' }}
+          off-store-build-dir: ${{ inputs.system == 'aarch64-darwin' && inputs.stage == 'closure-gate' && 'true' || 'false' }}
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         if: inputs.previous != ''
         with:
@@ -203,6 +204,7 @@ jobs:
           NIXCFG_CLOSURE_GATE_COMMAND: realize
           NIXCFG_CLOSURE_GATE_PLAN: ${{ runner.temp }}/closure-gate/plan.json
           NIXCFG_DEVICE_FAULT_RETRY: ${{ inputs.device_fault_retry }}
+          NIXCFG_BUILD_DIR: ${{ inputs.system == 'aarch64-darwin' && '/private/tmp/nix-builds' || '' }}
           SYSTEM: ${{ inputs.system }}
         shell: python
         run: |

@@ -949,7 +949,15 @@ millions of inodes free. The retry's kernel log is 215161
 end of the build, while Nix was unlinking `bb-0.48.1-pnpm10-source` and
 `waku-0.1.20-vendor` together (`max-jobs` 2). The first attempt failed
 the same way on another `node_modules` tree. One build directory at a
-time is the fix; another retry is not. A runner lost with no
+time stops two teardowns. It does not stop one tree. Run 44430419052
+kept `--max-jobs 1`. The first runner was lost. Both fresh VMs then
+faulted `disk2s7` while unlinking a single tree,
+`bb-0.48.1-pnpm10-source`, with tens of GiB and hundreds of millions of
+inodes still free. Darwin closure-gate sets the daemon `build-dir` to
+`/private/tmp/nix-builds` on the Data volume, so that unlink is not on
+the Nix Store volume. Store outputs still land on `disk2s7`; Nix copies
+them across the volume boundary. The gate clears leftover `nix-*`
+directories in both places between installables. A runner lost with no
 `device_fault` flag is the same retry, as is a job that times out or an
 `update-runtime` step that fails alone.
 `realize-aarch64-darwin-faults` reads the check-run annotation, the step

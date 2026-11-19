@@ -603,6 +603,25 @@ def retain_store_paths(
         run(["nix-store", "--realise", "--add-root", str(link), path])
 
 
+_STORE_BUILD_DIR = Path("/nix/var/nix/builds")
+_OFF_STORE_BUILD_DIR = Path("/private/tmp/nix-builds")
+
+
+def build_directories(off_store: str) -> tuple[Path, ...]:
+    """Return build-directory roots the gate may clear.
+
+    Darwin closure-gate sets the daemon ``build-dir`` to the Data volume.
+    Only that exact path is accepted.
+    """
+    if not off_store:
+        return (_STORE_BUILD_DIR,)
+    path = Path(off_store)
+    if path != _OFF_STORE_BUILD_DIR:
+        msg = f"off-store build directory is not {_OFF_STORE_BUILD_DIR}"
+        raise GateError(msg)
+    return (_STORE_BUILD_DIR, path)
+
+
 def clear_nix_build_directories(root: Path) -> int:
     """Delete leftover ``nix-*`` build directories under *root*.
 
@@ -990,7 +1009,9 @@ class _ProcessRunner(_Runner):
             root,
             lambda args: _run(args, timeout=_INSTANTIATE_TIMEOUT_SECONDS),
         )
-        removed = clear_nix_build_directories(Path("/nix/var/nix/builds"))
+        removed = 0
+        for root in build_directories(os.environ.get("NIXCFG_BUILD_DIR", "")):
+            removed += clear_nix_build_directories(root)
         sys.stdout.write(f"closure-gate cleared {removed} leftover build directories\n")
         sys.stdout.flush()
         _load_jobs().reclaim_hosted_store()

@@ -6291,6 +6291,14 @@ def test_hosted_update_runtime_reserves_store_headroom_for_root_closures() -> No
     assert "max-free = ${{ steps.reclaim.outputs.nix_max_free }}" in extra_conf
     assert "eval-cores = 2" in extra_conf
     assert "eval-cores = 0" not in extra_conf
+    assert "inputs.off-store-build-dir == 'true'" in extra_conf
+    assert "build-dir = /private/tmp/nix-builds" in extra_conf
+    prepare = next(
+        step
+        for step in action["runs"]["steps"]
+        if step.get("name") == "Prepare an off-store build directory"
+    )
+    assert prepare["if"] == "inputs.off-store-build-dir == 'true'"
     assert jobs._NIX_MIN_FREE_BYTES == 34359738368
     assert jobs._NIX_MAX_FREE_BYTES == 68719476736
     assert jobs._STORE_GC_SKIP_BYTES == (
