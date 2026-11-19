@@ -21,6 +21,7 @@ jobs:
       - name: Prepare pinned Nix and Python tooling
         id: runtime
         uses: ./.github/actions/update-runtime
+        timeout-minutes: 90
         with:
           github-token: ${{ github.token }}
           cache-generators: 'true'

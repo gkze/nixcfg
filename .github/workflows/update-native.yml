@@ -83,6 +83,10 @@ on:
         description: Fresh-VM rerun of a device-faulted warmup or root cell; a second fault fails
         default: false
         type: boolean
+      timeout_minutes:
+        description: Job cap. The closure-gate retry is shorter than a first attempt
+        default: 360
+        type: number
     outputs:
       darwin_closure_shards:
         description: Generated always-run Darwin closure matrix
@@ -104,7 +108,7 @@ permissions:
 jobs:
   native:
     runs-on: ${{ inputs.runner }}
-    timeout-minutes: 360
+    timeout-minutes: ${{ inputs.timeout_minutes }}
     outputs:
       darwin_closure_shards: ${{ steps.candidate.outputs.darwin_closure_shards }}
       device_fault: |-
@@ -117,11 +121,13 @@ jobs:
           ref: ${{ inputs.checkout_ref || github.event.inputs.repair_commit || github.sha }}
           persist-credentials: false
       - uses: ./.github/actions/update-runtime
+        timeout-minutes: 90
         id: runtime
         with:
           github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
           cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           cache-generators: ${{ inputs.stage == 'prepare' }}
+          off-store-build-dir: ${{ inputs.system == 'aarch64-darwin' && inputs.stage == 'closure-gate' && 'true' || 'false' }}
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         if: inputs.previous != ''
         with:
@@ -197,6 +203,8 @@ jobs:
         env:
           NIXCFG_CLOSURE_GATE_COMMAND: realize
           NIXCFG_CLOSURE_GATE_PLAN: ${{ runner.temp }}/closure-gate/plan.json
+          NIXCFG_DEVICE_FAULT_RETRY: ${{ inputs.device_fault_retry }}
+          NIXCFG_BUILD_DIR: ${{ inputs.system == 'aarch64-darwin' && '/private/tmp/nix-builds' || '' }}
           SYSTEM: ${{ inputs.system }}
         shell: python
         run: |
@@ -295,6 +303,9 @@ jobs:
           # Step env is not inherited. The shard root names the pin
           # (darwin-argus, home-george); a hash-named pin is a new pin
           # every closure and filled the Cachix pin quota (43613142360).
+          # Scope tells flush which jobs own that name. Cascade warmup
+          # realizes a home-manager-generation without one (44038363047).
+          NIXCFG_VALIDATE_SCOPE: ${{ inputs.scope }}
           NIXCFG_CLOSURE_ROOTS: ${{ inputs.closure_roots }}
           CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
         run: |

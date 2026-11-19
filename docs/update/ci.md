@@ -301,6 +301,23 @@ Prefetches append store paths to an invocation-local JSONL receipt that stays
 with the job artifacts. Publication validates and deduplicates these paths
 without a scan of the runner's store.
 
+`require-cachix-daemon` runs after `cachix-action` and before bootstrap.
+The action returns when it spawns `cachix daemon run`. Cachix 1.11.1 logs
+`Starting Cachix Daemon` and then fetches cache metadata from `Daemon.new`.
+That fetch retries HTTP failures for 90 seconds of cumulative delay
+(`Cachix.Client.Retry.httpRetryPolicy`) before `Listen.listen` binds
+`daemon.sock`. The gate waits 180 seconds so a retry still inside that
+window can bind the socket, and it fails immediately when the recorded
+daemon pid has exited. A request that never returns still fails the gate
+at 180 seconds, before bootstrap. Update 44033920588
+`validate-darwin-warm-rust` slots 0 and 1 still had only the Starting line
+when a 60-second gate expired. The socket existed about 84 seconds after
+the action returned, `cachix daemon stop` returned 0, and the kernel log
+had no `(IOStorageFamily) diskN: I/O error.` line. Slots 2–4 stopped
+because slot 1 was a sibling failure. A kernel block-device I/O error
+remains the fresh-VM device-fault handoff. This gate's failure stays a
+job failure, and its artifact name has no `-device-fault` suffix.
+
 The Cachix client does not time out a stalled upload. Prepare's publication
 of those receipts therefore uses the same 1200-second bound as flush, three
 times. A push that is still silent fails that attempt and retries, and the
@@ -318,7 +335,11 @@ Every job that passes an explicit `cachix-token` input to `update-runtime`
 ends with `flush-cachix`; read-only `repair` and `start-repair` do not. That
 step stops the daemon, then pushes and pins the job's recorded root receipts.
 A Darwin root pin uses the shard name (`darwin-argus`, `home-george`) and
-`--keep-revisions 1`. The linux-builder image uses its stable
+`--keep-revisions 1`. Only a `closure-shard` flush owns that name. Update
+44038363047 cascade-warmup slot 3 realized `home-manager-generation` with
+`NIXCFG_CLOSURE_ROOTS` empty, `cachix push` already saw the path on gkze,
+and naming the pin failed the flush. A warmup, package, or aggregate
+closure flush still pushes that wrapper and does not invent a pin. The linux-builder image uses its stable
 per-architecture name and the same one-revision keep. Hash-named pins are
 deleted before a Darwin root pin. A linux-builder pin that still keeps days
 is deleted before that image is pinned. If the pin then returns 402, flush
@@ -570,9 +591,15 @@ One device error makes the runner's store untrusted:
   its retry succeeded without a device fault. `prepare-merge` then folds that
   one Darwin candidate with Linux.
 
-Any other preparation failure is still a failure. A device fault on the retry
+A lost runner, a job that reaches its timeout, or an `update-runtime` step
+that fails with no other failed step sets neither output. `prepare-darwin-faults`
+reads the job list and emits those shard indexes. The retry `if` unions that
+list with the shard outputs. A real updater or flush failure is still a
+failure, including the siblings it stopped. A device fault on the retry
 also leaves preparation incomplete, so the run fails. The PR update-prepare
-check uses the same retry.
+check uses the same retry. The single-job `update-pr` Darwin prepare matches
+a namespaced `prepare-aarch64-darwin-device-fault-<namespace>` artifact, not
+only the exact suffix.
 
 A Darwin prepare shard that loses the Nix daemon or the store, and whose
 failure is not one package's derivation eval, uses the same retry jobs.
@@ -629,8 +656,29 @@ registered with bad bytes. A fresh VM can redo the shard exactly.
 A root shard's kernel-log query that runs past its budget fails the shard,
 as it does for a warmup slot: the shard exists to publish its paths.
 
-Canary, package, and aggregate closure validation have no retry job. They
-do not query the kernel log, and a fault there still fails the job.
+Package validation and the aggregate closure query the kernel log and hand
+a device fault to one fresh VM, the same way a warmup slot does. The FOD
+canary, the rust canary, the cascade canary, the leaf prebuild, and the
+Zed family job do too. Each has a fresh-VM retry. A faulted FOD canary is
+not success for the rust stripe until that retry succeeds or is skipped.
+`NIXCFG_CANARY` does not turn the kernel query off.
+
+A hosted runner can also die without logging a block-device error and
+without setting `device_fault`. GitHub then annotates "lost communication
+with the server" and leaves the current step `in_progress`, or the job
+conclusion is `timed_out` after the runner sits until the job cap. A
+completed `update-runtime` step that fails alone is the same fresh VM: the
+Nix install or the Cachix daemon never became usable. `-faults` reads the
+job list after the Darwin job finishes. It retries that job, and any
+sibling that stopped because of that loss, once. A real updater, flush, or
+build failure is not retried: Update 44038363047 slot 3 failed in flush and
+the other cascade slots stopped for that sibling, so no slot was retried.
+Coverage accepts the first job's `failure` only when `-recovered` is true
+and the retry succeeded. The closure-gate Darwin plan cell and realize job
+use the same decision. Publish, repair, and the self-heal agent are not
+redone: a second writer can publish twice. Each caller gives the
+`update-runtime` step 90 minutes. A composite action cannot set
+`timeout-minutes` on its own steps; that key makes the action fail to load.
 
 ### Validation failures and timeouts
 
@@ -855,8 +903,21 @@ aggregate.
 Realize calls the Update reusable workflow (`update-native.yml`) with stage
 `closure-gate` on `macos-15`, `ubuntu-24.04-arm`, and `ubuntu-24.04`. The
 build flags are the validation build (`nix build --no-update-lock-file
---no-link --keep-going --fallback`) plus `--print-out-paths`. The build
-budget is the Darwin shard budget, 18000 seconds, inside the 360-minute job.
+--no-link --keep-going --fallback`) plus `--max-silent-time 1200`,
+`--timeout 7200`, `--max-jobs 1`, and `--print-out-paths`. Twenty minutes
+of builder silence, or two hours for one derivation, fails that derivation.
+Each selected installable is a separate build. After
+it, the gate roots the printed paths, deletes leftover `nix-*` build
+directories, and runs the hosted store GC when free space is under the
+skip threshold before the next installable.
+The installable budget is the Darwin shard budget, 18000 seconds, inside
+the 360-minute job, on the first attempt and on the fresh-VM retry.
+`--max-silent-time 1200` is what stops a silent builder. Run 44191046002's
+retry wrote the store for five hours with no client log and no kernel I/O
+error. Run 44268930857's retry was still compiling argus, the store having
+grown from 8 GiB to 98 GiB with rust and bun shards in progress, when a
+7200-second cap killed that build. A timeout keeps the last 20 lines Nix
+had already printed.
 The receipt is `--print-out-paths`. Derivation show of a Darwin system
 names a different output than the build realizes, so it does not choose
 what gets pushed. `nix build` substitutes a path already on gkze. The gate
@@ -874,8 +935,47 @@ had started. Run 44005867871's `home-manager-generation` builder reported
 `substituteInPlace` reads the activation script in one pass, and that read
 hit the faulted volume. The tree had no NUL bytes. The realize job records
 `device_fault` and `realize-aarch64-darwin-retry` rebuilds the same outputs
-once on a fresh VM, which is the attempt allowed to push. A second fault
-fails the gate.
+once on a fresh VM, which is the attempt allowed to push. The realize step
+itself exits nonzero; the storage dump uploads
+`closure-gate-aarch64-darwin-gate-device-fault`. That artifact is the retry
+signal even though the job conclusion is failure. Run 44141142629 failed
+`waku` with `Directory not empty` and `Illegal byte sequence` after the
+Nix Store volume faulted, uploaded that artifact, and the retry was skipped
+because the failed step looked like a real build. A second fault fails the
+gate. Run 44158690416 did that on two fresh VMs, and it was not a full
+disk or a dead device: both ended with 48–60 GiB free and hundreds of
+millions of inodes free. The retry's kernel log is 215161
+`IOStorageFamily` I/O errors on `disk2s7`, all inside 64 seconds at the
+end of the build, while Nix was unlinking `bb-0.48.1-pnpm10-source` and
+`waku-0.1.20-vendor` together (`max-jobs` 2). The first attempt failed
+the same way on another `node_modules` tree. One build directory at a
+time stops two teardowns. It does not stop one tree. Run 44430419052
+kept `--max-jobs 1`. The first runner was lost. Both fresh VMs then
+faulted `disk2s7` while unlinking a single tree,
+`bb-0.48.1-pnpm10-source`, with tens of GiB and hundreds of millions of
+inodes still free. Darwin closure-gate sets the daemon `build-dir` to
+`/private/tmp/nix-builds` on the Data volume, so that unlink is not on
+the Nix Store volume. Store outputs still land on `disk2s7`; Nix copies
+them across the volume boundary. The gate clears leftover `nix-*`
+directories in both places between installables. A runner lost with no
+`device_fault` flag is the same retry, as is a job that times out or an
+`update-runtime` step that fails alone.
+`realize-aarch64-darwin-faults` reads the check-run annotation, the step
+left `in_progress`, the job conclusion, and the step conclusions.
+Run 44327589569 lost that runner, and the fresh VM then logged 104271
+`disk2s7` I/O errors while unlinking superset's bun tree. That retry is
+not a result either. `realize-aarch64-darwin-retry-2` is one more fresh
+VM, and only when the retry's own `device_fault` output is set or the
+retry was a lost runner or a failed `update-runtime` step. A real build
+failure of the retry stops there.
+The Darwin plan cell uses that decision too: a lost plan retries once and
+uploads `closure-gate-plan-aarch64-darwin` for route. The realize jobs opt
+into `always()`: `plan-darwin-retry` is skipped on a clean plan, and GitHub
+then skips every later job that does not, even after route succeeds. Run
+44264431579 skipped all three realize jobs that way. The aggregating job
+downloads that retry's receipt when
+the first realize did not succeed. A build failure with no `-device-fault`
+artifact is not retried.
 
 Fork pull requests do not run the workflow's jobs. The trigger is
 `pull_request` for a head in this repository, and the Cachix token is passed

@@ -126,6 +126,14 @@ type ValidationProgress = Callable[[ValidationProgressEvent], None]
 _ROOT_CLOSURE_VALIDATION_SOURCE = "root-closures"
 _ROOT_CLOSURE_MANIFEST_INSTALLABLE = "path:.#lib.rootClosureManifest"
 ROOT_CLOSURE_VALIDATION_TIMEOUT_SECONDS = 6 * 60 * 60
+# Run 44191046002 realize retry: the next closure installable wrote the
+# store for five hours and emitted no client log until the 18000s budget.
+# Builder silence of twenty minutes, and two hours for one derivation, stop
+# that hang. A derivation that keeps logging can still use the installable
+# budget. The closure gate duplicates these integers; it cannot import this
+# module on the runner's Python 3.12.
+HOSTED_BUILD_MAX_SILENT_SECONDS = 20 * 60
+HOSTED_BUILD_DERIVATION_TIMEOUT_SECONDS = 2 * 60 * 60
 _VALIDATION_MAX_ATTEMPTS = 3
 _VALIDATION_INDIVIDUAL_THRESHOLD = 4
 _VALIDATION_RETRY_BACKOFF_SECONDS = 1.0
@@ -901,6 +909,16 @@ def resolve_derivation_validations(
     return tuple(requests)
 
 
+def _hosted_build_deadline_args() -> list[str]:
+    """Stop a silent or stuck derivation before the installable budget."""
+    return [
+        "--max-silent-time",
+        str(HOSTED_BUILD_MAX_SILENT_SECONDS),
+        "--timeout",
+        str(HOSTED_BUILD_DERIVATION_TIMEOUT_SECONDS),
+    ]
+
+
 def _validation_args(
     request: DerivationValidationRequest,
     *,
@@ -953,6 +971,7 @@ def _validation_args(
                         ]
                     )
                 ),
+                *_hosted_build_deadline_args(),
                 *(["-L"] if print_build_logs else []),
             ]
             if request.mode == "build"

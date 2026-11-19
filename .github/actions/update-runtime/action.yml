@@ -14,6 +14,9 @@ inputs:
   light-image-reclaim:
     description: Skip Xcode/Android purge; keep a smaller fail-closed disk check
     default: "false"
+  off-store-build-dir:
+    description: Put temporary build directories on the Data volume, not the Nix Store volume.
+    default: "false"
 outputs:
   runtime:
     description: Pinned nixcfg package
@@ -26,6 +29,8 @@ outputs:
     value: ${{ steps.runtime.outputs.nixpkgs }}
 runs:
   using: composite
+  # Composite steps cannot set timeout-minutes. The key fails the
+  # action load (44264423588). Each caller step sets 90 minutes.
   steps:
     - name: Reclaim unused hosted image tools
       id: reclaim
@@ -36,6 +41,14 @@ runs:
       run: |
         import runpy
         runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+    # 44430419052: one pnpm tree on disk2s7 faulted the volume during
+    # unlink, with max-jobs already 1. The Data volume holds this directory.
+    - name: Prepare an off-store build directory
+      if: inputs.off-store-build-dir == 'true'
+      shell: bash
+      run: |
+        mkdir -p /private/tmp/nix-builds
+        chmod 755 /private/tmp/nix-builds
     # Determinate Nix v3.22.5
     - uses: DeterminateSystems/determinate-nix-action@8d87e8d5e5b8a8309d4281094560f127d9a265f1
       with:
@@ -46,6 +59,7 @@ runs:
           eval-cores = 2
           min-free = ${{ steps.reclaim.outputs.nix_min_free }}
           max-free = ${{ steps.reclaim.outputs.nix_max_free }}
+          ${{ inputs.off-store-build-dir == 'true' && 'build-dir = /private/tmp/nix-builds' || '' }}
     - name: Record disk after Nix install
       shell: python
       env:

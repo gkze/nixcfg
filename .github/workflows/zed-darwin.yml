@@ -63,3 +63,48 @@ jobs:
       warmup_artifact: zed-plan
       canary: true
     secrets: inherit
+  zed-family-faults:
+    needs: zed-family
+    if: |-
+      always() && !cancelled() &&
+      (needs.zed-family.result == 'success' ||
+      needs.zed-family.result == 'failure')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      retry: ${{ steps.faults.outputs.retry }}
+      recovered: ${{ steps.faults.outputs.recovered }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Decide a fresh-VM Zed retry
+        id: faults
+        env:
+          NIXCFG_ACTIONS_TOKEN: ${{ github.token }}
+          NIXCFG_FAULT_ARTIFACT_PREFIX: validate-aarch64-darwin-zed-warmup-zed
+          NIXCFG_FAULT_JOB_PREFIX: zed-family
+          NIXCFG_CI_STAGE: darwin-job-retry
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+  zed-family-retry:
+    needs:
+      - zed-family
+      - zed-family-faults
+    if: |-
+      always() && !cancelled() &&
+      needs.zed-family-faults.result == 'success' &&
+      needs.zed-family-faults.outputs.retry == 'true'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      scope: zed-warmup
+      shard: zed
+      warmup_artifact: zed-plan
+      canary: true
+      device_fault_retry: true
+    secrets: inherit

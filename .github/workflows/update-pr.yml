@@ -237,6 +237,55 @@ jobs:
       targets: ${{ needs.resolve.outputs.targets }}
       checkout_ref: ${{ needs.resolve.outputs.from_default == 'true' && github.event.repository.default_branch || (needs.resolve.outputs.action == 'update' && inputs.branch || '') }}
     secrets: inherit
+  prepare-darwin-faults:
+    needs: prepare-darwin
+    if: |-
+      always() && !cancelled() &&
+      (needs.prepare-darwin.result == 'success' ||
+      needs.prepare-darwin.result == 'failure')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      retry: ${{ steps.faults.outputs.retry }}
+      recovered: ${{ steps.faults.outputs.recovered }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.branch }}
+          persist-credentials: false
+      - name: Decide a fresh-VM Darwin prepare retry
+        id: faults
+        env:
+          NIXCFG_ACTIONS_TOKEN: ${{ github.token }}
+          NIXCFG_FAULT_ARTIFACT_PREFIX: prepare-aarch64-darwin
+          NIXCFG_FAULT_JOB_PREFIX: prepare-darwin
+          NIXCFG_CI_STAGE: darwin-job-retry
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+  prepare-darwin-retry:
+    needs: [resolve, prepare-pins, prepare-darwin, prepare-darwin-faults]
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin-faults.result == 'success' &&
+      needs.prepare-darwin-faults.outputs.retry == 'true'
+    concurrency:
+      group: nixcfg-darwin-${{ needs.resolve.outputs.priority }}
+      cancel-in-progress: false
+      queue: max
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: prepare
+      previous: prepare-pins
+      artifact_namespace: ${{ needs.resolve.outputs.artifact_namespace }}
+      targets: ${{ needs.resolve.outputs.targets }}
+      checkout_ref: ${{ needs.resolve.outputs.from_default == 'true' && github.event.repository.default_branch || (needs.resolve.outputs.action == 'update' && inputs.branch || '') }}
+      device_fault_retry: true
+    secrets: inherit
   prepare-arm:
     needs: [resolve, prepare-pins]
     if: always() && !cancelled() && needs.prepare-pins.result == 'success'
@@ -264,10 +313,26 @@ jobs:
       checkout_ref: ${{ needs.resolve.outputs.from_default == 'true' && github.event.repository.default_branch || (needs.resolve.outputs.action == 'update' && inputs.branch || '') }}
     secrets: inherit
   prepare-merge:
-    needs: [resolve, prepare-darwin, prepare-arm, prepare-x86]
+    needs:
+      - resolve
+      - prepare-darwin
+      - prepare-darwin-faults
+      - prepare-darwin-retry
+      - prepare-arm
+      - prepare-x86
     if: |-
       always() && !cancelled() &&
-      (needs.prepare-darwin.result == 'success' || needs.prepare-darwin.result == 'skipped') &&
+      (needs.prepare-darwin.result == 'skipped' ||
+      needs.prepare-darwin.result == 'success' &&
+      needs.prepare-darwin.outputs.device_fault != 'true' &&
+      needs.prepare-darwin.outputs.runner_fault != 'true' ||
+      needs.prepare-darwin-faults.outputs.recovered == 'true' &&
+      needs.prepare-darwin-retry.result == 'success' &&
+      needs.prepare-darwin-retry.outputs.device_fault != 'true' &&
+      needs.prepare-darwin-retry.outputs.runner_fault != 'true' ||
+      needs.prepare-darwin-retry.result == 'success' &&
+      needs.prepare-darwin-retry.outputs.device_fault != 'true' &&
+      needs.prepare-darwin-retry.outputs.runner_fault != 'true') &&
       needs.prepare-arm.result == 'success' &&
       needs.prepare-x86.result == 'success'
     uses: ./.github/workflows/update-native.yml
@@ -283,7 +348,7 @@ jobs:
     secrets: inherit
   publish:
     needs: [resolve, prepare-merge]
-    if: needs.prepare-merge.result == 'success'
+    if: always() && !cancelled() && needs.prepare-merge.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -293,6 +358,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - uses: ./.github/actions/update-runtime
+        timeout-minutes: 90
         id: runtime
         with:
           github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}

@@ -14,6 +14,8 @@ import yaml
 
 from lib.system_policy import supported_systems
 from lib.update.derivation_validation import (
+    HOSTED_BUILD_DERIVATION_TIMEOUT_SECONDS,
+    HOSTED_BUILD_MAX_SILENT_SECONDS,
     DerivationValidationRequest,
     _batch_validation_args,
 )
@@ -65,7 +67,10 @@ class _Runner:
         self.present: set[str] = set()
         self.presence_value = "absent"
         self.built: tuple[str, ...] | None = None
+        self.builds: list[tuple[str, ...]] = []
         self.build_result: tuple[str, ...] = ()
+        self.build_results: dict[tuple[str, ...], tuple[str, ...]] = {}
+        self.settled: list[tuple[str, ...]] = []
         self.pushed: tuple[str, ...] | None = None
         self.push_error: Exception | None = None
 
@@ -81,8 +86,12 @@ class _Runner:
         return self.presence_value
 
     def build(self, installables: tuple[str, ...]) -> tuple[str, ...]:
+        self.builds.append(installables)
         self.built = installables
-        return self.build_result
+        return self.build_results.get(installables, self.build_result)
+
+    def settle(self, paths: tuple[str, ...]) -> None:
+        self.settled.append(paths)
 
     def push(self, paths: tuple[str, ...]) -> None:
         if self.push_error is not None:
@@ -225,6 +234,62 @@ def test_plan_roundtrip_keeps_changed_drvs_only() -> None:
         )
 
 
+def test_nix_timeout_keeps_the_captured_tail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """44191046002 hid five hours of Nix output until the budget fired."""
+
+    def explode(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(
+            ["nix"],
+            float(kwargs["timeout"]),
+            output="early\n" * 25 + "still writing the store\n",
+            stderr="no kernel fault\n",
+        )
+
+    assert gate._process_text(b"bytes\n") == "bytes\n"
+    assert gate._process_text(None) == ""
+    monkeypatch.setattr(gate.subprocess, "run", explode)
+    monkeypatch.setattr(gate, "_executable", lambda name: name)
+    with pytest.raises(gate.GateError, match="still writing the store") as caught:
+        gate._run(["nix", "build"], timeout=12)
+    message = str(caught.value)
+    assert "timed out after 12s" in message
+    assert "no kernel fault" in message
+    assert message.count("early") <= 19
+
+    def silent(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(["nix"], float(kwargs["timeout"]))
+
+    monkeypatch.setattr(gate.subprocess, "run", silent)
+    with pytest.raises(gate.GateError, match="timed out after 3s$"):
+        gate._run(["nix", "eval"], timeout=3)
+
+
+def test_retry_realize_keeps_the_installable_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A device-fault retry still has to finish the closure.
+
+    44268930857's retry was compiling argus, store 8 GiB to 98 GiB, when a
+    7200s cap killed it. Silence is bounded by --max-silent-time.
+    """
+    seen: dict[str, float] = {}
+
+    def run(args: list[str], *, timeout: float, cwd: Path | None = None) -> str:
+        del args, cwd
+        seen["timeout"] = timeout
+        return "/nix/store/" + "a" * 32 + "-tool\n"
+
+    monkeypatch.setattr(gate, "_run", run)
+    monkeypatch.setenv("NIXCFG_DEVICE_FAULT_RETRY", "true")
+    assert gate._ProcessRunner().build((".#packages.aarch64-darwin.tool",)) == (
+        "/nix/store/" + "a" * 32 + "-tool",
+    )
+    assert seen["timeout"] == gate.BUILD_BUDGET_SECONDS
+    monkeypatch.setenv("NIXCFG_DEVICE_FAULT_RETRY", "false")
+    gate._ProcessRunner().build((".#packages.aarch64-darwin.tool",))
+    assert seen["timeout"] == gate.BUILD_BUDGET_SECONDS
+
+
 def test_build_args_match_validation_plus_the_output_receipt() -> None:
     """The gate must not grow a second build command."""
     installables = (
@@ -239,8 +304,18 @@ def test_build_args_match_validation_plus_the_output_receipt() -> None:
     )
     expected = _batch_validation_args(requests, flake_root=None)
     first = expected.index("path:.#packages.aarch64-darwin.tool")
-    expected = [*expected[:first], "--print-out-paths", *expected[first:]]
+    expected = [
+        *expected[:first],
+        "--max-jobs",
+        "1",
+        "--print-out-paths",
+        *expected[first:],
+    ]
     assert gate.build_args(installables) == expected
+    assert gate.BUILD_MAX_SILENT_SECONDS == HOSTED_BUILD_MAX_SILENT_SECONDS
+    assert gate.BUILD_DERIVATION_TIMEOUT_SECONDS == (
+        HOSTED_BUILD_DERIVATION_TIMEOUT_SECONDS
+    )
     with pytest.raises(gate.GateError, match="at least one"):
         gate.build_args(())
 
@@ -395,6 +470,71 @@ def test_realize_builds_the_instantiated_drv_when_ifd_changes_it() -> None:
     result = gate.realize_changed((item,), runner)
     assert runner.built == (item.installable(),)
     assert result.pushed == (output,)
+
+
+def test_realize_builds_one_installable_at_a_time() -> None:
+    """44158690416 deleted two vendor trees at once. Each root settles first."""
+    first = _changed("root", "root-closure-darwin-argus", _drv("argus"))
+    second = _changed("root", "root-closure-home-george", _drv("home"))
+    argus = _out("argus")
+    home = _out("home")
+    runner = _Runner()
+    runner.drvs[first.attr] = first.drv
+    runner.drvs[second.attr] = second.drv
+    runner.build_results = {
+        (first.installable(),): (argus,),
+        (second.installable(),): (home,),
+    }
+    result = gate.realize_changed((first, second), runner)
+    assert runner.builds == [(first.installable(),), (second.installable(),)]
+    assert runner.settled == [(argus,), (home,)]
+    assert result.pushed == (argus, home)
+
+
+def test_build_directory_cleanup_removes_only_nix_trees(tmp_path: Path) -> None:
+    """A leftover vendor tree, including a non-UTF-8 name, is removed.
+
+    A sibling that is not a Nix build directory stays. A symlink is unlinked
+    and its target is not followed.
+    """
+    builds = tmp_path / "builds"
+    tree = builds / "nix-1" / "node_modules"
+    tree.mkdir(parents=True)
+    (tree / "plain").write_text("ok")
+    (tree / "bad\udcff").write_text("name")
+    outside = tmp_path / "outside"
+    outside.write_text("keep")
+    link = builds / "nix-link"
+    link.symlink_to(outside)
+    kept = builds / "other"
+    kept.mkdir()
+    assert gate.clear_nix_build_directories(builds) == 2
+    assert not (builds / "nix-1").exists()
+    assert not link.exists()
+    assert outside.read_text() == "keep"
+    assert kept.is_dir()
+    assert gate.clear_nix_build_directories(tmp_path / "missing") == 0
+
+
+def test_off_store_build_directory_is_only_the_data_volume() -> None:
+    """A stray path must not become a directory the gate deletes."""
+    assert gate.build_directories("") == (Path("/nix/var/nix/builds"),)
+    assert gate.build_directories("/private/tmp/nix-builds") == (
+        Path("/nix/var/nix/builds"),
+        Path("/private/tmp/nix-builds"),
+    )
+    with pytest.raises(gate.GateError, match="off-store build directory"):
+        gate.build_directories("/private/tmp")
+
+
+def test_retained_store_paths_are_gc_roots(tmp_path: Path) -> None:
+    """The output of one root must survive the GC before the next root."""
+    path = _out("system")
+    calls: list[list[str]] = []
+    gate.retain_store_paths((path,), tmp_path, calls.append)
+    assert calls == [
+        ["nix-store", "--realise", "--add-root", str(tmp_path / Path(path).name), path]
+    ]
 
 
 def test_realize_fails_closed_on_a_bad_build() -> None:
@@ -718,10 +858,23 @@ def test_pull_request_workflow_is_same_repo_and_keeps_darwin() -> None:
     jobs = workflow["jobs"]
     realize_names = {f"realize-{system}" for system in _SYSTEMS}
     darwin_retry = "realize-aarch64-darwin-retry"
-    assert set(jobs) == {"plan", "route", "closure-gate", darwin_retry, *realize_names}
+    darwin_retry_again = "realize-aarch64-darwin-retry-2"
+    darwin_faults = "realize-aarch64-darwin-faults"
+    assert set(jobs) == {
+        "plan",
+        "plan-darwin-faults",
+        "plan-darwin-retry",
+        "route",
+        "closure-gate",
+        darwin_faults,
+        darwin_retry,
+        "realize-aarch64-darwin-retry-faults",
+        darwin_retry_again,
+        *realize_names,
+    }
     for name, job in jobs.items():
         assert "head.repo.full_name == github.repository" in job["if"]
-        if name in realize_names or name == darwin_retry:
+        if name in realize_names or name in {darwin_retry, darwin_retry_again}:
             assert set(job["secrets"]) == {
                 "CACHIX_AUTH_TOKEN",
                 "UPDATE_SELF_HEAL_GITHUB_TOKEN",
@@ -731,6 +884,12 @@ def test_pull_request_workflow_is_same_repo_and_keeps_darwin() -> None:
             assert job["with"]["runner"] == _RUNNERS[job["with"]["system"]]
             assert "head.sha" in job["with"]["checkout_ref"]
             assert "matrix" not in job["if"]
+            if name in realize_names:
+                # 44264431579: a skipped plan-darwin-retry made GitHub skip
+                # realize even though route succeeded.
+                assert " ".join(job["if"].split()).startswith(
+                    "always() && !cancelled() && "
+                )
         else:
             assert "secrets" not in job
     assert "secrets: inherit" not in text
@@ -767,19 +926,66 @@ def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -
     """
     jobs = _workflow("pr-closure-gate.yml")["jobs"]
     first = jobs["realize-aarch64-darwin"]
+    faults = jobs["realize-aarch64-darwin-faults"]
     retry = jobs["realize-aarch64-darwin-retry"]
-    assert retry["needs"] == ["route", "realize-aarch64-darwin"]
+    assert faults["needs"] == ["route", "realize-aarch64-darwin"]
+    assert " ".join(faults["if"].split()) == (
+        "always() && !cancelled() && "
+        "github.event.pull_request.head.repo.full_name == github.repository && "
+        "needs.route.result == 'success' && "
+        "(needs.realize-aarch64-darwin.result == 'success' || "
+        "needs.realize-aarch64-darwin.result == 'failure')"
+    )
+    assert faults["outputs"]["retry"] == "${{ steps.faults.outputs.retry }}"
+    assert retry["needs"] == [
+        "route",
+        "realize-aarch64-darwin",
+        "realize-aarch64-darwin-faults",
+    ]
     assert " ".join(retry["if"].split()) == (
         "always() && !cancelled() && "
         "github.event.pull_request.head.repo.full_name == github.repository && "
         "needs.route.result == 'success' && "
-        "needs.realize-aarch64-darwin.outputs.device_fault == 'true'"
+        "needs.realize-aarch64-darwin-faults.result == 'success' && "
+        "needs.realize-aarch64-darwin-faults.outputs.retry == 'true'"
     )
     assert retry["concurrency"] == first["concurrency"]
     assert retry["uses"] == first["uses"]
     assert retry["secrets"] == first["secrets"]
-    assert retry["with"] == {**first["with"], "device_fault_retry": "true"}
+    assert retry["with"] == {
+        **first["with"],
+        "device_fault_retry": "true",
+        "timeout_minutes": "360",
+    }
     assert "realize-aarch64-darwin-retry" in jobs["closure-gate"]["needs"]
+    download = next(
+        step
+        for step in jobs["closure-gate"]["steps"]
+        if step.get("with", {}).get("path") == "results/aarch64-darwin"
+    )
+    assert " ".join(download["if"].split()) == (
+        "needs.realize-aarch64-darwin.result == 'success' || "
+        "needs.realize-aarch64-darwin-retry.result == 'success' || "
+        "needs.realize-aarch64-darwin-retry-2.result == 'success'"
+    )
+    again_faults = jobs["realize-aarch64-darwin-retry-faults"]
+    again = jobs["realize-aarch64-darwin-retry-2"]
+    assert again_faults["needs"] == ["route", "realize-aarch64-darwin-retry"]
+    assert again["needs"] == [
+        "route",
+        "realize-aarch64-darwin-retry",
+        "realize-aarch64-darwin-retry-faults",
+    ]
+    assert " ".join(again["if"].split()) == (
+        "always() && !cancelled() && "
+        "github.event.pull_request.head.repo.full_name == github.repository && "
+        "needs.route.result == 'success' && "
+        "needs.realize-aarch64-darwin-retry-faults.result == 'success' && "
+        "(needs.realize-aarch64-darwin-retry.outputs.device_fault == 'true' || "
+        "needs.realize-aarch64-darwin-retry-faults.outputs.retry == 'true')"
+    )
+    assert again["with"] == retry["with"]
+    assert again["secrets"] == retry["secrets"]
     aggregate = next(
         step
         for step in jobs["closure-gate"]["steps"]
@@ -787,7 +993,10 @@ def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -
     )
     realized = " ".join(aggregate["env"]["REALIZE_RESULTS"].split())
     assert (
-        "needs.realize-aarch64-darwin.outputs.device_fault == 'true' && "
+        "needs.realize-aarch64-darwin-retry.outputs.device_fault == 'true' || "
+        "needs.realize-aarch64-darwin-retry-faults.outputs.retry == 'true') && "
+        "needs.realize-aarch64-darwin-retry-2.result || "
+        "needs.realize-aarch64-darwin-faults.outputs.retry == 'true' && "
         "needs.realize-aarch64-darwin-retry.result || "
         "needs.realize-aarch64-darwin.result"
     ) in realized
@@ -809,6 +1018,18 @@ def test_realize_reuses_the_update_native_runner() -> None:
     assert candidate["if"] == "inputs.stage != 'closure-gate'"
     assert flush["if"] == "always()"
     assert realize["env"]["NIXCFG_CLOSURE_GATE_COMMAND"] == "realize"
+    assert realize["env"]["NIXCFG_BUILD_DIR"] == (
+        "${{ inputs.system == 'aarch64-darwin' && '/private/tmp/nix-builds' || '' }}"
+    )
+    runtime = next(
+        step
+        for step in steps
+        if str(step.get("uses", "")).startswith("./.github/actions/update-runtime")
+    )
+    assert runtime["with"]["off-store-build-dir"] == (
+        "${{ inputs.system == 'aarch64-darwin' && inputs.stage == 'closure-gate' "
+        "&& 'true' || 'false' }}"
+    )
     update = _workflow("update.yml")
     budgets = [
         job["with"]["closure_budget_seconds"]

@@ -25,6 +25,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/update-runtime
+        timeout-minutes: 90
         id: runtime
         with:
           github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
@@ -202,6 +203,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/update-runtime
+        timeout-minutes: 90
         id: runtime
         with:
           github-token: ${{ github.token }}
@@ -238,6 +240,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/update-runtime
+        timeout-minutes: 90
         id: runtime
         with:
           github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}

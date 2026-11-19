@@ -20,10 +20,10 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import TextIO, cast
+from typing import NoReturn, TextIO, cast
 from urllib.parse import quote
 
 # A direct script invocation has only lib/update/ci on sys.path. The policy and
@@ -62,10 +62,20 @@ _STORE_PATH_PREFIX = Path("/nix/store")
 _CACHIX_DAEMON_DIR_ENV = "CACHIX_DAEMON_DIR"
 _CACHIX_DAEMON_SOCKET_ENV = "CACHIX_DAEMON_SOCKET"
 _CACHIX_DAEMON_SOCKET_NAME = "daemon.sock"
-# cachix-action can return before daemon.sock exists. Poll so the
-# require-before-bootstrap gate still fail-closes without racing the
-# listener. Tests disable the wait through NIXCFG_CACHIX_DAEMON_READY_SECONDS.
-_CACHIX_DAEMON_READY_SECONDS = 60.0
+# cachix-action returns when it spawns `cachix daemon run`, before the
+# socket exists. Cachix 1.11.1 `Daemon.new` logs "Starting Cachix Daemon"
+# and then fetches cache metadata. `getBinaryCache` retries that HTTP call
+# for 90s of cumulative delay (`Cachix.Client.Retry.httpRetryPolicy`, and
+# the manager's `responseTimeoutNone` does not bound one hung request).
+# `Listen.listen` binds daemon.sock only after the fetch returns. Update
+# 44033920588 warm-rust slots 0 and 1 still had only the Starting line when
+# a 60s gate expired; the socket existed ~84s after the action returned,
+# `cachix daemon stop` returned 0, and the kernel log had no
+# `(IOStorageFamily) diskN: I/O error.`. 180s covers the 90s backoff cap
+# plus the requests that do return. A hung fetch still fails this gate
+# instead of occupying the shard. A recorded pid that has exited fails
+# immediately. Tests shorten the wait through NIXCFG_CACHIX_DAEMON_READY_SECONDS.
+_CACHIX_DAEMON_READY_SECONDS = 180.0
 _CACHIX_DAEMON_READY_POLL_SECONDS = 0.1
 _CACHIX_DAEMON_READY_SECONDS_ENV = "NIXCFG_CACHIX_DAEMON_READY_SECONDS"
 # cachix (1.11.1 on the runners, unchanged through 1.13.0) builds its HTTP
@@ -244,7 +254,24 @@ _DEVICE_FAULT_RETRY_SCOPES = frozenset({
     "rust-warmup",
     "cascade-warmup",
     "closure-shard",
+    "packages",
+    "closures",
+    "fod-canary",
+    "leaf-prebuild",
+    "cascade-canary",
+    "zed-warmup",
 })
+_PREPARE_DARWIN_JOB = re.compile(r"prepare-darwin-(\d+)$")
+_RECOVERABLE_KINDS = frozenset({"lost", "runtime"})
+# Only a planned root shard owns a stable Cachix pin. Cascade warmup can
+# realize the same home-manager-generation.drv (44038363047 slot 3 built it,
+# push already saw it on gkze) and has no NIXCFG_CLOSURE_ROOTS. Pinning that
+# wrapper requires a home-* name the warmup job does not have.
+_PIN_OWNER_SCOPE = "closure-shard"
+_LOST_RUNNER_TEXT = "lost communication with the server"
+_SIBLING_STOP_TEXT = "NIXCFG_SIBLING_STOP"
+_STEP_FAILURES = frozenset({"failure", "timed_out", "startup_failure"})
+_ABANDONED_STEP = frozenset({"in_progress", "pending"})
 _DEVICE_FAULT_RETRY_ENV = "NIXCFG_DEVICE_FAULT_RETRY"
 _DEVICE_FAULT_ARTIFACT_SUFFIX = "-device-fault"
 _ARTIFACT_PAGE_SIZE = 100
@@ -503,6 +530,34 @@ def cachix_daemon_socket() -> Path | None:
     if daemon_dir := os.environ.get(_CACHIX_DAEMON_DIR_ENV, "").strip():
         return Path(daemon_dir) / _CACHIX_DAEMON_SOCKET_NAME
     return None
+
+
+def _cachix_daemon_pid_state() -> tuple[int | None, bool | None]:
+    """Return the action's daemon pid and whether that process is running.
+
+    ``(None, None)`` means the pid file is absent or not a process id yet.
+    ``(pid, False)`` means the action recorded a pid and that process is
+    gone. ``(pid, True)`` means the process is still in its startup, including
+    the cache-metadata retry that runs before the socket exists.
+    """
+    daemon_dir = os.environ.get(_CACHIX_DAEMON_DIR_ENV, "").strip()
+    if not daemon_dir:
+        return None, None
+    try:
+        pid = int((Path(daemon_dir) / "daemon.pid").read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None, None
+    if pid <= 0:
+        return None, None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return pid, False
+    except PermissionError:
+        # Signal 0 still returns EPERM when the process exists and is owned
+        # by another user. That is a running daemon, including pid 1 in tests.
+        return pid, True
+    return pid, True
 
 
 class CachixFlushError(RuntimeError):
@@ -1905,16 +1960,17 @@ def _finish_native_stage(
 def _hands_off_device_faults(stage: str) -> bool:
     """Return whether a fresh-VM retry job can redo this stage's exact work.
 
-    Prepare shards, the rust/cascade warmup slots and the planned root
-    shards have one. Canary, package and aggregate closure validation do
-    not, so a fault there still fails the job.
+    Prepare shards and every Darwin validate scope that has a ``-retry`` job
+    hand a faulted store off. Scope ``all`` and the closure-gate realize step
+    do not: realize fails the step and the storage dump is the retry signal.
+    ``NIXCFG_CANARY`` does not disable the hand-off. The canary jobs have
+    their own fresh VM.
     """
     if stage == "prepare":
         return True
     return (
         stage == "validate"
         and os.environ.get("NIXCFG_VALIDATE_SCOPE", "all") in _DEVICE_FAULT_RETRY_SCOPES
-        and os.environ.get("NIXCFG_CANARY") != "true"
     )
 
 
@@ -2066,21 +2122,275 @@ def run_artifact_names() -> set[str]:
     raise RuntimeError(msg)
 
 
-def device_fault_slots() -> None:
-    """Emit the warmup slots whose first attempt handed off a device fault.
+def _step_name(step: object) -> str:
+    if isinstance(step, Mapping) and isinstance(step.get("name"), str):
+        return step["name"]
+    return ""
 
-    A matrix cell cannot publish its own job output, so the faulted slot is
-    read back from its ``<prefix><slot>-device-fault`` artifact. An answer
-    that cannot be read fails this job, and the consumers then do not run.
+
+def _is_update_runtime_step(step: object) -> bool:
+    return "update-runtime" in _step_name(step)
+
+
+def retry_job_kind(job: Mapping[str, object], annotations: Sequence[str]) -> str:
+    """Classify one completed Actions job for a fresh-VM retry.
+
+    ``lost`` is a runner that died without recording ``device_fault``. GitHub
+    leaves the in-progress step without a conclusion and annotates
+    "lost communication with the server" (PR closure-gate realize on
+    44052745290). A job conclusion of ``timed_out`` is the same loss when
+    the runner sits until the job cap and never sets the flag.
+    ``runtime`` is a completed ``update-runtime`` step failure with no other
+    failed step: the Nix install or the Cachix daemon never became usable.
+    ``sibling`` stopped because that loss already blocks publish. ``real``
+    is an updater, flush, or build failure and is not retried.
+    """
+    text = "\n".join(annotations)
+    raw_steps = job.get("steps")
+    steps = [
+        step
+        for step in (raw_steps if isinstance(raw_steps, list) else [])
+        if isinstance(step, Mapping)
+    ]
+    if _LOST_RUNNER_TEXT in text or _runner_abandoned(job):
+        return "lost"
+    if _SIBLING_STOP_TEXT in text:
+        return "sibling"
+    if job.get("conclusion") == "timed_out":
+        return "lost"
+    runtime_failed = any(
+        _is_update_runtime_step(step) and step.get("conclusion") in _STEP_FAILURES
+        for step in steps
+    )
+    other_failed = any(
+        not _is_update_runtime_step(step) and step.get("conclusion") in _STEP_FAILURES
+        for step in steps
+    )
+    if runtime_failed and not other_failed:
+        return "runtime"
+    if job.get("conclusion") in _STEP_FAILURES:
+        return "real"
+    return "ok"
+
+
+def _runner_abandoned(job: Mapping[str, object]) -> bool:
+    """Return whether the runner died before the current step could finish."""
+    if job.get("conclusion") != "failure":
+        return False
+    steps = job.get("steps")
+    if not isinstance(steps, list):
+        return False
+    if any(
+        isinstance(step, Mapping) and step.get("conclusion") in _STEP_FAILURES
+        for step in steps
+    ):
+        return False
+    return any(
+        isinstance(step, Mapping)
+        and step.get("status") in _ABANDONED_STEP
+        and not step.get("conclusion")
+        for step in steps
+    )
+
+
+def _read_github_json(url: str, token: str) -> object:
+    """Read one GitHub JSON document, retrying transient HTTP failures."""
+    request = urllib.request.Request(  # noqa: S310 -- fixed https://api.github.com URL
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    error: Exception | None = None
+    for attempt in range(_ARTIFACT_HTTP_ATTEMPTS):
+        if attempt:
+            time.sleep(_ARTIFACT_HTTP_RETRY_SECONDS)
+        try:
+            with urllib.request.urlopen(  # noqa: S310 -- fixed https://api.github.com URL
+                request, timeout=_ARTIFACT_HTTP_TIMEOUT_SECONDS
+            ) as response:
+                return json.loads(response.read())
+        except (OSError, ValueError) as caught:
+            error = caught
+            continue
+    msg = f"could not read {url.split('?', 1)[0]}: {type(error).__name__}: {error}"
+    raise RuntimeError(msg)
+
+
+def _run_jobs() -> list[dict[str, object]]:
+    """Return this run's latest-attempt jobs. An unreadable list fails closed."""
+    repository = os.environ.get("GITHUB_REPOSITORY", "")
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    token = os.environ.get("NIXCFG_ACTIONS_TOKEN", "").strip()
+    if not repository or not run_id.isdigit() or not token:
+        msg = (
+            "listing run jobs requires GITHUB_REPOSITORY, GITHUB_RUN_ID "
+            "and NIXCFG_ACTIONS_TOKEN"
+        )
+        raise RuntimeError(msg)
+    collected: list[dict[str, object]] = []
+    for page in range(1, _ARTIFACT_MAX_PAGES + 1):
+        payload = _read_github_json(
+            f"https://api.github.com/repos/{repository}/actions/runs/{run_id}"
+            f"/jobs?filter=latest&per_page={_ARTIFACT_PAGE_SIZE}&page={page}",
+            token,
+        )
+        if not isinstance(payload, dict):
+            msg = "job list is not an object"
+            raise TypeError(msg)
+        items = payload.get("jobs")
+        total = payload.get("total_count")
+        if not isinstance(items, list) or not isinstance(total, int):
+            msg = "job list is missing jobs or total_count"
+            raise TypeError(msg)
+        collected.extend(item for item in items if isinstance(item, dict))
+        if len(items) < _ARTIFACT_PAGE_SIZE or page * _ARTIFACT_PAGE_SIZE >= total:
+            return collected
+    msg = f"job list exceeds {_ARTIFACT_MAX_PAGES} pages"
+    raise RuntimeError(msg)
+
+
+def _annotation_messages(check_run_url: str) -> list[str]:
+    """Return annotation text for one job. The URL stays on api.github.com."""
+    if not check_run_url.startswith("https://api.github.com/"):
+        msg = "refusing check-run URL outside https://api.github.com/"
+        raise RuntimeError(msg)
+    token = os.environ.get("NIXCFG_ACTIONS_TOKEN", "").strip()
+    payload = _read_github_json(f"{check_run_url}/annotations", token)
+    if not isinstance(payload, list):
+        msg = "check-run annotations are not a list"
+        raise TypeError(msg)
+    return [
+        item["message"]
+        for item in payload
+        if isinstance(item, dict) and isinstance(item.get("message"), str)
+    ]
+
+
+def _job_caller(name: object) -> str:
+    """Return the caller job id, without the reusable-workflow suffix."""
+    if not isinstance(name, str):
+        return ""
+    return name.split(" / ", 1)[0]
+
+
+def _matrix_label(caller: str, job_prefix: str) -> str | None:
+    """Return the matrix label of *caller* when it belongs to *job_prefix*."""
+    marker = f"{job_prefix} ("
+    if caller.startswith(marker) and caller.endswith(")"):
+        return caller[len(marker) : -1]
+    return None
+
+
+def _classify_watched_jobs(
+    jobs: Sequence[Mapping[str, object]],
+    *,
+    match: Callable[[Mapping[str, object]], str | None],
+) -> dict[str, str]:
+    """Classify failed jobs the watcher selected. The key is the match token."""
+    kinds: dict[str, str] = {}
+    for job in jobs:
+        token = match(job)
+        if token is None or job.get("conclusion") not in _STEP_FAILURES:
+            continue
+        url = job.get("check_run_url")
+        notes = _annotation_messages(url) if isinstance(url, str) and url else []
+        if not isinstance(url, str) or not url:
+            if job.get("conclusion") == "timed_out" or _runner_abandoned(job):
+                kinds[token] = "lost"
+                continue
+            kinds[token] = "real"
+            continue
+        kinds[token] = retry_job_kind(job, notes)
+    return kinds
+
+
+def _lost_runner_selection(
+    kinds: Mapping[str, str], device: Sequence[str]
+) -> tuple[list[str], bool]:
+    """Return retry tokens and whether a lost runner accounts for every failure.
+
+    A real updater failure is not retried, and neither are the siblings it
+    stopped. 44038363047 slot 3 failed in flush; slots 0-2 and 4 stopped
+    for that sibling. That is not a lost runner. A runner that dies with no
+    ``device_fault`` flag, a job that times out, or an ``update-runtime``
+    step that fails alone, plus the siblings that then stop, is retried once.
+    """
+    recoverable = [token for token, kind in kinds.items() if kind in _RECOVERABLE_KINDS]
+    sibling = [token for token, kind in kinds.items() if kind == "sibling"]
+    real = [token for token, kind in kinds.items() if kind == "real"]
+    if real or (sibling and not recoverable):
+        return [], False
+    if recoverable:
+        return sorted(set(device) | set(recoverable) | set(sibling)), True
+    return sorted(set(device)), False
+
+
+def _slot_token(
+    job: Mapping[str, object], job_prefix: str, slots: Sequence[str]
+) -> str | None:
+    label = _matrix_label(_job_caller(job.get("name")), job_prefix)
+    if label is None:
+        return None
+    token = label.split(",", 1)[0].strip()
+    if token in slots:
+        return token
+    return None
+
+
+def _merge_lost_runner_slots(
+    job_prefix: str, slots: Sequence[str], device: Sequence[int]
+) -> tuple[list[int], bool]:
+    """Add lost-runner slots to the device-fault slots, or retry nothing."""
+    kinds = _classify_watched_jobs(
+        _run_jobs(),
+        match=lambda job: _slot_token(job, job_prefix, slots),
+    )
+    selected, recovered = _lost_runner_selection(kinds, [str(slot) for slot in device])
+    return [int(slot) for slot in selected], recovered
+
+
+def _device_fault_artifact_present(names: set[str], prefix: str) -> bool:
+    """Return whether *prefix* was uploaded as a device-fault artifact.
+
+    The suffix is inserted before ``artifact_namespace``, so a namespaced
+    prepare is ``<prefix>-device-fault-<namespace>`` and an exact
+    ``<prefix>-device-fault`` match misses it.
+    """
+    marker = f"{prefix}{_DEVICE_FAULT_ARTIFACT_SUFFIX}"
+    return any(name == marker or name.startswith(f"{marker}-") for name in names)
+
+
+def device_fault_slots() -> None:
+    """Emit the warmup slots whose first attempt must rerun on a fresh VM.
+
+    A matrix cell cannot publish its own job output, so a device fault is
+    read back from its ``<prefix><slot>-device-fault`` artifact. A runner
+    lost before it can set that flag is read from the job list: the step
+    stays ``in_progress`` and the check run says the runner lost
+    communication. An answer that cannot be read fails this job, and the
+    consumers then do not run.
     """
     prefix, slots = _device_fault_slot_names()
     names = run_artifact_names()
     faulted = [
         int(slot)
         for slot in slots
-        if f"{prefix}{slot}{_DEVICE_FAULT_ARTIFACT_SUFFIX}" in names
+        if _device_fault_artifact_present(names, f"{prefix}{slot}")
     ]
+    job_prefix = os.environ.get("NIXCFG_FAULT_JOB_PREFIX", "").strip()
+    recovered = False
+    if job_prefix:
+        faulted, recovered = _merge_lost_runner_slots(job_prefix, slots, faulted)
     sys.stdout.write(f"Device-faulted slots for {prefix}*: {faulted}\n")
+    if job_prefix:
+        _outputs(
+            slots=json.dumps(faulted, separators=(",", ":")),
+            recovered=str(recovered).lower(),
+        )
+        return
     _outputs(slots=json.dumps(faulted, separators=(",", ":")))
 
 
@@ -2127,12 +2437,151 @@ def device_fault_shards() -> None:
     faulted = [
         entry
         for entry in shards
-        if f"{prefix}{entry['shard']}{_DEVICE_FAULT_ARTIFACT_SUFFIX}" in names
+        if _device_fault_artifact_present(names, f"{prefix}{entry['shard']}")
     ]
+    job_prefix = os.environ.get("NIXCFG_FAULT_JOB_PREFIX", "").strip()
+    recovered = False
+    if job_prefix:
+        faulted, recovered = _merge_lost_runner_shards(job_prefix, shards, faulted)
     sys.stdout.write(
         f"Device-faulted shards for {prefix}*: {[entry['shard'] for entry in faulted]}\n"
     )
+    if job_prefix:
+        _outputs(
+            shards=json.dumps(faulted, separators=(",", ":")),
+            recovered=str(recovered).lower(),
+        )
+        return
     _outputs(shards=json.dumps(faulted, separators=(",", ":")))
+
+
+def _shard_token(
+    job: Mapping[str, object],
+    job_prefix: str,
+    shards: Sequence[Mapping[str, str]],
+) -> str | None:
+    """Return the planned shard named by this matrix job, if it is one."""
+    label = _matrix_label(_job_caller(job.get("name")), job_prefix)
+    if label is None:
+        return None
+    tokens = [part.strip() for part in label.split(",")]
+    for entry in shards:
+        shard = entry["shard"]
+        if shard == label or shard in tokens:
+            return shard
+    return None
+
+
+def _merge_lost_runner_shards(
+    job_prefix: str,
+    shards: Sequence[dict[str, str]],
+    device: Sequence[dict[str, str]],
+) -> tuple[list[dict[str, str]], bool]:
+    """Add lost-runner shards to the device-fault entries, or retry nothing."""
+    by_shard = {entry["shard"]: entry for entry in shards}
+    kinds = _classify_watched_jobs(
+        _run_jobs(),
+        match=lambda job: _shard_token(job, job_prefix, shards),
+    )
+    selected, recovered = _lost_runner_selection(
+        kinds, [entry["shard"] for entry in device]
+    )
+    return [by_shard[shard] for shard in selected], recovered
+
+
+def _watched_job(job: Mapping[str, object], job_name: str, system: str) -> bool:
+    """Return whether *job* is the watched caller, including one matrix cell.
+
+    A matrix job is ``plan (aarch64-darwin, macos-15)``. The cell is selected
+    by the system token so the Linux plan cells are not the Darwin retry.
+    """
+    caller = _job_caller(job.get("name"))
+    if caller == job_name:
+        return True
+    if not system or not caller.startswith(f"{job_name} ("):
+        return False
+    return system in caller
+
+
+def _prepare_darwin_token(job: Mapping[str, object]) -> str | None:
+    """Return the prepare shard index, never a retry, merge, or faults job."""
+    match = _PREPARE_DARWIN_JOB.fullmatch(_job_caller(job.get("name")))
+    if match is None:
+        return None
+    token = match.group(1)
+    slots = os.environ.get("NIXCFG_FAULT_SLOTS", "").split()
+    if token not in slots:
+        return None
+    return token
+
+
+def prepare_darwin_retries() -> None:
+    """Emit prepare shards a lost runner or a failed runtime must redo.
+
+    Device-fault and runner-fault exits are already job outputs. This stage
+    adds the forms that set no output: a lost runner, a job that times out,
+    and an ``update-runtime`` step that fails alone. A real updater failure
+    emits no slots.
+    """
+    slots = os.environ.get("NIXCFG_FAULT_SLOTS", "").split()
+    if not slots or not all(slot.isdigit() for slot in slots):
+        msg = "prepare-darwin-retries requires numeric NIXCFG_FAULT_SLOTS"
+        raise RuntimeError(msg)
+    selected, recovered = _lost_runner_selection(
+        _classify_watched_jobs(_run_jobs(), match=_prepare_darwin_token),
+        [],
+    )
+    sys.stdout.write(f"Darwin prepare retries: {selected} recovered={recovered}\n")
+    _outputs(
+        slots=json.dumps(selected, separators=(",", ":")),
+        recovered=str(recovered).lower(),
+    )
+
+
+def darwin_job_retry() -> None:
+    """Emit whether one Darwin job must rerun, and whether a lost runner is why.
+
+    Packages, aggregate closures, and the closure-gate realize job are one
+    cell, not a matrix. A device-fault artifact or a runner lost with no
+    ``device_fault`` flag retries that cell once. A real failure does not.
+
+    Realize does not hand the fault off with exit 0 (scope ``gate`` is not
+    a warmup). The realize step fails, the storage dump uploads
+    ``-device-fault``, and flush refuses the store. 44141142629 did that
+    for ``waku`` (``Directory not empty``, then ``Illegal byte sequence``)
+    and the retry was skipped because the failed step looked real.
+    """
+    job_name = os.environ.get("NIXCFG_FAULT_JOB_PREFIX", "").strip()
+    artifact = os.environ.get("NIXCFG_FAULT_ARTIFACT_PREFIX", "").strip()
+    if not job_name or not artifact:
+        msg = (
+            "darwin-job-retry requires NIXCFG_FAULT_JOB_PREFIX and "
+            "NIXCFG_FAULT_ARTIFACT_PREFIX"
+        )
+        raise RuntimeError(msg)
+    names = run_artifact_names()
+    device = _device_fault_artifact_present(names, artifact)
+    system = os.environ.get("NIXCFG_FAULT_MATRIX_SYSTEM", "").strip()
+    matched = [job for job in _run_jobs() if _watched_job(job, job_name, system)]
+    if len(matched) != 1:
+        msg = f"expected one Actions job named {job_name}, found {len(matched)}"
+        raise RuntimeError(msg)
+    job = matched[0]
+    kind = "ok"
+    if job.get("conclusion") in _STEP_FAILURES:
+        url = job.get("check_run_url")
+        if isinstance(url, str) and url:
+            kind = retry_job_kind(job, _annotation_messages(url))
+        elif job.get("conclusion") == "timed_out" or _runner_abandoned(job):
+            kind = "lost"
+        else:
+            kind = "real"
+    retry = kind in _RECOVERABLE_KINDS or device
+    recovered = kind in _RECOVERABLE_KINDS
+    sys.stdout.write(
+        f"Darwin retry for {job_name}: retry={retry} recovered={recovered} kind={kind}\n"
+    )
+    _outputs(retry=str(retry).lower(), recovered=str(recovered).lower())
 
 
 def _candidate_identity() -> dict[str, str]:
@@ -2608,6 +3057,41 @@ def _release_cachix_daemon_dir() -> None:
     _clear_cachix_daemon_env()
 
 
+def _refuse_unready_cachix_daemon(
+    artifacts: Path, log: TextIO, message: str
+) -> NoReturn:
+    """Keep the daemon files and fail the gate with *message*."""
+    _retain_cachix_daemon_evidence(artifacts, log)
+    _write_diagnostic(log, message)
+    raise CachixDaemonError(message)
+
+
+def _unready_cachix_daemon_message(
+    socket: Path | None, *, pid: int | None, alive: bool | None
+) -> str:
+    """Describe why the post-build-hook daemon is not ready to take pushes."""
+    if socket is None:
+        return (
+            "Cachix daemon socket is unknown: "
+            f"{_CACHIX_DAEMON_DIR_ENV} and {_CACHIX_DAEMON_SOCKET_ENV} "
+            "are unset. useDaemon did not start a post-build-hook daemon."
+        )
+    if pid is not None and alive is False:
+        return (
+            f"Cachix daemon pid {pid} exited before listening on {socket}. "
+            "The process is gone, so this is outside the pre-listen "
+            "cache-info retry."
+        )
+    if pid is not None and alive is True:
+        waited = _cachix_daemon_ready_wait_seconds()
+        return (
+            f"Cachix daemon socket missing: {socket}. "
+            f"Pid {pid} is still running after {waited:.0f}s, past the "
+            "cache-info retry window, and has not listened."
+        )
+    return f"Cachix daemon socket missing: {socket}"
+
+
 def require_cachix_daemon() -> None:
     """Fail closed unless cachix-action started a live post-build-hook daemon.
 
@@ -2616,7 +3100,11 @@ def require_cachix_daemon() -> None:
     daemon never started, nothing a shard compiles reaches gkze, which
     breaks push-at-the-smallest-unit. This check runs after cachix-action
     and before bootstrap so a silent skip cannot burn a five-hour shard.
-    Evidence is copied into artifacts here so retain (before flush) keeps it.
+    The action returns before ``Listen.listen`` binds the socket: Cachix
+    fetches cache metadata first and may spend its HTTP retry budget there.
+    The wait covers that budget. A recorded pid that has exited is not in
+    the retry, so the gate fails without spending the wait. Evidence is
+    copied into artifacts here so retain (before flush) keeps it.
     """
     artifacts = _temp() / "update-artifacts"
     artifacts.mkdir(parents=True, exist_ok=True)
@@ -2627,19 +3115,20 @@ def require_cachix_daemon() -> None:
             socket = cachix_daemon_socket()
             if socket is not None and socket.exists():
                 break
+            daemon_pid, alive = _cachix_daemon_pid_state()
+            if daemon_pid is not None and alive is False:
+                _refuse_unready_cachix_daemon(
+                    artifacts,
+                    log,
+                    _unready_cachix_daemon_message(socket, pid=daemon_pid, alive=alive),
+                )
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                _retain_cachix_daemon_evidence(artifacts, log)
-                if socket is None:
-                    msg = (
-                        "Cachix daemon socket is unknown: "
-                        f"{_CACHIX_DAEMON_DIR_ENV} and {_CACHIX_DAEMON_SOCKET_ENV} "
-                        "are unset. useDaemon did not start a post-build-hook daemon."
-                    )
-                else:
-                    msg = f"Cachix daemon socket missing: {socket}"
-                _write_diagnostic(log, msg)
-                raise CachixDaemonError(msg)
+                _refuse_unready_cachix_daemon(
+                    artifacts,
+                    log,
+                    _unready_cachix_daemon_message(socket, pid=daemon_pid, alive=alive),
+                )
             time.sleep(min(_CACHIX_DAEMON_READY_POLL_SECONDS, remaining))
         _retain_cachix_daemon_evidence(artifacts, log)
         daemon_dir = os.environ.get(_CACHIX_DAEMON_DIR_ENV, "").strip()
@@ -3174,6 +3663,11 @@ def _roots_by_pin_kind(roots: tuple[str, ...]) -> dict[str, tuple[str, ...]]:
     return {kind: tuple(names) for kind, names in grouped.items()}
 
 
+def _owns_darwin_pin() -> bool:
+    """Return whether this flush is the shard that must name the pin."""
+    return os.environ.get("NIXCFG_VALIDATE_SCOPE", "") == _PIN_OWNER_SCOPE
+
+
 def _stable_darwin_pin_names(paths: tuple[str, ...]) -> dict[str, str]:
     """Map each realized Darwin root to its shard's stable pin name.
 
@@ -3181,6 +3675,13 @@ def _stable_darwin_pin_names(paths: tuple[str, ...]) -> dict[str, str]:
     closure. 43613142360 already held two of those plus a home-generation
     pin, and the next one returned 402. The shard root (``darwin-argus``,
     ``home-george``) stays one pin; ``--keep-revisions 1`` replaces it.
+
+    44038363047 cascade-warmup slot 3 realized
+    ``jm82z8kz…-home-manager-generation`` with ``NIXCFG_CLOSURE_ROOTS``
+    empty. The push was already on gkze. Naming a pin failed the flush,
+    sibling-stopped the other four slots, and publish never ran. A job
+    that does not own a shard root still pushes the wrapper and does not
+    invent a pin name.
     """
     by_kind: dict[str, list[str]] = {"darwin": [], "home": []}
     for path in paths:
@@ -3189,7 +3690,10 @@ def _stable_darwin_pin_names(paths: tuple[str, ...]) -> dict[str, str]:
             by_kind[kind].append(path)
     if not any(by_kind.values()):
         return {}
-    grouped = _roots_by_pin_kind(_closure_root_names())
+    roots = _closure_root_names()
+    if not roots and not _owns_darwin_pin():
+        return {}
+    grouped = _roots_by_pin_kind(roots)
     assigned: dict[str, str] = {}
     for kind, kind_paths in by_kind.items():
         if not kind_paths:
@@ -4033,6 +4537,8 @@ def main(stage: str) -> int:
         "dump-storage-fault": dump_hosted_storage_fault,
         "device-fault-slots": device_fault_slots,
         "device-fault-shards": device_fault_shards,
+        "darwin-job-retry": darwin_job_retry,
+        "prepare-darwin-retries": prepare_darwin_retries,
         "require-cachix-daemon": require_cachix_daemon,
         "bootstrap": bootstrap,
         "quality": quality,

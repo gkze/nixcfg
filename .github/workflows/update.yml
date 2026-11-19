@@ -191,18 +191,62 @@ jobs:
   # same kind of dead VM: this attempt publishes nothing and uploads under
   # -device-fault or -runner-fault. The matching retry reruns that shard
   # once on a fresh VM. The first attempt exits 0 so sibling-stop does not
-  # fire before that retry. Any other prepare failure is not retried. A
-  # retry starts only after its shard finishes, so the five-runner pool is
-  # unchanged.
+  # fire before that retry. A lost runner, a job timeout, or a failed
+  # update-runtime step sets no output; prepare-darwin-faults emits those
+  # indexes and the retry if unions them with the shard outputs. A real
+  # updater or flush failure is not retried. A retry starts only after its
+  # shard finishes, so the five-runner pool is unchanged.
+  prepare-darwin-faults:
+    needs:
+      - prepare-darwin-0
+      - prepare-darwin-1
+      - prepare-darwin-2
+      - prepare-darwin-3
+      - prepare-darwin-4
+    if: |-
+      always() && !cancelled() &&
+      (needs.prepare-darwin-0.result == 'success' ||
+      needs.prepare-darwin-0.result == 'failure' ||
+      needs.prepare-darwin-1.result == 'success' ||
+      needs.prepare-darwin-1.result == 'failure' ||
+      needs.prepare-darwin-2.result == 'success' ||
+      needs.prepare-darwin-2.result == 'failure' ||
+      needs.prepare-darwin-3.result == 'success' ||
+      needs.prepare-darwin-3.result == 'failure' ||
+      needs.prepare-darwin-4.result == 'success' ||
+      needs.prepare-darwin-4.result == 'failure')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      slots: ${{ steps.faults.outputs.slots }}
+      recovered: ${{ steps.faults.outputs.recovered }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.inputs.repair_commit || github.sha }}
+          persist-credentials: false
+      - name: List Darwin prepare retries
+        id: faults
+        env:
+          NIXCFG_ACTIONS_TOKEN: ${{ github.token }}
+          NIXCFG_FAULT_SLOTS: 0 1 2 3 4
+          NIXCFG_CI_STAGE: prepare-darwin-retries
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
   prepare-darwin-retry-0:
     needs:
       - prepare-pins
+      - prepare-darwin-faults
       - prepare-darwin-0
     if: |-
       always() && !cancelled() &&
       needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin-faults.result == 'success' &&
       (needs.prepare-darwin-0.outputs.device_fault == 'true' ||
-      needs.prepare-darwin-0.outputs.runner_fault == 'true')
+      needs.prepare-darwin-0.outputs.runner_fault == 'true' ||
+      contains(fromJSON(needs.prepare-darwin-faults.outputs.slots || '[]'), '0'))
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -219,12 +263,15 @@ jobs:
   prepare-darwin-retry-1:
     needs:
       - prepare-pins
+      - prepare-darwin-faults
       - prepare-darwin-1
     if: |-
       always() && !cancelled() &&
       needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin-faults.result == 'success' &&
       (needs.prepare-darwin-1.outputs.device_fault == 'true' ||
-      needs.prepare-darwin-1.outputs.runner_fault == 'true')
+      needs.prepare-darwin-1.outputs.runner_fault == 'true' ||
+      contains(fromJSON(needs.prepare-darwin-faults.outputs.slots || '[]'), '1'))
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -241,12 +288,15 @@ jobs:
   prepare-darwin-retry-2:
     needs:
       - prepare-pins
+      - prepare-darwin-faults
       - prepare-darwin-2
     if: |-
       always() && !cancelled() &&
       needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin-faults.result == 'success' &&
       (needs.prepare-darwin-2.outputs.device_fault == 'true' ||
-      needs.prepare-darwin-2.outputs.runner_fault == 'true')
+      needs.prepare-darwin-2.outputs.runner_fault == 'true' ||
+      contains(fromJSON(needs.prepare-darwin-faults.outputs.slots || '[]'), '2'))
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -263,12 +313,15 @@ jobs:
   prepare-darwin-retry-3:
     needs:
       - prepare-pins
+      - prepare-darwin-faults
       - prepare-darwin-3
     if: |-
       always() && !cancelled() &&
       needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin-faults.result == 'success' &&
       (needs.prepare-darwin-3.outputs.device_fault == 'true' ||
-      needs.prepare-darwin-3.outputs.runner_fault == 'true')
+      needs.prepare-darwin-3.outputs.runner_fault == 'true' ||
+      contains(fromJSON(needs.prepare-darwin-faults.outputs.slots || '[]'), '3'))
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -285,12 +338,15 @@ jobs:
   prepare-darwin-retry-4:
     needs:
       - prepare-pins
+      - prepare-darwin-faults
       - prepare-darwin-4
     if: |-
       always() && !cancelled() &&
       needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin-faults.result == 'success' &&
       (needs.prepare-darwin-4.outputs.device_fault == 'true' ||
-      needs.prepare-darwin-4.outputs.runner_fault == 'true')
+      needs.prepare-darwin-4.outputs.runner_fault == 'true' ||
+      contains(fromJSON(needs.prepare-darwin-faults.outputs.slots || '[]'), '4'))
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -309,6 +365,7 @@ jobs:
   prepare-darwin-merge:
     needs:
       - prepare-pins
+      - prepare-darwin-faults
       - prepare-darwin-0
       - prepare-darwin-1
       - prepare-darwin-2
@@ -322,6 +379,7 @@ jobs:
     if: |-
       always() && !cancelled() &&
       needs.prepare-pins.result == 'success' &&
+      needs.prepare-darwin-faults.result == 'success' &&
       (needs.prepare-darwin-0.result == 'success' &&
       needs.prepare-darwin-0.outputs.device_fault != 'true' &&
       needs.prepare-darwin-0.outputs.runner_fault != 'true' ||
@@ -426,10 +484,12 @@ jobs:
     if: |-
       always() && !cancelled() &&
       needs.prepare-merge.result == 'success' &&
-      needs.validate-darwin-warm-rust.result == 'success' &&
+      (needs.validate-darwin-warm-rust.result == 'success' &&
       needs.validate-darwin-warm-rust-faults.result == 'success' &&
       (needs.validate-darwin-warm-rust-retry.result == 'success' ||
-      needs.validate-darwin-warm-rust-retry.result == 'skipped')
+      needs.validate-darwin-warm-rust-retry.result == 'skipped') ||
+      needs.validate-darwin-warm-rust-faults.outputs.recovered == 'true' &&
+      needs.validate-darwin-warm-rust-retry.result == 'success')
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04-arm
@@ -446,10 +506,12 @@ jobs:
     if: |-
       always() && !cancelled() &&
       needs.prepare-merge.result == 'success' &&
-      needs.validate-darwin-warm-rust.result == 'success' &&
+      (needs.validate-darwin-warm-rust.result == 'success' &&
       needs.validate-darwin-warm-rust-faults.result == 'success' &&
       (needs.validate-darwin-warm-rust-retry.result == 'success' ||
-      needs.validate-darwin-warm-rust-retry.result == 'skipped')
+      needs.validate-darwin-warm-rust-retry.result == 'skipped') ||
+      needs.validate-darwin-warm-rust-faults.outputs.recovered == 'true' &&
+      needs.validate-darwin-warm-rust-retry.result == 'success')
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04
@@ -594,6 +656,57 @@ jobs:
       scope: fod-canary
       shard: fod-${{ matrix.host }}
     secrets: inherit
+  canary-darwin-fods-faults:
+    needs: canary-darwin-fods
+    if: |-
+      always() && !cancelled() &&
+      (needs.canary-darwin-fods.result == 'success' ||
+      needs.canary-darwin-fods.result == 'failure')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      slots: ${{ steps.faults.outputs.slots }}
+      recovered: ${{ steps.faults.outputs.recovered }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.inputs.repair_commit || github.sha }}
+          persist-credentials: false
+      - name: List device-faulted FOD hosts
+        id: faults
+        env:
+          NIXCFG_ACTIONS_TOKEN: ${{ github.token }}
+          NIXCFG_FAULT_ARTIFACT_PREFIX: validate-aarch64-darwin-fod-canary-fod-
+          NIXCFG_FAULT_JOB_PREFIX: canary-darwin-fods
+          NIXCFG_FAULT_SLOTS: 0 1
+          NIXCFG_CI_STAGE: device-fault-slots
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+  canary-darwin-fods-retry:
+    needs:
+      - canary-darwin-fods
+      - canary-darwin-fods-faults
+    if: |-
+      always() && !cancelled() &&
+      needs.canary-darwin-fods-faults.result == 'success' &&
+      needs.canary-darwin-fods-faults.outputs.slots != '[]'
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        host: ${{ fromJSON(needs.canary-darwin-fods-faults.outputs.slots) }}
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      previous: prepare-x86_64-linux
+      scope: fod-canary
+      shard: fod-${{ matrix.host }}
+      device_fault_retry: true
+    secrets: inherit
   # 39166099302: cascade slots 1 and 2 both compiled zeron (26 min each)
   # while plan-darwin-closures left three macos-15 runners idle ~40 min.
   # Realize heavy rust_*-independent leaves in that window; the Cachix
@@ -616,18 +729,70 @@ jobs:
       scope: leaf-prebuild
       shard: leaves
     secrets: inherit
+  prebuild-darwin-leaves-faults:
+    needs: prebuild-darwin-leaves
+    if: |-
+      always() && !cancelled() &&
+      (needs.prebuild-darwin-leaves.result == 'success' ||
+      needs.prebuild-darwin-leaves.result == 'failure')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      retry: ${{ steps.faults.outputs.retry }}
+      recovered: ${{ steps.faults.outputs.recovered }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.inputs.repair_commit || github.sha }}
+          persist-credentials: false
+      - name: Decide a fresh-VM leaf retry
+        id: faults
+        env:
+          NIXCFG_ACTIONS_TOKEN: ${{ github.token }}
+          NIXCFG_FAULT_ARTIFACT_PREFIX: validate-aarch64-darwin-leaf-prebuild-leaves
+          NIXCFG_FAULT_JOB_PREFIX: prebuild-darwin-leaves
+          NIXCFG_CI_STAGE: darwin-job-retry
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+  prebuild-darwin-leaves-retry:
+    needs:
+      - prebuild-darwin-leaves
+      - prebuild-darwin-leaves-faults
+    if: |-
+      always() && !cancelled() &&
+      needs.prebuild-darwin-leaves-faults.result == 'success' &&
+      needs.prebuild-darwin-leaves-faults.outputs.retry == 'true'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      previous: prepare-x86_64-linux
+      scope: leaf-prebuild
+      shard: leaves
+      device_fault_retry: true
+    secrets: inherit
   canary-warm-rust:
     needs:
       - canary-slots
       - prepare-merge
       - plan-darwin-closures
       - canary-darwin-fods
+      - canary-darwin-fods-faults
+      - canary-darwin-fods-retry
     if: |-
       always() && !cancelled() &&
       needs.canary-slots.result == 'success' &&
       needs.prepare-merge.result == 'success' &&
       needs.plan-darwin-closures.result == 'success' &&
-      needs.canary-darwin-fods.result == 'success' &&
+      (needs.canary-darwin-fods.result == 'success' &&
+      needs.canary-darwin-fods-faults.result == 'success' &&
+      (needs.canary-darwin-fods-retry.result == 'success' ||
+      needs.canary-darwin-fods-retry.result == 'skipped') ||
+      needs.canary-darwin-fods-faults.outputs.recovered == 'true' &&
+      needs.canary-darwin-fods-retry.result == 'success') &&
       needs.canary-slots.outputs.enabled == 'true'
     strategy:
       fail-fast: false
@@ -643,6 +808,63 @@ jobs:
       shard: rust-${{ matrix.slot }}
       warmup_artifact: plan-shards-x86_64-linux
       warmup_slot: ${{ matrix.slot }}
+      canary: true
+      canary_slots: ${{ needs.canary-slots.outputs.slots }}
+      canary_crates: ${{ needs.canary-slots.outputs.crates }}
+    secrets: inherit
+  canary-warm-rust-faults:
+    needs: canary-warm-rust
+    if: |-
+      always() && !cancelled() &&
+      (needs.canary-warm-rust.result == 'success' ||
+      needs.canary-warm-rust.result == 'failure')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      slots: ${{ steps.faults.outputs.slots }}
+      recovered: ${{ steps.faults.outputs.recovered }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.inputs.repair_commit || github.sha }}
+          persist-credentials: false
+      - name: List device-faulted canary slots
+        id: faults
+        env:
+          NIXCFG_ACTIONS_TOKEN: ${{ github.token }}
+          NIXCFG_FAULT_ARTIFACT_PREFIX: validate-aarch64-darwin-rust-warmup-rust-
+          NIXCFG_FAULT_JOB_PREFIX: canary-warm-rust
+          NIXCFG_FAULT_SLOTS: 0 1 2 3 4
+          NIXCFG_CI_STAGE: device-fault-slots
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+  canary-warm-rust-retry:
+    needs:
+      - canary-slots
+      - canary-warm-rust
+      - canary-warm-rust-faults
+    if: |-
+      always() && !cancelled() &&
+      needs.canary-warm-rust-faults.result == 'success' &&
+      needs.canary-warm-rust-faults.outputs.slots != '[]'
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        slot: ${{ fromJSON(needs.canary-warm-rust-faults.outputs.slots) }}
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      previous: prepare-x86_64-linux
+      scope: rust-warmup
+      shard: rust-${{ matrix.slot }}
+      warmup_artifact: plan-shards-x86_64-linux
+      warmup_slot: ${{ matrix.slot }}
+      device_fault_retry: true
       canary: true
       canary_slots: ${{ needs.canary-slots.outputs.slots }}
       canary_crates: ${{ needs.canary-slots.outputs.crates }}
@@ -667,11 +889,18 @@ jobs:
       - prepare-merge
       - plan-darwin-closures
       - canary-darwin-fods
+      - canary-darwin-fods-faults
+      - canary-darwin-fods-retry
     if: |-
       always() && !cancelled() &&
       needs.prepare-merge.result == 'success' &&
       needs.plan-darwin-closures.result == 'success' &&
-      needs.canary-darwin-fods.result == 'success' &&
+      (needs.canary-darwin-fods.result == 'success' &&
+      needs.canary-darwin-fods-faults.result == 'success' &&
+      (needs.canary-darwin-fods-retry.result == 'success' ||
+      needs.canary-darwin-fods-retry.result == 'skipped') ||
+      needs.canary-darwin-fods-faults.outputs.recovered == 'true' &&
+      needs.canary-darwin-fods-retry.result == 'success') &&
       (github.event_name != 'workflow_dispatch' ||
       (inputs.canary_warm_rust != true && inputs.canary_warm_rust != 'true' &&
       inputs.canary_slots == '' && inputs.canary_crates == ''))
@@ -704,11 +933,13 @@ jobs:
     needs: validate-darwin-warm-rust
     if: |-
       always() && !cancelled() &&
-      needs.validate-darwin-warm-rust.result == 'success'
+      (needs.validate-darwin-warm-rust.result == 'success' ||
+      needs.validate-darwin-warm-rust.result == 'failure')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       slots: ${{ steps.faults.outputs.slots }}
+      recovered: ${{ steps.faults.outputs.recovered }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -719,6 +950,7 @@ jobs:
         env:
           NIXCFG_ACTIONS_TOKEN: ${{ github.token }}
           NIXCFG_FAULT_ARTIFACT_PREFIX: validate-aarch64-darwin-rust-warmup-rust-
+          NIXCFG_FAULT_JOB_PREFIX: validate-darwin-warm-rust
           NIXCFG_FAULT_SLOTS: 0 1 2 3 4
           NIXCFG_CI_STAGE: device-fault-slots
         run: |
@@ -770,12 +1002,19 @@ jobs:
       - prepare-merge
       - plan-darwin-closures
       - canary-darwin-fods
+      - canary-darwin-fods-faults
+      - canary-darwin-fods-retry
       - canary-warm-rust
     if: |-
       always() && !cancelled() &&
       needs.prepare-merge.result == 'success' &&
       needs.plan-darwin-closures.result == 'success' &&
-      needs.canary-darwin-fods.result == 'success' &&
+      (needs.canary-darwin-fods.result == 'success' &&
+      needs.canary-darwin-fods-faults.result == 'success' &&
+      (needs.canary-darwin-fods-retry.result == 'success' ||
+      needs.canary-darwin-fods-retry.result == 'skipped') ||
+      needs.canary-darwin-fods-faults.outputs.recovered == 'true' &&
+      needs.canary-darwin-fods-retry.result == 'success') &&
       (needs.canary-warm-rust.result == 'success' ||
       needs.canary-warm-rust.result == 'skipped' ||
       needs.canary-warm-rust.result == 'failure') &&
@@ -792,6 +1031,52 @@ jobs:
       shard: cascade-canary
       warmup_artifact: plan-shards-x86_64-linux
     secrets: inherit
+  canary-warm-cascade-faults:
+    needs: canary-warm-cascade
+    if: |-
+      always() && !cancelled() &&
+      (needs.canary-warm-cascade.result == 'success' ||
+      needs.canary-warm-cascade.result == 'failure')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      retry: ${{ steps.faults.outputs.retry }}
+      recovered: ${{ steps.faults.outputs.recovered }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.inputs.repair_commit || github.sha }}
+          persist-credentials: false
+      - name: Decide a fresh-VM cascade-canary retry
+        id: faults
+        env:
+          NIXCFG_ACTIONS_TOKEN: ${{ github.token }}
+          NIXCFG_FAULT_ARTIFACT_PREFIX: validate-aarch64-darwin-cascade-canary-cascade-canary
+          NIXCFG_FAULT_JOB_PREFIX: canary-warm-cascade
+          NIXCFG_CI_STAGE: darwin-job-retry
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+  canary-warm-cascade-retry:
+    needs:
+      - canary-warm-cascade
+      - canary-warm-cascade-faults
+    if: |-
+      always() && !cancelled() &&
+      needs.canary-warm-cascade-faults.result == 'success' &&
+      needs.canary-warm-cascade-faults.outputs.retry == 'true'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      previous: prepare-x86_64-linux
+      scope: cascade-canary
+      shard: cascade-canary
+      warmup_artifact: plan-shards-x86_64-linux
+      device_fault_retry: true
+    secrets: inherit
   validate-darwin-cascade-warmup:
     needs:
       - prepare-merge
@@ -805,10 +1090,12 @@ jobs:
       always() && !cancelled() &&
       needs.prepare-merge.result == 'success' &&
       needs.plan-darwin-closures.result == 'success' &&
-      needs.validate-darwin-warm-rust.result == 'success' &&
+      (needs.validate-darwin-warm-rust.result == 'success' &&
       needs.validate-darwin-warm-rust-faults.result == 'success' &&
       (needs.validate-darwin-warm-rust-retry.result == 'success' ||
-      needs.validate-darwin-warm-rust-retry.result == 'skipped') &&
+      needs.validate-darwin-warm-rust-retry.result == 'skipped') ||
+      needs.validate-darwin-warm-rust-faults.outputs.recovered == 'true' &&
+      needs.validate-darwin-warm-rust-retry.result == 'success') &&
       (needs.canary-warm-cascade.result == 'success' ||
       needs.canary-warm-cascade.result == 'skipped' ||
       needs.canary-warm-cascade.result == 'failure') &&
@@ -836,11 +1123,13 @@ jobs:
     needs: validate-darwin-cascade-warmup
     if: |-
       always() && !cancelled() &&
-      needs.validate-darwin-cascade-warmup.result == 'success'
+      (needs.validate-darwin-cascade-warmup.result == 'success' ||
+      needs.validate-darwin-cascade-warmup.result == 'failure')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       slots: ${{ steps.faults.outputs.slots }}
+      recovered: ${{ steps.faults.outputs.recovered }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -851,6 +1140,7 @@ jobs:
         env:
           NIXCFG_ACTIONS_TOKEN: ${{ github.token }}
           NIXCFG_FAULT_ARTIFACT_PREFIX: validate-aarch64-darwin-cascade-warmup-cascade-
+          NIXCFG_FAULT_JOB_PREFIX: validate-darwin-cascade-warmup
           NIXCFG_FAULT_SLOTS: 0 1 2 3 4
           NIXCFG_CI_STAGE: device-fault-slots
         run: |
@@ -898,10 +1188,12 @@ jobs:
       always() && !cancelled() &&
       needs.prepare-merge.result == 'success' &&
       needs.plan-darwin-closures.result == 'success' &&
-      needs.validate-darwin-cascade-warmup.result == 'success' &&
+      (needs.validate-darwin-cascade-warmup.result == 'success' &&
       needs.validate-darwin-cascade-warmup-faults.result == 'success' &&
       (needs.validate-darwin-cascade-warmup-retry.result == 'success' ||
-      needs.validate-darwin-cascade-warmup-retry.result == 'skipped')
+      needs.validate-darwin-cascade-warmup-retry.result == 'skipped') ||
+      needs.validate-darwin-cascade-warmup-faults.outputs.recovered == 'true' &&
+      needs.validate-darwin-cascade-warmup-retry.result == 'success')
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -909,6 +1201,52 @@ jobs:
       stage: validate
       previous: prepare-x86_64-linux
       scope: packages
+    secrets: inherit
+  # A kernel fault or a lost runner (no device_fault flag) reruns the
+  # package inventory once. A real validation failure does not.
+  validate-darwin-packages-faults:
+    needs: validate-darwin-packages
+    if: |-
+      always() && !cancelled() &&
+      (needs.validate-darwin-packages.result == 'success' ||
+      needs.validate-darwin-packages.result == 'failure')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      retry: ${{ steps.faults.outputs.retry }}
+      recovered: ${{ steps.faults.outputs.recovered }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.inputs.repair_commit || github.sha }}
+          persist-credentials: false
+      - name: Decide a fresh-VM package retry
+        id: faults
+        env:
+          NIXCFG_ACTIONS_TOKEN: ${{ github.token }}
+          NIXCFG_FAULT_ARTIFACT_PREFIX: validate-aarch64-darwin-packages
+          NIXCFG_FAULT_JOB_PREFIX: validate-darwin-packages
+          NIXCFG_CI_STAGE: darwin-job-retry
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+  validate-darwin-packages-retry:
+    needs:
+      - validate-darwin-packages
+      - validate-darwin-packages-faults
+    if: |-
+      always() && !cancelled() &&
+      needs.validate-darwin-packages-faults.result == 'success' &&
+      needs.validate-darwin-packages-faults.outputs.retry == 'true'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      previous: prepare-x86_64-linux
+      scope: packages
+      device_fault_retry: true
     secrets: inherit
   # One generated matrix from lib.rootClosureManifest plus shard_costs.json.
   # The plan job evaluates the candidate tree, not a hand-maintained host list.
@@ -948,14 +1286,18 @@ jobs:
       needs.prepare-merge.result == 'success' &&
       needs.cache-darwin-linux-deps-arm.result == 'success' &&
       needs.cache-darwin-linux-deps-x86.result == 'success' &&
-      needs.validate-darwin-warm-rust.result == 'success' &&
+      (needs.validate-darwin-warm-rust.result == 'success' &&
       needs.validate-darwin-warm-rust-faults.result == 'success' &&
       (needs.validate-darwin-warm-rust-retry.result == 'success' ||
-      needs.validate-darwin-warm-rust-retry.result == 'skipped') &&
-      needs.validate-darwin-cascade-warmup.result == 'success' &&
+      needs.validate-darwin-warm-rust-retry.result == 'skipped') ||
+      needs.validate-darwin-warm-rust-faults.outputs.recovered == 'true' &&
+      needs.validate-darwin-warm-rust-retry.result == 'success') &&
+      (needs.validate-darwin-cascade-warmup.result == 'success' &&
       needs.validate-darwin-cascade-warmup-faults.result == 'success' &&
       (needs.validate-darwin-cascade-warmup-retry.result == 'success' ||
-      needs.validate-darwin-cascade-warmup-retry.result == 'skipped')
+      needs.validate-darwin-cascade-warmup-retry.result == 'skipped') ||
+      needs.validate-darwin-cascade-warmup-faults.outputs.recovered == 'true' &&
+      needs.validate-darwin-cascade-warmup-retry.result == 'success')
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan-darwin-closures.outputs.darwin_closure_shards) }}
@@ -983,11 +1325,13 @@ jobs:
       - validate-darwin-roots
     if: |-
       always() && !cancelled() &&
-      needs.validate-darwin-roots.result == 'success'
+      (needs.validate-darwin-roots.result == 'success' ||
+      needs.validate-darwin-roots.result == 'failure')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       shards: ${{ steps.faults.outputs.shards }}
+      recovered: ${{ steps.faults.outputs.recovered }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -998,6 +1342,7 @@ jobs:
         env:
           NIXCFG_ACTIONS_TOKEN: ${{ github.token }}
           NIXCFG_FAULT_ARTIFACT_PREFIX: validate-aarch64-darwin-closure-shard-
+          NIXCFG_FAULT_JOB_PREFIX: validate-darwin-roots
           NIXCFG_FAULT_MATRIX: ${{ needs.plan-darwin-closures.outputs.darwin_closure_shards }}
           NIXCFG_CI_STAGE: device-fault-shards
         run: |
@@ -1047,10 +1392,12 @@ jobs:
       needs.prepare-merge.result == 'success' &&
       needs.cache-darwin-linux-deps-arm.result == 'success' &&
       needs.cache-darwin-linux-deps-x86.result == 'success' &&
-      needs.validate-darwin-roots.result == 'success' &&
+      (needs.validate-darwin-roots.result == 'success' &&
       needs.validate-darwin-roots-faults.result == 'success' &&
       (needs.validate-darwin-roots-retry.result == 'success' ||
-      needs.validate-darwin-roots-retry.result == 'skipped')
+      needs.validate-darwin-roots-retry.result == 'skipped') ||
+      needs.validate-darwin-roots-faults.outputs.recovered == 'true' &&
+      needs.validate-darwin-roots-retry.result == 'success')
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -1059,6 +1406,52 @@ jobs:
       previous: prepare-x86_64-linux
       scope: closures
       closure_budget_seconds: "18000"
+    secrets: inherit
+  # Same fresh-VM retry as packages: device fault or a lost runner.
+  validate-darwin-closures-faults:
+    needs: validate-darwin-closures
+    if: |-
+      always() && !cancelled() &&
+      (needs.validate-darwin-closures.result == 'success' ||
+      needs.validate-darwin-closures.result == 'failure')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      retry: ${{ steps.faults.outputs.retry }}
+      recovered: ${{ steps.faults.outputs.recovered }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.inputs.repair_commit || github.sha }}
+          persist-credentials: false
+      - name: Decide a fresh-VM closure retry
+        id: faults
+        env:
+          NIXCFG_ACTIONS_TOKEN: ${{ github.token }}
+          NIXCFG_FAULT_ARTIFACT_PREFIX: validate-aarch64-darwin-closures
+          NIXCFG_FAULT_JOB_PREFIX: validate-darwin-closures
+          NIXCFG_CI_STAGE: darwin-job-retry
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+  validate-darwin-closures-retry:
+    needs:
+      - validate-darwin-closures
+      - validate-darwin-closures-faults
+    if: |-
+      always() && !cancelled() &&
+      needs.validate-darwin-closures-faults.result == 'success' &&
+      needs.validate-darwin-closures-faults.outputs.retry == 'true'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      previous: prepare-x86_64-linux
+      scope: closures
+      closure_budget_seconds: "18000"
+      device_fault_retry: true
     secrets: inherit
   # Fail closed: every manifest root valid and present in gkze.cachix.org,
   # every planned shard ran, Linux + Darwin package inventories intact.
@@ -1069,7 +1462,12 @@ jobs:
   publish:
     needs:
       - prepare-merge
+      - prepare-darwin-faults
       - plan-darwin-closures
+      - canary-darwin-fods-faults
+      - prebuild-darwin-leaves-faults
+      - canary-warm-rust-faults
+      - canary-warm-cascade-faults
       - validate-arm
       - validate-x86
       - validate-darwin-warm-rust
@@ -1079,10 +1477,14 @@ jobs:
       - validate-darwin-cascade-warmup-faults
       - validate-darwin-cascade-warmup-retry
       - validate-darwin-packages
+      - validate-darwin-packages-faults
+      - validate-darwin-packages-retry
       - validate-darwin-roots
       - validate-darwin-roots-faults
       - validate-darwin-roots-retry
       - validate-darwin-closures
+      - validate-darwin-closures-faults
+      - validate-darwin-closures-retry
     if: |-
       always() && !cancelled() &&
       (github.event_name != 'workflow_dispatch' ||
@@ -1101,6 +1503,7 @@ jobs:
           ref: ${{ github.event.inputs.repair_commit || github.sha }}
           persist-credentials: false
       - uses: ./.github/actions/update-runtime
+        timeout-minutes: 90
         id: runtime
         with:
           github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
@@ -1129,14 +1532,23 @@ jobs:
             validate-darwin-warm-rust=${{ needs.validate-darwin-warm-rust.result }}
             validate-darwin-warm-rust-faults=${{ needs.validate-darwin-warm-rust-faults.result }}
             validate-darwin-warm-rust-retry=${{ needs.validate-darwin-warm-rust-retry.result }}
+            validate-darwin-warm-rust-recovered=${{ needs.validate-darwin-warm-rust-faults.outputs.recovered }}
             validate-darwin-cascade-warmup=${{ needs.validate-darwin-cascade-warmup.result }}
             validate-darwin-cascade-warmup-faults=${{needs.validate-darwin-cascade-warmup-faults.result}}
             validate-darwin-cascade-warmup-retry=${{needs.validate-darwin-cascade-warmup-retry.result}}
+            validate-darwin-cascade-warmup-recovered=${{ needs.validate-darwin-cascade-warmup-faults.outputs.recovered }}
             validate-darwin-packages=${{ needs.validate-darwin-packages.result }}
+            validate-darwin-packages-faults=${{ needs.validate-darwin-packages-faults.result }}
+            validate-darwin-packages-retry=${{ needs.validate-darwin-packages-retry.result }}
+            validate-darwin-packages-recovered=${{ needs.validate-darwin-packages-faults.outputs.recovered }}
             validate-darwin-roots=${{ needs.validate-darwin-roots.result }}
             validate-darwin-roots-faults=${{ needs.validate-darwin-roots-faults.result }}
             validate-darwin-roots-retry=${{ needs.validate-darwin-roots-retry.result }}
+            validate-darwin-roots-recovered=${{ needs.validate-darwin-roots-faults.outputs.recovered }}
             validate-darwin-closures=${{ needs.validate-darwin-closures.result }}
+            validate-darwin-closures-faults=${{ needs.validate-darwin-closures-faults.result }}
+            validate-darwin-closures-retry=${{ needs.validate-darwin-closures-retry.result }}
+            validate-darwin-closures-recovered=${{ needs.validate-darwin-closures-faults.outputs.recovered }}
         run: |
           import runpy
           runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
@@ -1158,20 +1570,36 @@ jobs:
           success() &&
           needs.validate-arm.result == 'success' &&
           needs.validate-x86.result == 'success' &&
-          needs.validate-darwin-warm-rust.result == 'success' &&
+          (needs.validate-darwin-warm-rust.result == 'success' &&
           needs.validate-darwin-warm-rust-faults.result == 'success' &&
           (needs.validate-darwin-warm-rust-retry.result == 'success' ||
-          needs.validate-darwin-warm-rust-retry.result == 'skipped') &&
-          needs.validate-darwin-cascade-warmup.result == 'success' &&
+          needs.validate-darwin-warm-rust-retry.result == 'skipped') ||
+          needs.validate-darwin-warm-rust-faults.outputs.recovered == 'true' &&
+          needs.validate-darwin-warm-rust-retry.result == 'success') &&
+          (needs.validate-darwin-cascade-warmup.result == 'success' &&
           needs.validate-darwin-cascade-warmup-faults.result == 'success' &&
           (needs.validate-darwin-cascade-warmup-retry.result == 'success' ||
-          needs.validate-darwin-cascade-warmup-retry.result == 'skipped') &&
-          needs.validate-darwin-packages.result == 'success' &&
-          needs.validate-darwin-roots.result == 'success' &&
+          needs.validate-darwin-cascade-warmup-retry.result == 'skipped') ||
+          needs.validate-darwin-cascade-warmup-faults.outputs.recovered == 'true' &&
+          needs.validate-darwin-cascade-warmup-retry.result == 'success') &&
+          (needs.validate-darwin-packages.result == 'success' &&
+          needs.validate-darwin-packages-faults.result == 'success' &&
+          (needs.validate-darwin-packages-retry.result == 'success' ||
+          needs.validate-darwin-packages-retry.result == 'skipped') ||
+          needs.validate-darwin-packages-faults.outputs.recovered == 'true' &&
+          needs.validate-darwin-packages-retry.result == 'success') &&
+          (needs.validate-darwin-roots.result == 'success' &&
           needs.validate-darwin-roots-faults.result == 'success' &&
           (needs.validate-darwin-roots-retry.result == 'success' ||
-          needs.validate-darwin-roots-retry.result == 'skipped') &&
-          needs.validate-darwin-closures.result == 'success'
+          needs.validate-darwin-roots-retry.result == 'skipped') ||
+          needs.validate-darwin-roots-faults.outputs.recovered == 'true' &&
+          needs.validate-darwin-roots-retry.result == 'success') &&
+          (needs.validate-darwin-closures.result == 'success' &&
+          needs.validate-darwin-closures-faults.result == 'success' &&
+          (needs.validate-darwin-closures-retry.result == 'success' ||
+          needs.validate-darwin-closures-retry.result == 'skipped') ||
+          needs.validate-darwin-closures-faults.outputs.recovered == 'true' &&
+          needs.validate-darwin-closures-retry.result == 'success')
         env:
           NIXCFG_RUNTIME: ${{ steps.runtime.outputs.runtime }}
           NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
@@ -1219,6 +1647,7 @@ jobs:
     needs:
       - prepare-pins
       - prepare-darwin-0
+      - prepare-darwin-faults
       - prepare-darwin-1
       - prepare-darwin-2
       - prepare-darwin-3
@@ -1232,6 +1661,10 @@ jobs:
       - prepare-arm
       - prepare-x86
       - prepare-merge
+      - canary-darwin-fods-faults
+      - prebuild-darwin-leaves-faults
+      - canary-warm-rust-faults
+      - canary-warm-cascade-faults
       - cache-darwin-linux-deps-arm
       - cache-darwin-linux-deps-x86
       - validate-arm
@@ -1243,11 +1676,15 @@ jobs:
       - validate-darwin-cascade-warmup-faults
       - validate-darwin-cascade-warmup-retry
       - validate-darwin-packages
+      - validate-darwin-packages-faults
+      - validate-darwin-packages-retry
       - plan-darwin-closures
       - validate-darwin-roots
       - validate-darwin-roots-faults
       - validate-darwin-roots-retry
       - validate-darwin-closures
+      - validate-darwin-closures-faults
+      - validate-darwin-closures-retry
       - publish
     if: |-
       always() && !cancelled() && contains(needs.*.result, 'failure') &&
@@ -1271,6 +1708,7 @@ jobs:
           ref: ${{ github.event.inputs.repair_commit || github.sha }}
           persist-credentials: false
       - uses: ./.github/actions/update-runtime
+        timeout-minutes: 90
         id: runtime
         with:
           github-token: ${{ github.token }}
@@ -1323,7 +1761,7 @@ jobs:
           retention-days: 30
   start-repair:
     needs: repair
-    if: needs.repair.result == 'success'
+    if: always() && !cancelled() && needs.repair.result == 'success'
     # This environment must have required reviewers in GitHub settings. The
     # approval gates this exact artifact before any write or credentialed run.
     environment: update-repair-approval
@@ -1339,6 +1777,7 @@ jobs:
           ref: ${{ github.event.inputs.repair_commit || github.sha }}
           persist-credentials: false
       - uses: ./.github/actions/update-runtime
+        timeout-minutes: 90
         id: runtime
         with:
           github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
