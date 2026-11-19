@@ -954,6 +954,12 @@ time is the fix; another retry is not. A runner lost with no
 `update-runtime` step that fails alone.
 `realize-aarch64-darwin-faults` reads the check-run annotation, the step
 left `in_progress`, the job conclusion, and the step conclusions.
+Run 44327589569 lost that runner, and the fresh VM then logged 104271
+`disk2s7` I/O errors while unlinking superset's bun tree. That retry is
+not a result either. `realize-aarch64-darwin-retry-2` is one more fresh
+VM, and only when the retry's own `device_fault` output is set or the
+retry was a lost runner or a failed `update-runtime` step. A real build
+failure of the retry stops there.
 The Darwin plan cell uses that decision too: a lost plan retries once and
 uploads `closure-gate-plan-aarch64-darwin` for route. The realize jobs opt
 into `always()`: `plan-darwin-retry` is skipped on a clean plan, and GitHub

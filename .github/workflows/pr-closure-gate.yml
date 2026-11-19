@@ -293,6 +293,70 @@ jobs:
     secrets:
       UPDATE_SELF_HEAL_GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
       CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+  # 44327589569: the first attempt lost the runner. The fresh VM then
+  # logged 104271 disk2s7 I/O errors and died unlinking superset's bun
+  # tree. That retry is not a build result. One more fresh VM may push.
+  # A real failure of the retry does not.
+  realize-aarch64-darwin-retry-faults:
+    needs:
+      - route
+      - realize-aarch64-darwin-retry
+    if: >-
+      always() &&
+      !cancelled() &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      needs.route.result == 'success' &&
+      (needs.realize-aarch64-darwin-retry.result == 'success' ||
+      needs.realize-aarch64-darwin-retry.result == 'failure')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      retry: ${{ steps.faults.outputs.retry }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Decide whether the fresh VM was lost
+        id: faults
+        env:
+          NIXCFG_ACTIONS_TOKEN: ${{ github.token }}
+          NIXCFG_FAULT_ARTIFACT_PREFIX: closure-gate-darwin-retry-lost
+          NIXCFG_FAULT_JOB_PREFIX: realize-aarch64-darwin-retry
+          NIXCFG_CI_STAGE: darwin-job-retry
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+  realize-aarch64-darwin-retry-2:
+    needs:
+      - route
+      - realize-aarch64-darwin-retry
+      - realize-aarch64-darwin-retry-faults
+    if: >-
+      always() &&
+      !cancelled() &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      needs.route.result == 'success' &&
+      needs.realize-aarch64-darwin-retry-faults.result == 'success' &&
+      (needs.realize-aarch64-darwin-retry.outputs.device_fault == 'true' ||
+      needs.realize-aarch64-darwin-retry-faults.outputs.retry == 'true')
+    concurrency:
+      group: ${{ format('nixcfg-darwin-{0}', contains(github.event.pull_request.labels.*.name, 'main-fix') && 'main-fix' || contains(github.event.pull_request.labels.*.name, 'security') && 'security' || contains(github.event.pull_request.labels.*.name, 'heal') && 'heal' || 'routine') }}
+      cancel-in-progress: false
+      queue: max
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: closure-gate
+      scope: gate
+      checkout_ref: ${{ github.event.pull_request.head.sha }}
+      device_fault_retry: true
+      timeout_minutes: 360
+    secrets:
+      UPDATE_SELF_HEAL_GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
   realize-aarch64-linux:
     needs: route
     if: >-
@@ -336,6 +400,8 @@ jobs:
       - realize-aarch64-darwin
       - realize-aarch64-darwin-faults
       - realize-aarch64-darwin-retry
+      - realize-aarch64-darwin-retry-faults
+      - realize-aarch64-darwin-retry-2
       - realize-aarch64-linux
       - realize-x86_64-linux
     if: >-
@@ -357,7 +423,8 @@ jobs:
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         if: >-
           needs.realize-aarch64-darwin.result == 'success' ||
-          needs.realize-aarch64-darwin-retry.result == 'success'
+          needs.realize-aarch64-darwin-retry.result == 'success' ||
+          needs.realize-aarch64-darwin-retry-2.result == 'success'
         continue-on-error: true
         with:
           name: closure-gate-aarch64-darwin-gate
@@ -382,7 +449,7 @@ jobs:
           REALIZE_RESULTS: >-
             ${{ format(
             '{{"aarch64-darwin":"{0}","aarch64-linux":"{1}","x86_64-linux":"{2}"}}',
-            needs.realize-aarch64-darwin-faults.outputs.retry == 'true' && needs.realize-aarch64-darwin-retry.result || needs.realize-aarch64-darwin.result,
+            (needs.realize-aarch64-darwin-retry.outputs.device_fault == 'true' || needs.realize-aarch64-darwin-retry-faults.outputs.retry == 'true') && needs.realize-aarch64-darwin-retry-2.result || needs.realize-aarch64-darwin-faults.outputs.retry == 'true' && needs.realize-aarch64-darwin-retry.result || needs.realize-aarch64-darwin.result,
             needs.realize-aarch64-linux.result,
             needs.realize-x86_64-linux.result) }}
           CHANGED: ${{ needs.route.outputs.changed || '{}' }}

@@ -847,6 +847,7 @@ def test_pull_request_workflow_is_same_repo_and_keeps_darwin() -> None:
     jobs = workflow["jobs"]
     realize_names = {f"realize-{system}" for system in _SYSTEMS}
     darwin_retry = "realize-aarch64-darwin-retry"
+    darwin_retry_again = "realize-aarch64-darwin-retry-2"
     darwin_faults = "realize-aarch64-darwin-faults"
     assert set(jobs) == {
         "plan",
@@ -856,11 +857,13 @@ def test_pull_request_workflow_is_same_repo_and_keeps_darwin() -> None:
         "closure-gate",
         darwin_faults,
         darwin_retry,
+        "realize-aarch64-darwin-retry-faults",
+        darwin_retry_again,
         *realize_names,
     }
     for name, job in jobs.items():
         assert "head.repo.full_name == github.repository" in job["if"]
-        if name in realize_names or name == darwin_retry:
+        if name in realize_names or name in {darwin_retry, darwin_retry_again}:
             assert set(job["secrets"]) == {
                 "CACHIX_AUTH_TOKEN",
                 "UPDATE_SELF_HEAL_GITHUB_TOKEN",
@@ -951,8 +954,27 @@ def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -
     )
     assert " ".join(download["if"].split()) == (
         "needs.realize-aarch64-darwin.result == 'success' || "
-        "needs.realize-aarch64-darwin-retry.result == 'success'"
+        "needs.realize-aarch64-darwin-retry.result == 'success' || "
+        "needs.realize-aarch64-darwin-retry-2.result == 'success'"
     )
+    again_faults = jobs["realize-aarch64-darwin-retry-faults"]
+    again = jobs["realize-aarch64-darwin-retry-2"]
+    assert again_faults["needs"] == ["route", "realize-aarch64-darwin-retry"]
+    assert again["needs"] == [
+        "route",
+        "realize-aarch64-darwin-retry",
+        "realize-aarch64-darwin-retry-faults",
+    ]
+    assert " ".join(again["if"].split()) == (
+        "always() && !cancelled() && "
+        "github.event.pull_request.head.repo.full_name == github.repository && "
+        "needs.route.result == 'success' && "
+        "needs.realize-aarch64-darwin-retry-faults.result == 'success' && "
+        "(needs.realize-aarch64-darwin-retry.outputs.device_fault == 'true' || "
+        "needs.realize-aarch64-darwin-retry-faults.outputs.retry == 'true')"
+    )
+    assert again["with"] == retry["with"]
+    assert again["secrets"] == retry["secrets"]
     aggregate = next(
         step
         for step in jobs["closure-gate"]["steps"]
@@ -960,6 +982,9 @@ def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -
     )
     realized = " ".join(aggregate["env"]["REALIZE_RESULTS"].split())
     assert (
+        "needs.realize-aarch64-darwin-retry.outputs.device_fault == 'true' || "
+        "needs.realize-aarch64-darwin-retry-faults.outputs.retry == 'true') && "
+        "needs.realize-aarch64-darwin-retry-2.result || "
         "needs.realize-aarch64-darwin-faults.outputs.retry == 'true' && "
         "needs.realize-aarch64-darwin-retry.result || "
         "needs.realize-aarch64-darwin.result"
