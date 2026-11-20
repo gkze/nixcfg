@@ -278,7 +278,10 @@ flowchart TD
    That rewind does not quarantine the package. It runs on the tree after
    every native candidate has been folded, and it is what puts ``goose`` and
    ``superset`` back when the pins seed moved the input and a later restore
-   left the source metadata behind (Update 44258507999). The same merge
+   left the source metadata behind (Update 44258507999). Update 44694691236
+   is the same split with a newer Goose pin: ``fb55b5a6`` / ``v1.60.2`` in
+   the lock, ``2bcb8583`` / ``v1.55.0`` in ``overlays/goose-cli/sources.json``.
+   The same merge
    restores a consumer, and the flake input it pins, when that consumer's
    ``electronVersion`` is not in the Electron inventory the fold kept.
    Update 44479330250 left Superset at 2.0.10 (Electron 44.10.0) after the

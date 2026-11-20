@@ -729,30 +729,41 @@ def test_held_declarations_leave_a_flake_they_cannot_splice() -> None:
 def test_fold_rewinds_a_pin_whose_source_entry_stayed_on_the_baseline(
     tmp_path: Path,
 ) -> None:
-    """Update 44258507999: goose moved in the pins seed and sources.json did not.
+    """Updates 44258507999 and 44694691236: goose's pin moved and its files did not.
 
-    The rewind restores that input after the fold and does not quarantine the
-    package. Codex, whose source files are not part of the goose entry, stays
-    on the candidate pin.
+    44694691236 evaluated ``fb55b5a6`` / ``v1.60.2`` against sources.json
+    ``2bcb8583`` / ``v1.55.0``. The withhold restored the source files and the
+    crate artifacts, and the hold did not name the goose input. The rewind
+    puts that pin back after the fold and does not quarantine the package.
+    Codex, whose source files are not part of the goose entry, stays on the
+    candidate pin.
     """
     root = tmp_path / "repo"
+    baseline_rev = "2bcb8583a18a0623eb78c9ed845d597ed99fae48"
+    pinned_rev = "fb55b5a6d7f5b5df96c8f817f1cde6a81880d9f1"
     sources = json.dumps({
-        "commit": "a" * 40,
+        "commit": baseline_rev,
         "hashes": [],
         "version": "1.55.0",
     })
+    artifacts = {
+        "overlays/goose-cli/Cargo.nix": "{ }\n",
+        "overlays/goose-cli/crate-hashes.json": "{}\n",
+        "overlays/goose-cli/crate-sources.json": "{}\n",
+    }
     baseline_nix = _input_flake(desktop="v1.55.0", codex="v1").replace(
         "github-desktop", "goose"
     )
-    pinned_nix = _input_flake(desktop="v1.60.1", codex="v2").replace(
+    pinned_nix = _input_flake(desktop="v1.60.2", codex="v2").replace(
         "github-desktop", "goose"
     )
     init_update_workspace_repo(
         root,
         tracked_files={
             "flake.nix": baseline_nix,
-            "flake.lock": _lock(goose="a" * 40, codex="b" * 40),
+            "flake.lock": _lock(goose=baseline_rev, codex="b" * 40),
             "overlays/goose-cli/sources.json": sources + "\n",
+            **artifacts,
         },
     )
     merged = pipeline.fold_prepared_candidates(
@@ -760,7 +771,7 @@ def test_fold_rewinds_a_pin_whose_source_entry_stayed_on_the_baseline(
             root,
             {
                 "flake.nix": pinned_nix,
-                "flake.lock": _lock(goose="d" * 40, codex="e" * 40),
+                "flake.lock": _lock(goose=pinned_rev, codex="e" * 40),
             },
             systems=_X86,
         ),
@@ -775,8 +786,10 @@ def test_fold_rewinds_a_pin_whose_source_entry_stayed_on_the_baseline(
     assert input_declaration_text(flake, "codex") == input_declaration_text(
         pinned_nix, "codex"
     )
-    assert _locked_revs(root)["goose"] == "a" * 40
+    assert _locked_revs(root)["goose"] == baseline_rev
     assert _locked_revs(root)["codex"] == "e" * 40
+    for relative, content in artifacts.items():
+        assert (root / relative).read_text(encoding="utf-8") == content
     assert merged.quarantines == ()
     assert (root / "overlays/goose-cli/sources.json").read_text(
         encoding="utf-8"
