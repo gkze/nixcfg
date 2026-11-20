@@ -888,7 +888,7 @@ run 44498744364 attempt 2 died while the realize step was still running, so
 the output was never set and the retry did not start. A finished realize
 that records `device_fault=false` is a build failure and does not rerun. The
 aggregate downloads `closure-gate-aarch64-darwin-gate` from whichever of
-those jobs succeeded. A second fault fails the gate.
+those jobs succeeded. A second fault fails the gate. Run 44744612180 on `b21777a3` lost both the first Darwin realize and that one retry while the realize step was still running. GitHub recorded no build error, only that the runner lost communication.
 
 Fork pull requests do not run the workflow's jobs. The trigger is
 `pull_request` for a head in this repository, and the Cachix token is passed
