@@ -855,7 +855,15 @@ aggregate.
 Realize calls the Update reusable workflow (`update-native.yml`) with stage
 `closure-gate` on `macos-15`, `ubuntu-24.04-arm`, and `ubuntu-24.04`. The
 build flags are the validation build (`nix build --no-update-lock-file
---no-link --keep-going --fallback`) plus `--print-out-paths`. The build
+--no-link --keep-going --fallback`) plus `--max-jobs 1` and
+`--print-out-paths`. Each changed installable is its own build. After it,
+the gate roots the printed paths, deletes leftover `nix-*` directories
+under `/nix/var/nix/builds`, and reclaims the store when free space is
+under the skip threshold. Run 44713152415 lost the first Darwin runner
+and the retry was stopped during one combined build of all eight outputs.
+Run 44158690416 faulted `disk2s7` while two vendor trees were unlinked
+together. The build directory stays on the Nix store volume: Determinate
+Nix rejects `/private/tmp` as world-writable (44569736549). The build
 budget is the Darwin shard budget, 18000 seconds, inside the 360-minute job.
 The receipt is `--print-out-paths`. Derivation show of a Darwin system
 names a different output than the build realizes, so it does not choose

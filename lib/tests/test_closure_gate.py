@@ -65,6 +65,8 @@ class _Runner:
         self.present: set[str] = set()
         self.presence_value = "absent"
         self.built: tuple[str, ...] | None = None
+        self.builds: list[tuple[str, ...]] = []
+        self.settled: list[tuple[str, ...]] = []
         self.build_result: tuple[str, ...] = ()
         self.pushed: tuple[str, ...] | None = None
         self.push_error: Exception | None = None
@@ -82,7 +84,11 @@ class _Runner:
 
     def build(self, installables: tuple[str, ...]) -> tuple[str, ...]:
         self.built = installables
+        self.builds.append(installables)
         return self.build_result
+
+    def settle(self, paths: tuple[str, ...]) -> None:
+        self.settled.append(paths)
 
     def push(self, paths: tuple[str, ...]) -> None:
         if self.push_error is not None:
@@ -239,7 +245,13 @@ def test_build_args_match_validation_plus_the_output_receipt() -> None:
     )
     expected = _batch_validation_args(requests, flake_root=None)
     first = expected.index("path:.#packages.aarch64-darwin.tool")
-    expected = [*expected[:first], "--print-out-paths", *expected[first:]]
+    expected = [
+        *expected[:first],
+        "--max-jobs",
+        "1",
+        "--print-out-paths",
+        *expected[first:],
+    ]
     assert gate.build_args(installables) == expected
     with pytest.raises(gate.GateError, match="at least one"):
         gate.build_args(())
@@ -335,6 +347,40 @@ def test_narinfo_queries_gkze_by_digest() -> None:
         raise OSError("timed out")
 
     assert gate.gkze_presence(path, broken, lambda _seconds: None) == "unknown"
+
+
+def test_realize_builds_one_installable_and_settles_before_the_next() -> None:
+    """44713152415 died inside one combined Darwin build.
+
+    Each output is realized and settled before the next starts, so two
+    vendor-tree teardowns are not on the store volume together.
+    """
+    first = _changed("package", "comet", _drv("comet"))
+    second = _changed("root", "root-closure-darwin-argus", _drv("argus"))
+    runner = _Runner()
+    runner.drvs[first.attr] = first.drv
+    runner.drvs[second.attr] = second.drv
+    runner.build_result = (_out("built"),)
+    gate.realize_changed((first, second), runner)
+    assert runner.builds == [(first.installable(),), (second.installable(),)]
+    assert runner.settled == [(_out("built"),), (_out("built"),)]
+
+
+def test_clear_nix_build_directories_removes_only_nix_trees(tmp_path: Path) -> None:
+    """Leftover build directories are removed before the next installable."""
+    assert gate.clear_nix_build_directories(tmp_path / "missing") == 0
+    root = tmp_path / "builds"
+    root.mkdir()
+    tree = root / "nix-1"
+    tree.mkdir()
+    (tree / "file").write_text("x", encoding="utf-8")
+    link = root / "nix-link"
+    link.symlink_to(tree)
+    (root / "keep").mkdir()
+    assert gate.clear_nix_build_directories(root) == 2
+    assert not tree.exists()
+    assert not link.exists()
+    assert (root / "keep").is_dir()
 
 
 def test_realize_skips_outputs_already_on_gkze() -> None:
