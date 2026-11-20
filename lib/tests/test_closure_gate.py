@@ -762,8 +762,10 @@ def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -
     """44005867871: a faulted Nix Store read is not a closure result.
 
     substituteInPlace reported null bytes after disk2s7 I/O errors. The first
-    job must not satisfy the gate. The fresh VM's result does, and only when
-    the first job recorded device_fault.
+    job must not satisfy the gate. The fresh VM's result does when the first
+    job recorded device_fault, and when the realize died before it could
+    record one (44498744364 attempt 2). A finished realize that recorded
+    device_fault=false is a build failure and does not rerun.
     """
     jobs = _workflow("pr-closure-gate.yml")["jobs"]
     first = jobs["realize-aarch64-darwin"]
@@ -773,7 +775,8 @@ def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -
         "always() && !cancelled() && "
         "github.event.pull_request.head.repo.full_name == github.repository && "
         "needs.route.result == 'success' && "
-        "needs.realize-aarch64-darwin.outputs.device_fault == 'true'"
+        "needs.realize-aarch64-darwin.result == 'failure' && "
+        "needs.realize-aarch64-darwin.outputs.device_fault != 'false'"
     )
     assert retry["concurrency"] == first["concurrency"]
     assert retry["uses"] == first["uses"]
@@ -787,10 +790,20 @@ def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -
     )
     realized = " ".join(aggregate["env"]["REALIZE_RESULTS"].split())
     assert (
-        "needs.realize-aarch64-darwin.outputs.device_fault == 'true' && "
+        "needs.realize-aarch64-darwin.result == 'failure' && "
+        "needs.realize-aarch64-darwin.outputs.device_fault != 'false' && "
         "needs.realize-aarch64-darwin-retry.result || "
         "needs.realize-aarch64-darwin.result"
     ) in realized
+    download = next(
+        step
+        for step in jobs["closure-gate"]["steps"]
+        if step.get("with", {}).get("name") == "closure-gate-aarch64-darwin-gate"
+    )
+    assert " ".join(download["if"].split()) == (
+        "needs.realize-aarch64-darwin.result == 'success' || "
+        "needs.realize-aarch64-darwin-retry.result == 'success'"
+    )
 
 
 def test_realize_reuses_the_update_native_runner() -> None:

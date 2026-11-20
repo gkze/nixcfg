@@ -874,8 +874,13 @@ had started. Run 44005867871's `home-manager-generation` builder reported
 `substituteInPlace` reads the activation script in one pass, and that read
 hit the faulted volume. The tree had no NUL bytes. The realize job records
 `device_fault` and `realize-aarch64-darwin-retry` rebuilds the same outputs
-once on a fresh VM, which is the attempt allowed to push. A second fault
-fails the gate.
+once on a fresh VM, which is the attempt allowed to push. A realize that
+fails without recording `device_fault=false` is the same missing result:
+run 44498744364 attempt 2 died while the realize step was still running, so
+the output was never set and the retry did not start. A finished realize
+that records `device_fault=false` is a build failure and does not rerun. The
+aggregate downloads `closure-gate-aarch64-darwin-gate` from whichever of
+those jobs succeeded. A second fault fails the gate.
 
 Fork pull requests do not run the workflow's jobs. The trigger is
 `pull_request` for a head in this repository, and the Cachix token is passed
