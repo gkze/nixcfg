@@ -873,6 +873,14 @@ must exit 0 and the narinfo must then be 200, or the job fails. The flush step s
 fails closed. The aggregating step writes the pushed and already-cached
 store paths into the job summary.
 
+Darwin realize is one VM per slice: the changed packages, then each
+`root-closure-*` on its own. The slices share the Darwin lane, so they queue
+rather than taking a runner each. Each installable is pushed before the next
+build. Runs 44744612180 and 44776913311 lost both the first VM and its retry
+while one job still held every output, and the push had not run. The
+aggregate joins `closure-gate-aarch64-darwin-gate-*`. A second slice fault
+fails the gate.
+
 A Darwin realize whose kernel logged block-device I/O errors does not push.
 Flush clears the Cachix daemon directory so the action's post hook cannot
 drain that store; the hook then logs `Cachix Daemon not started`. The daemon
@@ -887,8 +895,8 @@ fails without recording `device_fault=false` is the same missing result:
 run 44498744364 attempt 2 died while the realize step was still running, so
 the output was never set and the retry did not start. A finished realize
 that records `device_fault=false` is a build failure and does not rerun. The
-aggregate downloads `closure-gate-aarch64-darwin-gate` from whichever of
-those jobs succeeded. A second fault fails the gate. Run 44744612180 on `b21777a3` lost both the first Darwin realize and that one retry while the realize step was still running. GitHub recorded no build error, only that the runner lost communication.
+aggregate downloads `closure-gate-aarch64-darwin-gate-*` from whichever of
+those jobs succeeded. A second fault fails the gate.
 
 Fork pull requests do not run the workflow's jobs. The trigger is
 `pull_request` for a head in this repository, and the Cachix token is passed

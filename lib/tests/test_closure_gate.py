@@ -68,7 +68,9 @@ class _Runner:
         self.builds: list[tuple[str, ...]] = []
         self.settled: list[tuple[str, ...]] = []
         self.build_result: tuple[str, ...] = ()
+        self.build_results: list[tuple[str, ...]] | None = None
         self.pushed: tuple[str, ...] | None = None
+        self.pushes: list[tuple[str, ...]] = []
         self.push_error: Exception | None = None
 
     def instantiate(self, attr: str) -> str:
@@ -85,6 +87,8 @@ class _Runner:
     def build(self, installables: tuple[str, ...]) -> tuple[str, ...]:
         self.built = installables
         self.builds.append(installables)
+        if self.build_results is not None:
+            return self.build_results.pop(0)
         return self.build_result
 
     def settle(self, paths: tuple[str, ...]) -> None:
@@ -93,6 +97,7 @@ class _Runner:
     def push(self, paths: tuple[str, ...]) -> None:
         if self.push_error is not None:
             raise self.push_error
+        self.pushes.append(paths)
         self.pushed = paths
 
 
@@ -364,6 +369,113 @@ def test_realize_builds_one_installable_and_settles_before_the_next() -> None:
     gate.realize_changed((first, second), runner)
     assert runner.builds == [(first.installable(),), (second.installable(),)]
     assert runner.settled == [(_out("built"),), (_out("built"),)]
+
+
+def test_realize_pushes_one_installable_before_building_the_next() -> None:
+    """44744612180 lost the VM before the single end-of-job push.
+
+    A finished output has to be on gkze before the next build starts, or
+    the retry rebuilds everything the dead runner already produced.
+    """
+    first = _changed("package", "comet", _drv("comet"))
+    second = _changed("package", "spotify", _drv("spotify"))
+    runner = _Runner()
+    runner.drvs[first.attr] = first.drv
+    runner.drvs[second.attr] = second.drv
+    runner.build_results = [(_out("comet"),), (_out("spotify"),)]
+    result = gate.realize_changed((first, second), runner)
+    assert runner.pushes == [(_out("comet"),), (_out("spotify"),)]
+    assert runner.builds == [(first.installable(),), (second.installable(),)]
+    assert result.pushed == (_out("comet"), _out("spotify"))
+    assert result.installables == (first.installable(), second.installable())
+
+
+def test_select_slice_keeps_linux_whole_and_splits_darwin() -> None:
+    """A Darwin VM realizes packages, or one root, not the whole plan."""
+    packages = _changed("package", "comet", _drv("comet"))
+    argus = _changed("root", "root-closure-darwin-argus", _drv("argus"))
+    zeus = _changed("root", "root-closure-darwin-zeus", _drv("zeus"))
+    changed = (packages, argus, zeus)
+    assert gate.select_slice(changed, "") == changed
+    assert gate.select_slice(changed, "packages") == (packages,)
+    assert gate.select_slice(changed, "root-closure-darwin-argus") == (argus,)
+    assert gate.select_slice(changed, "root-closure-darwin-rocinante") == ()
+    with pytest.raises(gate.GateError, match="unknown closure-gate slice"):
+        gate.select_slice(changed, "all")
+
+
+def test_unchanged_slice_records_an_empty_success(tmp_path: Path, monkeypatch) -> None:
+    """A root whose drv did not change does not build and does not fail."""
+    plan = gate.Plan(
+        system="aarch64-darwin",
+        merge_base="a" * 40,
+        head="b" * 40,
+        eval_seconds=1.0,
+        changed=(_changed("package", "comet", _drv("comet")),),
+    )
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(plan.to_json(), encoding="utf-8")
+    monkeypatch.setenv("NIXCFG_CLOSURE_GATE_PLAN", str(plan_path))
+    monkeypatch.setenv("NIXCFG_CLOSURE_GATE_COMMAND", "realize")
+    monkeypatch.setenv("NIXCFG_CLOSURE_GATE_SLICE", "root-closure-darwin-zeus")
+    monkeypatch.setenv("SYSTEM", "aarch64-darwin")
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    gate.main()
+    result = json.loads(
+        (tmp_path / "update-artifacts" / "closure-gate-result.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert result["ok"] is True
+    assert result["installables"] == []
+
+
+def test_aggregate_joins_darwin_slice_results(tmp_path: Path) -> None:
+    """The gate's one result is the union of the slice artifacts."""
+    system = tmp_path / "aarch64-darwin"
+    for name, installable in (
+        (
+            "closure-gate-aarch64-darwin-gate-packages",
+            ".#packages.aarch64-darwin.comet",
+        ),
+        (
+            "closure-gate-aarch64-darwin-gate-root-closure-darwin-argus",
+            ".#checks.aarch64-darwin.root-closure-darwin-argus",
+        ),
+    ):
+        directory = system / name
+        directory.mkdir(parents=True)
+        (directory / "closure-gate-result.json").write_text(
+            json.dumps({
+                "system": "aarch64-darwin",
+                "ok": True,
+                "pushed": [],
+                "cached": [_out(name)],
+                "installables": [installable],
+            }),
+            encoding="utf-8",
+        )
+    fault = system / "closure-gate-aarch64-darwin-gate-packages-device-fault"
+    fault.mkdir()
+    (fault / "closure-gate-result.json").write_text(
+        json.dumps({
+            "system": "aarch64-darwin",
+            "ok": True,
+            "pushed": [_out("fault")],
+            "cached": [],
+            "installables": [".#packages.aarch64-darwin.comet"],
+        }),
+        encoding="utf-8",
+    )
+    loaded = gate.load_system_result(tmp_path, "aarch64-darwin")
+    assert loaded is not None
+    assert loaded["installables"] == [
+        ".#packages.aarch64-darwin.comet",
+        ".#checks.aarch64-darwin.root-closure-darwin-argus",
+    ]
+    assert _out("fault") not in loaded["pushed"]
 
 
 def test_clear_nix_build_directories_removes_only_nix_trees(tmp_path: Path) -> None:
@@ -825,9 +937,23 @@ def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -
         "needs.realize-aarch64-darwin.outputs.device_fault != 'false'"
     )
     assert retry["concurrency"] == first["concurrency"]
+    assert retry["strategy"] == first["strategy"]
     assert retry["uses"] == first["uses"]
     assert retry["secrets"] == first["secrets"]
     assert retry["with"] == {**first["with"], "device_fault_retry": "true"}
+    darwin_roots = sorted(path.stem for path in (ROOT / "darwin").glob("*.nix"))
+    home_roots = sorted(
+        path.name
+        for path in (ROOT / "home").iterdir()
+        if (path / "default.nix").is_file()
+    )
+    assert first["strategy"]["matrix"]["slice"] == [
+        "packages",
+        *[f"root-closure-darwin-{name}" for name in darwin_roots],
+        *[f"root-closure-home-{name}" for name in home_roots],
+    ]
+    assert first["with"]["closure_gate_slice"] == "${{ matrix.slice }}"
+    assert first["with"]["shard"] == "${{ matrix.slice }}"
     assert "realize-aarch64-darwin-retry" in jobs["closure-gate"]["needs"]
     aggregate = next(
         step
@@ -844,7 +970,7 @@ def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -
     download = next(
         step
         for step in jobs["closure-gate"]["steps"]
-        if step.get("with", {}).get("name") == "closure-gate-aarch64-darwin-gate"
+        if step.get("with", {}).get("pattern") == "closure-gate-aarch64-darwin-gate-*"
     )
     assert " ".join(download["if"].split()) == (
         "needs.realize-aarch64-darwin.result == 'success' || "
@@ -868,6 +994,7 @@ def test_realize_reuses_the_update_native_runner() -> None:
     assert candidate["if"] == "inputs.stage != 'closure-gate'"
     assert flush["if"] == "always()"
     assert realize["env"]["NIXCFG_CLOSURE_GATE_COMMAND"] == "realize"
+    assert "inputs.closure_gate_slice" in realize["env"]["NIXCFG_CLOSURE_GATE_SLICE"]
     update = _workflow("update.yml")
     budgets = [
         job["with"]["closure_budget_seconds"]

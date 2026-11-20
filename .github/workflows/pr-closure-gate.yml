@@ -98,6 +98,11 @@ jobs:
   # A reusable workflow call cannot read matrix in its if, so each
   # system is its own job. An empty diff skips that job. One failure
   # does not cancel the others before their Cachix flush.
+  # One hosted macOS VM cannot realize every changed Darwin output.
+  # 44744612180 and 44776913311 lost the runner twice with the whole plan
+  # in one job, and the push never ran. Each slice is its own VM on the
+  # same Darwin lane. A slice pushes each finished installable before the
+  # next build. An unchanged root slice succeeds without a build.
   realize-aarch64-darwin:
     needs: route
     if: >-
@@ -108,12 +113,23 @@ jobs:
       group: ${{ format('nixcfg-darwin-{0}', contains(github.event.pull_request.labels.*.name, 'main-fix') && 'main-fix' || contains(github.event.pull_request.labels.*.name, 'security') && 'security' || contains(github.event.pull_request.labels.*.name, 'heal') && 'heal' || 'routine') }}
       cancel-in-progress: false
       queue: max
+    strategy:
+      fail-fast: false
+      matrix:
+        slice:
+          - packages
+          - root-closure-darwin-argus
+          - root-closure-darwin-rocinante
+          - root-closure-darwin-zeus
+          - root-closure-home-george
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
       system: aarch64-darwin
       stage: closure-gate
       scope: gate
+      shard: ${{ matrix.slice }}
+      closure_gate_slice: ${{ matrix.slice }}
       checkout_ref: ${{ github.event.pull_request.head.sha }}
     secrets:
       UPDATE_SELF_HEAL_GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
@@ -142,12 +158,23 @@ jobs:
       group: ${{ format('nixcfg-darwin-{0}', contains(github.event.pull_request.labels.*.name, 'main-fix') && 'main-fix' || contains(github.event.pull_request.labels.*.name, 'security') && 'security' || contains(github.event.pull_request.labels.*.name, 'heal') && 'heal' || 'routine') }}
       cancel-in-progress: false
       queue: max
+    strategy:
+      fail-fast: false
+      matrix:
+        slice:
+          - packages
+          - root-closure-darwin-argus
+          - root-closure-darwin-rocinante
+          - root-closure-darwin-zeus
+          - root-closure-home-george
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
       system: aarch64-darwin
       stage: closure-gate
       scope: gate
+      shard: ${{ matrix.slice }}
+      closure_gate_slice: ${{ matrix.slice }}
       checkout_ref: ${{ github.event.pull_request.head.sha }}
       device_fault_retry: true
     secrets:
@@ -215,7 +242,7 @@ jobs:
           needs.realize-aarch64-darwin-retry.result == 'success'
         continue-on-error: true
         with:
-          name: closure-gate-aarch64-darwin-gate
+          pattern: closure-gate-aarch64-darwin-gate-*
           path: results/aarch64-darwin
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         if: needs.realize-aarch64-linux.result == 'success'

@@ -59,6 +59,10 @@ on:
         description: Space-separated Darwin roots for one always-run shard
         default: ""
         type: string
+      closure_gate_slice:
+        description: Darwin closure-gate slice. Empty realizes the whole plan.
+        default: ""
+        type: string
       shard:
         description: Shard identity for artifact and receipt names
         default: ""
@@ -197,6 +201,7 @@ jobs:
         env:
           NIXCFG_CLOSURE_GATE_COMMAND: realize
           NIXCFG_CLOSURE_GATE_PLAN: ${{ runner.temp }}/closure-gate/plan.json
+          NIXCFG_CLOSURE_GATE_SLICE: ${{ inputs.closure_gate_slice }}
           SYSTEM: ${{ inputs.system }}
         shell: python
         run: |

@@ -654,13 +654,38 @@ def _rmdir_build_entry(path: Path) -> None:
         return
 
 
+def select_slice(
+    changed: Sequence[ChangedOutput], slice_name: str
+) -> tuple[ChangedOutput, ...]:
+    """Return the plan entries one Darwin VM realizes.
+
+    An empty slice is the whole plan, which is what Linux still builds.
+    ``packages`` is every changed package output. A ``root-closure-*`` name
+    is that one root, or nothing when the root's drv did not change. One
+    hosted macOS job cannot keep every changed Darwin root, and a runner
+    that dies before the final push leaves the finished outputs unpublished.
+    """
+    if slice_name == "":
+        return tuple(changed)
+    if slice_name == "packages":
+        return tuple(item for item in changed if item.kind == "package")
+    if slice_name.startswith("root-closure-"):
+        return tuple(
+            item for item in changed if item.kind == "root" and item.name == slice_name
+        )
+    msg = f"unknown closure-gate slice: {slice_name}"
+    raise GateError(msg)
+
+
 def realize_changed(changed: Sequence[ChangedOutput], runner: _Runner) -> RealizeResult:
     """Build the selected installables and push paths gkze does not have.
 
     ``nix build --print-out-paths`` is the receipt. Derivation show of a
     Darwin system names a different output than that build realizes, so it
     cannot choose the push set. A path already on gkze is substituted and
-    is not pushed again. A push that does not finish raises.
+    is not pushed again. Each installable is pushed before the next build,
+    so a later runner loss keeps the outputs that already finished. A push
+    that does not finish raises.
     """
     for item in changed:
         instantiated = runner.instantiate(item.attr)
@@ -670,35 +695,36 @@ def realize_changed(changed: Sequence[ChangedOutput], runner: _Runner) -> Realiz
                 f"plan_drv={item.drv} build_drv={instantiated}\n"
             )
             sys.stdout.flush()
-    built: list[str] = []
+    pushed: list[str] = []
+    cached: list[str] = []
+    seen: set[str] = set()
     for item in changed:
         # 44713152415 built every Darwin output in one nix invocation.
         # The first runner disappeared, and the retry was SIGTERM'd.
         # 44158690416 faulted disk2s7 while two vendor trees were unlinked
         # together. One installable, then its build directory, at a time.
+        # 44744612180 and 44776913311 lost both the first VM and the retry
+        # before the single push, so none of the finished outputs reached gkze.
         realized = runner.build((item.installable(),))
         if not realized:
             msg = f"nix build returned 0 paths for {item.installable()}"
             raise GateError(msg)
-        built.extend(realized)
         runner.settle(realized)
-    cached: list[str] = []
-    to_push: list[str] = []
-    seen: set[str] = set()
-    for path in built:
-        if path in seen:
-            continue
-        seen.add(path)
-        if runner.presence(path) == "present":
-            cached.append(path)
-        else:
-            to_push.append(path)
-    pushed = tuple(to_push)
-    if pushed:
-        runner.push(pushed)
+        to_push: list[str] = []
+        for path in realized:
+            if path in seen:
+                continue
+            seen.add(path)
+            if runner.presence(path) == "present":
+                cached.append(path)
+            else:
+                to_push.append(path)
+        if to_push:
+            runner.push(tuple(to_push))
+            pushed.extend(to_push)
     return RealizeResult(
-        pushed=pushed,
-        cached=tuple(sorted(cached)),
+        pushed=tuple(pushed),
+        cached=tuple(cached),
         installables=tuple(item.installable() for item in changed),
     )
 
@@ -742,6 +768,44 @@ def gate_problems(
             continue
         problems.extend(_result_problems(system, count, result))
     return tuple(problems)
+
+
+def combine_realize_payloads(
+    system: str, parts: Sequence[Mapping[str, object]]
+) -> dict[str, object]:
+    """Join one result per Darwin slice into the aggregate's single result.
+
+    Slices partition the plan. An unchanged root contributes no result file.
+    """
+    pushed: list[str] = []
+    cached: list[str] = []
+    installables: list[str] = []
+    for part in parts:
+        if part.get("system") != system or part.get("ok") is not True:
+            msg = f"{system} slice result is not an ok result for that system"
+            raise GateError(msg)
+        for key, sink in (
+            ("pushed", pushed),
+            ("cached", cached),
+            ("installables", installables),
+        ):
+            values = part.get(key)
+            if not isinstance(values, list) or not all(
+                isinstance(value, str) for value in values
+            ):
+                msg = f"{system} slice result {key} is not a list of strings"
+                raise GateError(msg)
+            sink.extend(values)
+    if len(installables) != len(set(installables)):
+        msg = f"{system} slice results repeat an installable"
+        raise GateError(msg)
+    return {
+        "system": system,
+        "ok": True,
+        "pushed": pushed,
+        "cached": cached,
+        "installables": installables,
+    }
 
 
 def _result_problems(
@@ -1119,9 +1183,15 @@ def _command_realize() -> None:
     if not plan.changed:
         msg = f"{system} has an empty plan; the realize job should have been skipped"
         raise GateError(msg)
-    if any(item.kind == "root" for item in plan.changed):
-        _load_jobs().reclaim_hosted_store()
-    result = realize_changed(plan.changed, _ProcessRunner())
+    selected = select_slice(
+        plan.changed, os.environ.get("NIXCFG_CLOSURE_GATE_SLICE", "")
+    )
+    if not selected:
+        result = RealizeResult(pushed=(), cached=(), installables=())
+    else:
+        if any(item.kind == "root" for item in selected):
+            _load_jobs().reclaim_hosted_store()
+        result = realize_changed(selected, _ProcessRunner())
     _remember(result.pushed)
     artifact = Path(os.environ["RUNNER_TEMP"]) / "update-artifacts"
     artifact.mkdir(parents=True, exist_ok=True)
@@ -1149,6 +1219,32 @@ def _load_result(path: Path) -> dict[str, object] | None:
     return payload
 
 
+def _fault_artifact(path: Path) -> bool:
+    return "device-fault" in path.parent.name or "runner-fault" in path.parent.name
+
+
+def load_system_result(results_root: Path, system: str) -> dict[str, object] | None:
+    """Read one system's result, joining Darwin slice artifacts when present."""
+    direct = _load_result(results_root / system / "closure-gate-result.json")
+    if direct is not None:
+        return direct
+    parts: list[dict[str, object]] = []
+    system_root = results_root / system
+    if not system_root.is_dir():
+        return None
+    for path in sorted(system_root.glob("*/closure-gate-result.json")):
+        if _fault_artifact(path):
+            continue
+        payload = _load_result(path)
+        if payload is not None:
+            parts.append(payload)
+    if not parts:
+        return None
+    if len(parts) == 1:
+        return parts[0]
+    return combine_realize_payloads(system, parts)
+
+
 def _command_aggregate() -> None:
     policy = Path("lib/system-policy.json").read_text(encoding="utf-8")
     required = required_systems(policy)
@@ -1170,7 +1266,7 @@ def _command_aggregate() -> None:
     results: dict[str, Mapping[str, object]] = {}
     loaded: list[RealizeResult] = []
     for system in required:
-        payload = _load_result(results_root / system / "closure-gate-result.json")
+        payload = load_system_result(results_root, system)
         if payload is None:
             continue
         results[system] = payload
