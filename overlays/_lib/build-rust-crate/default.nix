@@ -60,8 +60,7 @@ let
 
   # The unmodified nixpkgs builder, called the way all-packages.nix calls it.
   upstreamFor = pkgs: pkgs.callPackage (upstreamDirFor pkgs) (callArgsFor pkgs);
-in
-{
+
   # Refuse a crate output that is not what buildRustCrate just wrote.
   #
   # Run 44910664125 substituted rust_zerocopy-0.8.52-lib and
@@ -69,13 +68,12 @@ in
   # narinfos are 200, and the bytes are not a crate: the rlib does not start
   # with an archive header, and lib/link is the single byte "+" or "@".
   # setup_link_paths then passes that byte to rustc twice (LINK and
-  # EXTRA_BUILD). half fails with "multiple input filenames" on "+", bitflags
-  # fails loading an argument file named "@", and reqwest reports E0463 for
-  # tower whose rlib is the same class of garbage. cfg-if from the same cache,
-  # whose rlib is a real archive and whose link file is a newline, is fine.
-  # The check fails the producing build, so a faulted store cannot publish
-  # another one. Wrapping the builder changes every crate hash, so the
-  # published paths are not substituted again.
+  # EXTRA_BUILD). half fails with "multiple input filenames" on "+", and
+  # bitflags fails loading an argument file named "@". cfg-if from the same
+  # cache, whose rlib is a real archive and whose link file is a newline, is
+  # fine. The check fails the producing build, so a faulted store cannot
+  # publish another one. Wrapping the builder changes every crate hash, so
+  # the published paths are not substituted again.
   addCrateOutputCheck =
     drv:
     drv.overrideAttrs (old: {
@@ -135,7 +133,8 @@ in
       __functor = _self: args: addCrateOutputCheck (inner args);
       override = lib.mirrorFunctionArgs inner.override wrappedOverride;
     };
-
+in
+{
   inherit
     addCrateOutputCheck
     baseHash
