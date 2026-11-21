@@ -1036,6 +1036,16 @@ def test_realize_failure_is_kept_for_the_uploaded_artifact(
         in (tmp_path / "update-artifacts" / "realize-error.txt").read_text()
     )
 
+    def fail_with_binary_stderr(args, **_kwargs):
+        return subprocess.CompletedProcess(
+            args, 1, stdout=b"", stderr=b"error: bad \xdd path\n"
+        )
+
+    monkeypatch.setattr(gate.subprocess, "run", fail_with_binary_stderr)
+    with pytest.raises(gate.GateError, match="bad"):
+        gate._run(["nix", "build"], timeout=30)
+    assert "bad" in (tmp_path / "update-artifacts" / "realize-error.txt").read_text()
+
     monkeypatch.delenv("RUNNER_TEMP")
 
     def time_out_quietly(args, **_kwargs):

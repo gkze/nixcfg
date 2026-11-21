@@ -879,7 +879,12 @@ rather than taking a runner each. Each installable is pushed before the next
 build. Runs 44744612180 and 44776913311 lost both the first VM and its retry
 while one job still held every output, and the push had not run. The
 aggregate joins `closure-gate-aarch64-darwin-gate-*`. A second slice fault
-fails the gate.
+fails the gate. Process output is decoded with replacement: nix on Darwin
+can write a path that is not UTF-8, and a strict decode drops the exit code.
+Run 44817523361's home-george slice died that way twice, on byte 0xdd, and
+recorded neither the build result nor a device fault. The same run's
+rocinante slice rejected `GoogleDrive.dmg` on both VMs with one hash, now in
+`packages/google-drive/sources.json`.
 
 A Darwin realize whose kernel logged block-device I/O errors does not push.
 Flush clears the Cachix daemon directory so the action's post hook cannot

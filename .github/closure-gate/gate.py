@@ -939,6 +939,21 @@ def _retain_process_failure(detail: str) -> None:
     (directory / "realize-error.txt").write_text(detail, encoding="utf-8")
 
 
+def _process_text(value: bytes | str | None) -> str:
+    """Decode process output without dropping a non-UTF-8 byte.
+
+    Nix on Darwin can write a path that is not valid UTF-8. The hosted
+    Python then raises UnicodeDecodeError inside ``subprocess.run`` and the
+    gate never records the build result. Run 44817523361's home-george slice
+    died that way twice, on byte 0xdd.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "replace")
+    return value
+
+
 def _run(args: list[str], *, timeout: float, cwd: Path | None = None) -> str:
     try:
         result = subprocess.run(  # noqa: S603 -- nix or cachix argv, never a shell
@@ -946,27 +961,24 @@ def _run(args: list[str], *, timeout: float, cwd: Path | None = None) -> str:
             cwd=cwd,
             check=False,
             capture_output=True,
-            text=True,
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as error:
-        stderr = error.stderr
-        text = (
-            stderr.decode("utf-8", "replace") if isinstance(stderr, bytes) else stderr
-        )
-        tail = "\n".join((text or "").splitlines()[-20:])
+        text = _process_text(error.stderr) or _process_text(error.stdout)
+        tail = "\n".join(text.splitlines()[-20:])
         msg = f"{args[0]} timed out after {timeout:.0f}s"
         if tail:
             msg = f"{msg}: {tail}"
         _retain_process_failure(msg)
         raise GateError(msg) from error
+    stdout = _process_text(result.stdout)
     if result.returncode != 0:
-        detail = (result.stderr or result.stdout).strip()
+        detail = (_process_text(result.stderr) or stdout).strip()
         tail = "\n".join(detail.splitlines()[-20:])
         msg = f"{' '.join(args[:4])} failed: {tail}"
         _retain_process_failure(msg)
         raise GateError(msg)
-    return result.stdout
+    return stdout
 
 
 def _eval_inventory(inventory: Path, flake_path: Path, system: str) -> object:
