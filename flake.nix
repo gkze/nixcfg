@@ -268,10 +268,6 @@
       url = "github:coder/mux/v0.30.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    mountpoint-s3 = {
-      url = "github:awslabs/mountpoint-s3";
-      flake = false;
-    };
     t3code = {
       # Nightly channel. Upstream publishes nightlies as immutable
       # ``v<base>-nightly.<yyyymmdd>.<run>`` tags off main and uses the tag as the
@@ -1004,13 +1000,6 @@
                   src = ./.;
                 };
 
-              "test-nix-jsonc" =
-                { pkgs, ... }:
-                import ./tests/nix/jsonc.nix {
-                  inherit (pkgs) lib;
-                  src = ./.;
-                };
-
               "test-nix-repo-checks" =
                 { pkgs, ... }:
                 import ./tests/nix/repo-checks.nix {
@@ -1116,6 +1105,11 @@
               "test-nix-build-volume-session" = {
                 when = isConfigurationSystem;
                 test = _: import ./tests/nix/build-volume-session { inherit self; };
+              };
+
+              "test-nix-host-nix-settings" = {
+                when = isConfigurationSystem;
+                test = _: import ./tests/nix/host-nix-settings { inherit self; };
               };
 
               "test-nix-nvim-keymaps" = {

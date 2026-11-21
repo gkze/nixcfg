@@ -112,7 +112,10 @@ Each host file composes profiles from `darwin/george/profiles.nix` with
   machine and substituter are disabled while it is offline; the file notes
   how to restore them)
 - `darwin/rocinante.nix`: `georgeBase`, plus the personal Dock
-- `darwin/zeus.nix`: `georgeBase` and `townWorkstation`, plus the computer name
+- `darwin/zeus.nix`: `georgeBase` and `townWorkstation`, plus the computer name.
+  It is the one host where Determinate Nix owns the installation
+  (`nix.enable = false`), so the file also renders `/etc/nix/nix.custom.conf`
+  with the shared cache, trust, and store-headroom policy
 
 `georgeBase` holds the settings that all of George's machines share,
 including the Build volume: the host creates `~/Build.sparsebundle` on first

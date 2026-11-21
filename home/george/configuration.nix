@@ -200,7 +200,6 @@
       managedMacAppRouting = {
         agentastic-dev.package = pkgs.agentastic-dev;
         airfoil.package = pkgs.airfoil;
-        antigravity.package = pkgs.antigravity;
         appcleaner.package = pkgs.appcleaner;
         betterdisplay = {
           package = pkgs.betterdisplay;
@@ -233,8 +232,6 @@
           package = pkgs.figma;
           preventDowngrade = true;
         };
-        framer.package = pkgs.framer;
-        "github-desktop".package = pkgs.github-desktop;
         ghostty.package = pkgs.ghostty-tip;
         gitbutler.package = pkgs.gitbutler;
         "google-chrome".package = pkgs.google-chrome;
@@ -245,10 +242,7 @@
           cli.granola.path = "Contents/MacOS/Granola";
         };
         iina.package = pkgs.iina;
-        jacq.package = pkgs.jacq;
         linear.package = pkgs.linear;
-        "logi-options-plus".package = pkgs.logi-options-plus;
-        loom.package = pkgs.loom;
         netnewswire.package = pkgs.netnewswire;
         nordvpn = {
           package = pkgs.nordvpn;
@@ -263,7 +257,6 @@
           scope = "system";
         };
         pica.package = pkgs.pica;
-        postman.package = pkgs.postman;
         raycast.package = pkgs.raycast;
         reason.package = pkgs.reason;
         rectangle.package = pkgs.rectangle;
@@ -322,7 +315,6 @@
       # because a foreign derivation cannot carry our `passthru`.
       topgrade = {
         disabledSteps = [
-          "antigravity_cli" # pkgs.antigravity-cli, installed via programs below
           "brew_cask"
           "brew_formula"
           "home_manager"
@@ -769,7 +761,6 @@
     };
 
     # Simple enable-only programs (alphabetical)
-    antigravity-cli.enable = true;
     awscli = {
       enable = true;
       package =

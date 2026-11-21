@@ -141,12 +141,12 @@ def test_partition_keeps_a_prerequisite_component_on_one_shard() -> None:
 
 def test_partition_spreads_slow_updaters_instead_of_counting_names() -> None:
     """A slow updater fills its shard; quick names go to the lighter shard."""
-    plan = ("alpha", "openchamber", "beta", "paseo", "gamma")
+    plan = ("alpha", "openchamber", "beta", "mux", "gamma")
     assert partition_prepare_targets(plan, shard=0, count=2) == ("openchamber",)
     assert partition_prepare_targets(plan, shard=1, count=2) == (
         "alpha",
         "beta",
-        "paseo",
+        "mux",
         "gamma",
     )
 
@@ -501,7 +501,7 @@ def test_same_platform_partials_fold_into_the_three_system_merge(
     assert merged.validate_all_packages is True
     assert merged.prepared is True
     linux = _file_candidate(root, "linux.txt", "linux\n", systems=("aarch64-linux",))
-    folded = pipeline.merge_prepared_candidates(merged, linux, repo=root)
+    folded = pipeline.fold_prepared_candidates(merged, linux, repo=root)
     folded.apply(root)
     assert (root / "alpha.txt").read_text(encoding="utf-8") == "alpha\n"
     assert (root / "beta.txt").read_text(encoding="utf-8") == "beta\n"

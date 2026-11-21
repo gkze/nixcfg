@@ -8,6 +8,8 @@ let
     "lib/exact_text_patch.py"
     # Actions bootstraps Nix with the hosted image's Python 3.12.
     "lib/update/ci/jobs.py"
+    # The closure gate runs before the devshell exists, on that same 3.12.
+    ".github/closure-gate/gate.py"
   ];
   ruffMutationExcludes =
     (builtins.fromTOML (builtins.readFile ../pyproject.toml)).tool.ruff.format.exclude;

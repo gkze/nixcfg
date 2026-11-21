@@ -32,7 +32,94 @@ let
       throw "${label}: expected an evaluation failure, got ${builtins.toJSON result.value}"
     else
       true;
+
+  # Nix accepts space-separated list values, so split a rendered setting into
+  # the words the daemon will read.
+  wordsOf =
+    value:
+    let
+      pieces = builtins.split "[[:space:]]+" value;
+    in
+    builtins.filter builtins.isString pieces;
+
+  # Parse a rendered nix.conf, or a fragment of one, into `name -> [ value ]`.
+  # Comments and directives are skipped, and repeated keys keep the last value,
+  # which is how Nix resolves them.
+  parseNixSettings =
+    text:
+    let
+      lines = builtins.filter (line: line != "" && builtins.match "[[:space:]]*#.*" line == null) (
+        builtins.filter builtins.isString (builtins.split "\n" text)
+      );
+      parseLine =
+        line:
+        let
+          match = builtins.match "[[:space:]]*([^[:space:]=]+)[[:space:]]*=[[:space:]]*(.*)" line;
+        in
+        if match == null then
+          null
+        else
+          {
+            name = builtins.elemAt match 0;
+            value = builtins.elemAt match 1;
+          };
+      entries = builtins.filter (entry: entry != null) (map parseLine lines);
+    in
+    builtins.foldl' (acc: entry: acc // { ${entry.name} = wordsOf entry.value; }) { } entries;
+
+  # Nix appends `extra-` settings to their base setting, so fold them together
+  # before comparing what a host actually applies.
+  foldExtraSettings =
+    settings:
+    let
+      names = builtins.attrNames settings;
+      isExtra = name: builtins.substring 0 6 name == "extra-";
+      stripped = name: builtins.substring 6 (builtins.stringLength name) name;
+      base = builtins.listToAttrs (
+        map (name: {
+          inherit name;
+          value = settings.${name};
+        }) (builtins.filter (name: !isExtra name) names)
+      );
+    in
+    builtins.foldl' (
+      acc: name:
+      let
+        key = stripped name;
+      in
+      acc // { ${key} = (acc.${key} or [ ]) ++ settings.${name}; }
+    ) base (builtins.filter isExtra names);
+
+  # Encode a setting value the way nix.conf spells it. `toString` is not enough
+  # here because Nix renders booleans as an empty string.
+  confValue =
+    value:
+    if builtins.isBool value then
+      (if value then "true" else "false")
+    else if builtins.isList value then
+      map confValue value
+    else
+      toString value;
+
+  # The daemon settings a host actually applies. nix-darwin writes them when it
+  # owns Nix; otherwise the host renders them elsewhere and that text is the
+  # source of truth.
+  effectiveNixSettings =
+    host:
+    foldExtraSettings (
+      if host.nix.enable then
+        builtins.mapAttrs (
+          _: value: if builtins.isList value then map confValue value else [ (confValue value) ]
+        ) host.nix.settings
+      else
+        parseNixSettings host.environment.etc."nix/nix.custom.conf".text
+    );
 in
 {
-  inherit assertEq assertThrows;
+  inherit
+    assertEq
+    assertThrows
+    effectiveNixSettings
+    parseNixSettings
+    ;
 }

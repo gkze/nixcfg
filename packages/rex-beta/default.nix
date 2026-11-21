@@ -6,9 +6,11 @@
 }:
 mkDmgApp {
   pname = "rex-beta";
-  appName = "Rex Beta";
-  # The snapshot bundle ships as "Rex Beta.app" but its Mach-O is still "Rex".
-  executableName = "Rex";
+  # The snapshot feed still calls itself "Rex Beta", but the bundle it ships is
+  # "Rex.app" and Sparkle installs that name in place. The managed copy has to
+  # use the shipped name, or a self-update leaves the Dock pinned to a bundle
+  # that no longer exists.
+  appName = "Rex";
   info = selfSource;
   macApp.installMode = "copy";
   meta = with lib; {

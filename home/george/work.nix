@@ -29,7 +29,6 @@ let
     devin = systemApp pkgs.devin;
     energy = systemApp pkgs.energy;
     factory = systemApp pkgs.factory;
-    freelens.package = pkgs.freelens;
     gemini = {
       package = pkgs.gemini;
       preventDowngrade = true;
@@ -44,7 +43,6 @@ let
     mach-studio = systemApp pkgs.mach-studio;
     onepassword = systemApp pkgs.onepassword;
     openchamber = systemApp pkgs.openchamber;
-    paseo = systemApp pkgs.paseo;
     reflect = systemApp pkgs.reflect-open;
     screen-studio = systemApp pkgs.screen-studio;
     # macOS requires the system extension's parent app in /Applications.
@@ -58,14 +56,12 @@ let
         env.TAILSCALE_BE_CLI = "1";
       };
     };
-    thorium = systemApp pkgs.thorium;
     "town-assistant".package = pkgs.town-assistant-nightly;
     unsloth = systemApp pkgs.unsloth;
     voiceos = systemApp pkgs.voiceos;
     waku = systemApp pkgs.waku;
     "warp-preview".package = pkgs.warp-preview;
     writer-computer = systemApp pkgs.writer-computer;
-    zeron = systemApp pkgs.zeron;
     zo = systemApp pkgs.zo;
   };
   projection = macApps.managedMacAppRoutingProjection routing;

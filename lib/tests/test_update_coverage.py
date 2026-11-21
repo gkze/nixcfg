@@ -19,7 +19,6 @@ from lib.update.ci.coverage import (
     binary_cache_store,
     check_path_in_cachix,
     check_path_on_nixos,
-    coverage_platform,
     dump_job_results,
     eval_check_out_path,
     find_root_out_path_cache,
@@ -41,7 +40,6 @@ from lib.update.ci.coverage import (
     require_shard_receipts,
     require_validation_reports,
     required_coverage_jobs,
-    root_installable_for,
     root_store_paths,
     shard_artifact_name,
     write_root_out_path_cache,
@@ -449,10 +447,6 @@ def test_cachix_and_eval_helpers_fail_closed(tmp_path: Path) -> None:
     )
     assert paths["darwin-argus"].startswith("/nix/store/")
     assert "aggregate:aarch64-darwin" in paths
-    assert root_installable_for("aarch64-darwin") == (
-        "path:.#checks.aarch64-darwin.root-closures"
-    )
-    assert coverage_platform()
     assert dump_job_results({"a": "success"}) == "a=success\n"
     payload = tmp_path / "doc.json"
     payload.write_text("[]")

@@ -136,6 +136,6 @@ jobs:
           NIXCFG_CI_STAGE: flush-cachix
           CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
         shell: python
-        run: |
+        run: |-
           import runpy
           runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")

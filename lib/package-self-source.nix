@@ -15,13 +15,6 @@ let
     else
       null;
 
-  callPackageArgs =
-    name:
-    let
-      selfSource = maybeSelfSource name;
-    in
-    if selfSource == null then { } else { inherit selfSource; };
-
   injectIntoFunction =
     name: pkg:
     let
@@ -42,9 +35,5 @@ let
       ) (pkgArgs // { selfSource = true; });
 in
 {
-  inherit
-    callPackageArgs
-    injectIntoFunction
-    maybeSelfSource
-    ;
+  inherit injectIntoFunction;
 }

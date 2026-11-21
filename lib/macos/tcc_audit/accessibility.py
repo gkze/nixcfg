@@ -11,27 +11,20 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from AppKit import NSRunningApplication  # ty: ignore[unresolved-import]
-
-# pyobjc is Darwin-only and resolves framework symbols dynamically. ty reports
-# the module unresolved on Linux and each member unresolved on Darwin, so keep
-# every pyobjc import on the single line that carries its suppression; the
-# isort splits stop these from being merged into one parenthesized import.
-from ApplicationServices import AXUIElementCopyAttributeValue  # ty: ignore[unresolved-import]
-
-# isort: split
-from ApplicationServices import AXUIElementCreateApplication  # ty: ignore[unresolved-import]
-
-# isort: split
-from ApplicationServices import AXUIElementPerformAction  # ty: ignore[unresolved-import]
-
-# isort: split
-from ApplicationServices import AXUIElementSetAttributeValue  # ty: ignore[unresolved-import]
+# pyobjc is Darwin-only and resolves framework symbols dynamically. Ty's
+# module-resolution rules for that boundary are scoped in pyproject.toml.
+from AppKit import NSRunningApplication
+from ApplicationServices import (
+    AXUIElementCopyAttributeValue,
+    AXUIElementCreateApplication,
+    AXUIElementPerformAction,
+    AXUIElementSetAttributeValue,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from ApplicationServices import AXUIElement  # ty: ignore[unresolved-import]
+    from ApplicationServices import AXUIElement
 
 SYSTEM_SETTINGS_BUNDLE_ID = "com.apple.systempreferences"
 

@@ -22,6 +22,7 @@ from lib.nix.commands.base import (
     ProcessLine,
 )
 from lib.nix.models.sources import SourceEntry
+from lib.tests._assertions import expect_instance
 from lib.update import cli, cli_validation, process
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.cli_options import UpdateOptions
@@ -33,7 +34,6 @@ from lib.update.events import (
     StatusKind,
     UpdateEvent,
     UpdateEventKind,
-    expect_command_result,
     raise_failed_command,
 )
 from lib.update.summary import UpdateSummary
@@ -157,7 +157,7 @@ def test_command_events_are_safe_without_changing_execution_results(
         UpdateEventKind.COMMAND_END,
     ]
     assert "SYNTHETIC" not in json.dumps([asdict(event) for event in events])
-    diagnostic = expect_command_result(events[-1].payload)
+    diagnostic = expect_instance(events[-1].payload, CommandResult)
     assert diagnostic.args == ["download", safe_url]
     assert diagnostic.stderr == f"fetching {safe_url}\ngot: {_HASH}\n"
     with pytest.raises(RuntimeError) as error:
@@ -261,7 +261,7 @@ def test_status_fields_and_command_tails_are_safe() -> None:
     assert status.value == status.current == status.latest == _SAFE
     raw = CommandResult(["download"], 1, "", "", tail_lines=(_URL,))
     event = UpdateEvent("demo", UpdateEventKind.COMMAND_END, payload=raw)
-    assert expect_command_result(event.payload).tail_lines == (_SAFE,)
+    assert expect_instance(event.payload, CommandResult).tail_lines == (_SAFE,)
     assert raw.tail_lines == (_URL,)
 
 

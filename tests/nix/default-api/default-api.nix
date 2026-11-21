@@ -282,9 +282,6 @@ let
     (assertEq "flakelight wispr version" "1.4.661"
       ((flakelightPackagesFor packageSmokeSystem).wispr-flow fakeDarwinAppArgs).info.version
     )
-    (assertEq "selfSource helper callPackage path" "1.2.3"
-      (selfSourceHelper.callPackageArgs "demo").selfSource.version
-    )
     (assertEq "selfSource helper wrapped default" "1.2.3-ok" (wrappedDemo {
       suffix = "-ok";
     }))

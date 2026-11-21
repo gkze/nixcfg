@@ -23,7 +23,13 @@ jobs:
     # request. A missing priority label is routine. cancel-in-progress stays
     # false so one lane does not drop another pull request's Darwin plan.
     concurrency:
-      group: ${{ matrix.system == 'aarch64-darwin' && format('nixcfg-darwin-{0}', contains(github.event.pull_request.labels.*.name, 'main-fix') && 'main-fix' || contains(github.event.pull_request.labels.*.name, 'security') && 'security' || contains(github.event.pull_request.labels.*.name, 'heal') && 'heal' || 'routine') || format('pr-closure-gate-plan-{0}-{1}', github.event.pull_request.number, matrix.system) }}
+      group: >-
+        ${{ matrix.system == 'aarch64-darwin' && format('nixcfg-darwin-{0}',
+        contains(github.event.pull_request.labels.*.name, 'main-fix') && 'main-fix' ||
+        contains(github.event.pull_request.labels.*.name, 'security') && 'security' ||
+        contains(github.event.pull_request.labels.*.name, 'heal') && 'heal' || 'routine')
+        || format('pr-closure-gate-plan-{0}-{1}', github.event.pull_request.number,
+        matrix.system) }}
       cancel-in-progress: false
       queue: max
     strategy:
@@ -105,7 +111,11 @@ jobs:
       needs.route.result == 'success' &&
       fromJSON(needs.route.outputs.changed || '{}')['aarch64-darwin'] > 0
     concurrency:
-      group: ${{ format('nixcfg-darwin-{0}', contains(github.event.pull_request.labels.*.name, 'main-fix') && 'main-fix' || contains(github.event.pull_request.labels.*.name, 'security') && 'security' || contains(github.event.pull_request.labels.*.name, 'heal') && 'heal' || 'routine') }}
+      group: >-
+        ${{ format('nixcfg-darwin-{0}',
+        contains(github.event.pull_request.labels.*.name, 'main-fix') && 'main-fix' ||
+        contains(github.event.pull_request.labels.*.name, 'security') && 'security' ||
+        contains(github.event.pull_request.labels.*.name, 'heal') && 'heal' || 'routine') }}
       cancel-in-progress: false
       queue: max
     uses: ./.github/workflows/update-native.yml
@@ -134,7 +144,11 @@ jobs:
       needs.route.result == 'success' &&
       needs.realize-aarch64-darwin.outputs.device_fault == 'true'
     concurrency:
-      group: ${{ format('nixcfg-darwin-{0}', contains(github.event.pull_request.labels.*.name, 'main-fix') && 'main-fix' || contains(github.event.pull_request.labels.*.name, 'security') && 'security' || contains(github.event.pull_request.labels.*.name, 'heal') && 'heal' || 'routine') }}
+      group: >-
+        ${{ format('nixcfg-darwin-{0}',
+        contains(github.event.pull_request.labels.*.name, 'main-fix') && 'main-fix' ||
+        contains(github.event.pull_request.labels.*.name, 'security') && 'security' ||
+        contains(github.event.pull_request.labels.*.name, 'heal') && 'heal' || 'routine') }}
       cancel-in-progress: false
       queue: max
     uses: ./.github/workflows/update-native.yml
@@ -230,7 +244,9 @@ jobs:
           REALIZE_RESULTS: >-
             ${{ format(
             '{{"aarch64-darwin":"{0}","aarch64-linux":"{1}","x86_64-linux":"{2}"}}',
-            needs.realize-aarch64-darwin.outputs.device_fault == 'true' && needs.realize-aarch64-darwin-retry.result || needs.realize-aarch64-darwin.result,
+            needs.realize-aarch64-darwin.outputs.device_fault == 'true'
+            && needs.realize-aarch64-darwin-retry.result
+            || needs.realize-aarch64-darwin.result,
             needs.realize-aarch64-linux.result,
             needs.realize-x86_64-linux.result) }}
           CHANGED: ${{ needs.route.outputs.changed || '{}' }}
