@@ -258,7 +258,7 @@ def test_pin_then_parallel_native_matches_serial_darwin_then_linux(
     arm = pipeline.prepare_candidate(("example",), previous=darwin)[0]
     state["system"] = "x86_64-linux"
     x86 = pipeline.prepare_candidate(("example",), previous=darwin)[0]
-    serial = pipeline.merge_prepared_candidates(arm, x86, repo=root)
+    serial = pipeline.fold_prepared_candidates(arm, x86, repo=root)
     operations.clear()
     state["system"] = "x86_64-linux"
     pin_out = root.parent / "pin.json"
@@ -331,7 +331,7 @@ def test_darwin_prepare_shards_hash_every_target_once_then_merge(
     for system in ("aarch64-linux", "x86_64-linux"):
         state["system"] = system
         native = pipeline.prepare_candidate(("example",), previous=pin)[0]
-        darwin = pipeline.merge_prepared_candidates(darwin, native, repo=root)
+        darwin = pipeline.fold_prepared_candidates(darwin, native, repo=root)
     assert set(darwin.systems) == set(pipeline.supported_systems())
     with IsolatedUpdateWorkspace(root) as workspace:
         darwin.apply(workspace.root)
@@ -6653,7 +6653,7 @@ def _candidate_with_file(
     )
 
 
-def test_merge_prepared_candidates_preserves_guide_symlink(tmp_path: Path) -> None:
+def test_fold_prepared_candidates_preserves_guide_symlink(tmp_path: Path) -> None:
     """Materializing the merge must not follow CLAUDE.md into AGENTS.md (#1267)."""
     root = tmp_path / "repo"
     init_update_workspace_repo(
@@ -6689,7 +6689,7 @@ def test_merge_prepared_candidates_preserves_guide_symlink(tmp_path: Path) -> No
         "x86\n",
         systems=("aarch64-darwin", "x86_64-linux"),
     )
-    merged = pipeline.merge_prepared_candidates(arm, x86, repo=root)
+    merged = pipeline.fold_prepared_candidates(arm, x86, repo=root)
     merged.apply(root)
     assert (root / "AGENTS.md").read_text(encoding="utf-8") == (
         "# Agent Guide\nkeep this body\n"
@@ -6699,7 +6699,7 @@ def test_merge_prepared_candidates_preserves_guide_symlink(tmp_path: Path) -> No
     assert b"AGENTS.md" not in merged.patch
 
 
-def test_merge_prepared_candidates_keeps_disjoint_linux_edits(tmp_path: Path) -> None:
+def test_fold_prepared_candidates_keeps_disjoint_linux_edits(tmp_path: Path) -> None:
     """Arm and x86 may extend Darwin in parallel when they do not clash."""
     root = tmp_path / "repo"
     init_update_workspace_repo(
@@ -6728,7 +6728,7 @@ def test_merge_prepared_candidates_keeps_disjoint_linux_edits(tmp_path: Path) ->
         prepared=True,
         patch=x86.patch,
     )
-    merged = pipeline.merge_prepared_candidates(arm, x86, repo=root)
+    merged = pipeline.fold_prepared_candidates(arm, x86, repo=root)
     assert merged.resolutions["linux"].version == "1"
     assert set(merged.systems) == {
         "aarch64-darwin",
@@ -6776,7 +6776,7 @@ def _source_json(
     )
 
 
-def test_merge_prepared_candidates_rejects_file_conflicts(tmp_path: Path) -> None:
+def test_fold_prepared_candidates_rejects_file_conflicts(tmp_path: Path) -> None:
     """Shared generated files with different contents fail closed."""
     root = tmp_path / "repo"
     init_update_workspace_repo(root, tracked_files={"shared.txt": "base\n"})
@@ -6793,9 +6793,9 @@ def test_merge_prepared_candidates_rejects_file_conflicts(tmp_path: Path) -> Non
         systems=("aarch64-darwin", "x86_64-linux"),
     )
     with pytest.raises(ValueError, match="Conflicting candidate edits"):
-        pipeline.merge_prepared_candidates(arm, x86, repo=root)
+        pipeline.fold_prepared_candidates(arm, x86, repo=root)
     with pytest.raises(ValueError, match="share a baseline"):
-        pipeline.merge_prepared_candidates(
+        pipeline.fold_prepared_candidates(
             arm,
             Candidate(
                 base_tree="b" * 40,
@@ -6811,7 +6811,7 @@ def test_merge_prepared_candidates_rejects_file_conflicts(tmp_path: Path) -> Non
         )
 
 
-def test_merge_prepared_candidates_unions_drv_hash_only_sources_json(
+def test_fold_prepared_candidates_unions_drv_hash_only_sources_json(
     tmp_path: Path,
 ) -> None:
     """#1266: parallel Linux prepares rewrote openai-cli drvHash only."""
@@ -6838,7 +6838,7 @@ def test_merge_prepared_candidates_unions_drv_hash_only_sources_json(
         _source_json(drv_hash=_OPENAI_X86_DRV),
         systems=("aarch64-darwin", "x86_64-linux"),
     )
-    merged = pipeline.merge_prepared_candidates(arm, x86, repo=root)
+    merged = pipeline.fold_prepared_candidates(arm, x86, repo=root)
     merged.apply(root)
     entry = SourceEntry.model_validate_json(
         (root / "packages/openai-cli/sources.json").read_bytes()
@@ -6849,7 +6849,7 @@ def test_merge_prepared_candidates_unions_drv_hash_only_sources_json(
     assert entry.hashes.primary_hash() == _OPENAI_VENDOR
 
 
-def test_merge_prepared_candidates_unions_complementary_platform_hashes(
+def test_fold_prepared_candidates_unions_complementary_platform_hashes(
     tmp_path: Path,
 ) -> None:
     """Arm and x86 may each add their native hash to the same sources.json."""
@@ -6890,7 +6890,7 @@ def test_merge_prepared_candidates_unions_complementary_platform_hashes(
         json.dumps(x86_entry.to_dict(), indent=2, sort_keys=True) + "\n",
         systems=("aarch64-darwin", "x86_64-linux"),
     )
-    merged = pipeline.merge_prepared_candidates(arm, x86, repo=root)
+    merged = pipeline.fold_prepared_candidates(arm, x86, repo=root)
     merged.apply(root)
     entry = SourceEntry.model_validate_json(
         (root / "overlays/demo.sources.json").read_bytes()
@@ -6902,7 +6902,7 @@ def test_merge_prepared_candidates_unions_complementary_platform_hashes(
     }
 
 
-def test_merge_prepared_candidates_rejects_incompatible_sources_json(
+def test_fold_prepared_candidates_rejects_incompatible_sources_json(
     tmp_path: Path,
 ) -> None:
     """Version or artifact-hash disagreements still fail closed."""
@@ -6926,7 +6926,7 @@ def test_merge_prepared_candidates_rejects_incompatible_sources_json(
         systems=("aarch64-darwin", "x86_64-linux"),
     )
     with pytest.raises(ValueError, match="Conflicting candidate edits"):
-        pipeline.merge_prepared_candidates(arm, x86, repo=root)
+        pipeline.fold_prepared_candidates(arm, x86, repo=root)
     git(root, "reset", "--hard", "HEAD")
     hashed = _candidate_with_file(
         root,
@@ -6935,10 +6935,10 @@ def test_merge_prepared_candidates_rejects_incompatible_sources_json(
         systems=("aarch64-darwin", "x86_64-linux"),
     )
     with pytest.raises(ValueError, match="Conflicting candidate edits"):
-        pipeline.merge_prepared_candidates(arm, hashed, repo=root)
+        pipeline.fold_prepared_candidates(arm, hashed, repo=root)
 
 
-def test_merge_prepared_candidates_rejects_non_entry_json_conflicts(
+def test_fold_prepared_candidates_rejects_non_entry_json_conflicts(
     tmp_path: Path,
 ) -> None:
     """crate-sources and unparseable JSON keep the whole-file fail-closed path."""
@@ -6962,10 +6962,10 @@ def test_merge_prepared_candidates_rejects_non_entry_json_conflicts(
         systems=("aarch64-darwin", "x86_64-linux"),
     )
     with pytest.raises(ValueError, match="Conflicting candidate edits"):
-        pipeline.merge_prepared_candidates(arm, x86, repo=root)
+        pipeline.fold_prepared_candidates(arm, x86, repo=root)
 
 
-def test_merge_prepared_candidates_rejects_sources_delete_versus_edit(
+def test_fold_prepared_candidates_rejects_sources_delete_versus_edit(
     tmp_path: Path,
 ) -> None:
     """A delete on one platform and an edit on the other is still a conflict."""
@@ -7005,7 +7005,7 @@ def test_merge_prepared_candidates_rejects_sources_delete_versus_edit(
         systems=("aarch64-darwin", "x86_64-linux"),
     )
     with pytest.raises(ValueError, match="Conflicting candidate edits"):
-        pipeline.merge_prepared_candidates(deleted, x86, repo=root)
+        pipeline.fold_prepared_candidates(deleted, x86, repo=root)
 
 
 @pytest.mark.parametrize(
@@ -7161,7 +7161,7 @@ def test_validate_command_canary_uses_checkout_without_previous(
     assert report.tree == pipeline.checkout_candidate(prepared_run[0]).tree
 
 
-def test_merge_prepared_candidates_keeps_identical_shared_edits(
+def test_fold_prepared_candidates_keeps_identical_shared_edits(
     tmp_path: Path,
 ) -> None:
     """Same-content overlap is not a conflict; one-sided deletes apply."""
@@ -7182,7 +7182,7 @@ def test_merge_prepared_candidates_keeps_identical_shared_edits(
         "same\n",
         systems=("aarch64-darwin", "x86_64-linux"),
     )
-    merged = pipeline.merge_prepared_candidates(arm, x86, repo=root)
+    merged = pipeline.fold_prepared_candidates(arm, x86, repo=root)
     merged.apply(root)
     assert (root / "shared.txt").read_text(encoding="utf-8") == "same\n"
     git(root, "reset", "--hard", "HEAD")
@@ -7208,7 +7208,7 @@ def test_merge_prepared_candidates_keeps_identical_shared_edits(
         ),
     )
     git(root, "reset", "--hard", "HEAD")
-    gone = pipeline.merge_prepared_candidates(deleted, x86, repo=root)
+    gone = pipeline.fold_prepared_candidates(deleted, x86, repo=root)
     gone.apply(root)
     assert not (root / "gone.txt").exists()
     assert (root / "shared.txt").read_text(encoding="utf-8") == "same\n"
@@ -7301,7 +7301,7 @@ def test_merge_candidates_command_writes_outside_the_checkout(
     }
 
 
-def test_merge_prepared_candidates_rejects_incompatible_extensions(
+def test_fold_prepared_candidates_rejects_incompatible_extensions(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "repo"
@@ -7314,7 +7314,7 @@ def test_merge_prepared_candidates_rejects_incompatible_extensions(
     )
     x86_systems = ("aarch64-darwin", "x86_64-linux")
     with pytest.raises(ValueError, match="target selection"):
-        pipeline.merge_prepared_candidates(
+        pipeline.fold_prepared_candidates(
             arm,
             Candidate(
                 base_tree=arm.base_tree,
@@ -7329,7 +7329,7 @@ def test_merge_prepared_candidates_rejects_incompatible_extensions(
             repo=root,
         )
     with pytest.raises(ValueError, match="cannot be merged"):
-        pipeline.merge_prepared_candidates(
+        pipeline.fold_prepared_candidates(
             Candidate(
                 base_tree=arm.base_tree,
                 tree=arm.tree,
@@ -7353,7 +7353,7 @@ def test_merge_prepared_candidates_rejects_incompatible_extensions(
             repo=root,
         )
     with pytest.raises(ValueError, match="disjoint platform"):
-        pipeline.merge_prepared_candidates(
+        pipeline.fold_prepared_candidates(
             arm,
             Candidate(
                 base_tree=arm.base_tree,
@@ -7368,7 +7368,7 @@ def test_merge_prepared_candidates_rejects_incompatible_extensions(
             repo=root,
         )
     with pytest.raises(ValueError, match="Conflicting resolution"):
-        pipeline.merge_prepared_candidates(
+        pipeline.fold_prepared_candidates(
             Candidate(
                 base_tree=arm.base_tree,
                 tree=arm.tree,

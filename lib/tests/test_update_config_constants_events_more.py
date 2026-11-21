@@ -4,7 +4,6 @@ import asyncio
 
 import pytest
 
-from lib.nix.models.sources import HashCollection, SourceEntry
 from lib.tests._updater_helpers import collect_events
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.config import (
@@ -17,14 +16,11 @@ from lib.update.config import (
     resolve_config,
 )
 from lib.update.events import (
-    CommandResult,
     StatusInfo,
     StatusKind,
     StatusPayload,
     UpdateEvent,
     expect_artifact_updates,
-    expect_command_result,
-    expect_source_entry,
     gather_results,
     is_nix_build_command,
 )
@@ -176,17 +172,6 @@ def test_resolve_config_ignores_none_overrides(
 
 def test_update_event_expect_helpers_and_type_guards() -> None:
     """Validate payload conversion helpers for common event payloads."""
-    cmd = CommandResult(args=["nix"], returncode=0, stdout="", stderr="")
-    assert expect_command_result(cmd) is cmd
-    with pytest.raises(TypeError, match="Expected CommandResult payload"):
-        expect_command_result("x")
-
-    mapping = {"sha256": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}
-    source_entry = SourceEntry(hashes=HashCollection.from_value(mapping))
-    assert expect_source_entry(source_entry) is source_entry
-    with pytest.raises(TypeError, match="Expected SourceEntry payload"):
-        expect_source_entry("bad")
-
     artifact = GeneratedArtifact.text("demo.txt", "content\n")
     assert expect_artifact_updates([artifact]) == [artifact]
     with pytest.raises(TypeError, match="Expected GeneratedArtifact list payload"):

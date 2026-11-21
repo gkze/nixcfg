@@ -179,65 +179,6 @@ rec {
     else
       stripVersionPrefix ref;
 
-  # Convert a Nix value to JSONC format with trailing commas
-  toJSONC =
-    {
-      indent ? 2,
-      initialIndent ? 0,
-    }:
-    value:
-    let
-      inherit (builtins)
-        attrNames
-        concatStringsSep
-        isBool
-        isList
-        isString
-        map
-        typeOf
-        ;
-      inherit (lib) concatMapStringsSep;
-
-      mkIndent = level: concatStringsSep "" (map (_: " ") (lib.range 1 (level * indent)));
-      escapeString = builtins.toJSON;
-      toJSONCImpl =
-        level: v:
-        let
-          currentIndent = mkIndent level;
-          nextIndent = mkIndent (level + 1);
-          vType = typeOf v;
-        in
-        if vType == "null" then
-          "null"
-        else if isBool v then
-          if v then "true" else "false"
-        else if vType == "int" || vType == "float" then
-          toString v
-        else if isString v then
-          escapeString v
-        else if isList v then
-          if v == [ ] then
-            "[]"
-          else
-            "[\n${
-              concatMapStringsSep ",\n" (item: "${nextIndent}${toJSONCImpl (level + 1) item}") v
-            },\n${currentIndent}]"
-        else if vType == "set" then
-          let
-            keys = attrNames v;
-          in
-          if keys == [ ] then
-            "{}"
-          else
-            "{\n${
-              concatMapStringsSep ",\n" (
-                key: "${nextIndent}${escapeString key}: ${toJSONCImpl (level + 1) v.${key}}"
-              ) keys
-            },\n${currentIndent}}"
-        else
-          throw "toJSONC: unsupported type '${vType}'";
-    in
-    toJSONCImpl initialIndent value;
   userMetaIfExists =
     user:
     let
@@ -273,14 +214,6 @@ rec {
       linux = "src";
     }
     .${kernel system};
-  ghRaw =
-    {
-      owner,
-      repo,
-      rev,
-      path,
-    }:
-    "https://raw.githubusercontent.com/${owner}/${repo}/${rev}/${path}";
   # Shared module args for home-manager configurations
   mkHomeModuleArgs =
     { system, username }:

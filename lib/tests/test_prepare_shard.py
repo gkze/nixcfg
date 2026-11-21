@@ -501,7 +501,7 @@ def test_same_platform_partials_fold_into_the_three_system_merge(
     assert merged.validate_all_packages is True
     assert merged.prepared is True
     linux = _file_candidate(root, "linux.txt", "linux\n", systems=("aarch64-linux",))
-    folded = pipeline.merge_prepared_candidates(merged, linux, repo=root)
+    folded = pipeline.fold_prepared_candidates(merged, linux, repo=root)
     folded.apply(root)
     assert (root / "alpha.txt").read_text(encoding="utf-8") == "alpha\n"
     assert (root / "beta.txt").read_text(encoding="utf-8") == "beta\n"

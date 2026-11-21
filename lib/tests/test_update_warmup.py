@@ -22,7 +22,6 @@ from lib.update.ci.warmup import (
     DARWIN_RUST_FAMILY_PACKAGES,
     MAX_SHARD_LOCAL_BUILDS,
     RUST_WARMUP_SLOTS,
-    SETTINGS_MEMBER_CRATES,
     SHARED_MISSING_MIN_ROOTS,
     SOURCE_FETCH_DNS_HOSTS,
     SOURCE_FETCH_DNS_PROBES,
@@ -45,7 +44,6 @@ from lib.update.ci.warmup import (
     canary_crate_warmup_paths,
     cascade_canary_paths,
     cascade_path_weight,
-    classify_slot_warmup_will_be_built,
     command_store_drv,
     compiler_input_drvs,
     darwin_fod_canary_installables,
@@ -57,15 +55,13 @@ from lib.update.ci.warmup import (
     drv_input_requisites,
     dry_run_will_be_built_count,
     eval_darwin_package_graph,
-    eval_root_darwin_outputs,
+    eval_root_darwin_graph,
     export_warmup_drvs,
-    extension_host_family_warmup_outputs,
     filter_cascade_realize_drvs,
     force_local_dry_run_builds,
     foreign_input_gate,
     gitbutler_family_package_outputs,
     gitbutler_family_slot_from_package,
-    gitbutler_family_warmup_outputs,
     gkze_or_local_paths,
     import_warmup_drvs,
     intersect_missing,
@@ -80,7 +76,6 @@ from lib.update.ci.warmup import (
     is_force_local_allowed_build,
     is_gitbutler_family_store_path,
     is_linux_builder_image_command,
-    is_linux_builder_output_store_path,
     is_merman_family_store_path,
     is_named_rust_crate_store_path,
     is_rust_agent_ui_store_path,
@@ -105,11 +100,8 @@ from lib.update.ci.warmup import (
     load_warmup_plan,
     locally_fetchable_source_drvs,
     locally_valid_paths,
-    nix_store_argv_has_operation,
     parse_canary_crates,
     parse_canary_slots,
-    parse_kick_canary_crates,
-    parse_kick_canary_slots,
     partition_agent_ui_drvs,
     partition_compiler_input_drvs,
     partition_compiler_substitute_probe_drvs,
@@ -125,12 +117,10 @@ from lib.update.ci.warmup import (
     raise_if_warmup_fatal,
     realize_source_fetch_drvs,
     realize_warmup_outputs,
-    rust_compile_input_drvs,
     rust_svh_input_drvs,
     rust_warmup_layers,
     rust_warmup_output_drvs,
     rust_warmup_probe_paths,
-    rust_warmup_realize_paths,
     rust_zed_member_warmup_outputs,
     rustc_generation_ids,
     rusty_v8_family_outputs,
@@ -165,7 +155,6 @@ from lib.update.derivation_validation import (
     DerivationValidationFailure,
     RootClosureManifest,
 )
-from lib.update.paths import REPO_ROOT
 
 
 def _manifest() -> RootClosureManifest:
@@ -763,14 +752,10 @@ def test_plan_darwin_warmup_peels_gitbutler_family_even_when_cached(
     assert "38867194218" in plan.notes
 
 
-def test_rust_warmup_realize_paths_keeps_gitbutler_family() -> None:
+def test_rust_warmup_probe_paths_keeps_gitbutler_family() -> None:
     """path-info is not the realize oracle for rust_gitbutler / rust_but."""
     but = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_but-core-0.0.0"
     gpui = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_gpui-1"
-    cached = rust_warmup_realize_paths((but, gpui), present=lambda _path: True)
-    assert cached == (but,)
-    missing = rust_warmup_realize_paths((but, gpui), present=lambda _path: False)
-    assert missing == (but, gpui)
     assert rust_warmup_probe_paths((but, gpui), present=lambda _path: True) == (but,)
     assert rust_warmup_probe_paths((but, gpui), present=lambda _path: False) == ()
     assert rust_warmup_probe_paths((gpui,), present=lambda _path: True) == ()
@@ -800,7 +785,6 @@ def test_gitbutler_family_slot_from_package_stripes(tmp_path: Path) -> None:
     assert drvs[but] == f"{but}.drv"
     payload = eval_darwin_package_graph(tmp_path, "gitbutler", run=run)
     assert but in darwin_output_paths(payload)
-    assert gitbutler_family_warmup_outputs(((but,), (sqlx,))) == (but, sqlx)
     graphs = _eval_darwin_package_graphs(tmp_path, DARWIN_RUST_FAMILY_PACKAGES, run=run)
     assert "gitbutler" in graphs
 
@@ -879,41 +863,45 @@ def test_eval_root_darwin_graphs_is_serial_on_hosted_16g(
     assert set(per_root) == set(calls)
 
 
-def test_eval_root_darwin_outputs_and_substituters_fail_closed(
+def test_eval_root_darwin_graph_and_substituters_fail_closed(
     tmp_path: Path,
 ) -> None:
     def boom(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(args, 1, stdout="", stderr="no graph")
 
     with pytest.raises(WarmupError, match="no graph"):
-        eval_root_darwin_outputs(tmp_path, "darwin-argus", run=boom)
+        eval_root_darwin_graph(tmp_path, "darwin-argus", run=boom)
     with pytest.raises(WarmupError, match="nix derivation show failed"):
-        eval_root_darwin_outputs(
+        eval_root_darwin_graph(
             tmp_path,
             "darwin-argus",
             run=lambda args, **_k: subprocess.CompletedProcess(args, 1, "", ""),
         )
     with pytest.raises(WarmupError, match="not JSON"):
-        eval_root_darwin_outputs(
+        eval_root_darwin_graph(
             tmp_path,
             "darwin-argus",
             run=lambda args, **_k: subprocess.CompletedProcess(args, 0, "nope", ""),
         )
     with pytest.raises(WarmupError, match="not an object"):
-        eval_root_darwin_outputs(
+        eval_root_darwin_graph(
             tmp_path,
             "darwin-argus",
             run=lambda args, **_k: subprocess.CompletedProcess(args, 0, "[1]", ""),
         )
-    shown = eval_root_darwin_outputs(
-        tmp_path,
-        "darwin-argus",
-        run=lambda args, **_k: subprocess.CompletedProcess(
-            args,
-            0,
-            json.dumps(_graph("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared")),
-            "",
-        ),
+    shown = darwin_output_paths(
+        eval_root_darwin_graph(
+            tmp_path,
+            "darwin-argus",
+            run=lambda args, **_k: subprocess.CompletedProcess(
+                args,
+                0,
+                json.dumps(
+                    _graph("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared")
+                ),
+                "",
+            ),
+        )
     )
     assert shown == frozenset({"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared"})
     assert substitutable_paths((), present=lambda _p: True) == frozenset()
@@ -953,7 +941,7 @@ def test_plan_defaults_to_subprocess_and_cache_helpers(
         return subprocess.CompletedProcess(args, 0, json.dumps(graph), "")
 
     monkeypatch.setattr("lib.update.ci.warmup.subprocess.run", run)
-    shown = eval_root_darwin_outputs(tmp_path, "darwin-argus")
+    shown = darwin_output_paths(eval_root_darwin_graph(tmp_path, "darwin-argus"))
     assert shown == frozenset({
         "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cargo-package-sha2-0.10.9",
         "/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-cached",
@@ -1318,22 +1306,6 @@ def test_warmup_gc_root_argv_rejects_add_root_without_operation() -> None:
         "/tmp/warmup-drvs/gcroots/byzk43f67r0kgqvpwmx6cwynxg8qjf5g-patchutils-0.3.3.drv"
     )
     malformed = ["nix-store", "--add-root", str(root), "--indirect", drv]
-    assert not nix_store_argv_has_operation(())
-    assert not nix_store_argv_has_operation(malformed)
-    assert nix_store_argv_has_operation([
-        "nix-store",
-        "--realise",
-        "--add-root",
-        str(root),
-        drv,
-    ])
-    assert not nix_store_argv_has_operation([
-        "nix",
-        "build",
-        "--out-link",
-        str(root),
-        drv,
-    ])
     args = warmup_drv_root_args(root, drv)
     assert args[:3] == ["nix", "build", "--out-link"]
     assert args[3] == str(root)
@@ -1917,12 +1889,6 @@ def test_compiler_input_drvs_uses_requisites_and_keeps_src() -> None:
         )
 
     assert compiler_input_drvs((zed,), run=query_run) == (rustc, bmake, src, serde)
-    assert rust_compile_input_drvs((zed,), run=query_run) == (
-        models,
-        tree_sitter,
-        git_ui_core,
-        serde,
-    )
     assert partition_compiler_input_drvs((rustc, bmake, src, bmake)) == (
         (rustc,),
         (bmake, src),
@@ -1939,13 +1905,6 @@ def test_compiler_input_drvs_uses_requisites_and_keeps_src() -> None:
         (patchutils, patchutils_tar),
     )
     assert any("--requisites" in args for args in seen_query)
-    host_lib = (
-        "/nix/store/5crb9axiaaaaaaaaaaaaaaaaaaaaaaaaa-rust_extension_host-0.1.0-lib"
-    )
-    assert extension_host_family_warmup_outputs(((host_lib, zed), (models,))) == (
-        host_lib,
-        models,
-    )
     models_lib = (
         "/nix/store/h3crq11aaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0-lib"
     )
@@ -2011,28 +1970,6 @@ def test_parse_canary_slots_and_crates() -> None:
         parse_canary_slots("5")
     assert parse_canary_crates("extension_host, zed zed") == ("extension_host", "zed")
     assert parse_canary_crates("") == ()
-    assert parse_kick_canary_slots("# comment\n2026-10-10T15:00:00Z kick\n") == ()
-    assert parse_kick_canary_slots(
-        "# Touch this file\ncanary-slots: 3,4\n2026-10-10T16:00:00Z\n"
-    ) == (3, 4)
-    assert parse_kick_canary_slots("canary-slots: 4 4 3\n") == (4, 3)
-    with pytest.raises(WarmupError, match="0..4"):
-        parse_kick_canary_slots("canary-slots: 5\n")
-    assert parse_kick_canary_crates("# comment\ncanary-slots: 3,4\n") == ()
-    assert parse_kick_canary_crates(
-        "canary-crates: settings settings_content settings\n"
-        "canary-slots: 0\n"
-        "2026-10-10T18:40:00Z\n"
-    ) == ("settings", "settings_content")
-    assert parse_kick_canary_crates(
-        "canary-crates: settings_json, settings_macros\n"
-    ) == (
-        "settings_json",
-        "settings_macros",
-    )
-    kick = (REPO_ROOT / ".github" / "update-kick").read_text(encoding="utf-8")
-    assert parse_kick_canary_crates(kick) == SETTINGS_MEMBER_CRATES
-    assert parse_kick_canary_slots(kick) == (0,)
 
 
 def test_canary_crate_warmup_paths_reads_every_layer() -> None:
@@ -2158,17 +2095,13 @@ def test_1268_slot_others_defer_leaf_packages_with_dry_run_counts() -> None:
         vendor: 521,
         but: 1,
     }
-    safe4, deferred4 = classify_slot_warmup_will_be_built(slot4, will_be_built=counts)
-    safe3, deferred3 = classify_slot_warmup_will_be_built(slot3, will_be_built=counts)
-    safe0, deferred0 = classify_slot_warmup_will_be_built(slot0, will_be_built=counts)
-    assert safe4 == ((cargo_sha2, 1), (crane, 1))
-    assert deferred4 == ((goose, 1759),)
-    assert max(count for _path, count in safe4) <= WARMUP_FATAL_BUILD_LIMIT
-    assert deferred4[0][1] > WARMUP_FATAL_BUILD_LIMIT
-    assert safe3 == ()
-    assert deferred3 == ((but, 1), (vendor, 521))
-    assert safe0 == ((v8_native, 1),)
-    assert deferred0 == ()
+    safe4, deferred4 = partition_rust_warmup_others(slot4)
+    assert safe4 == (cargo_sha2, crane)
+    assert deferred4 == (goose,)
+    assert max(counts[path] for path in safe4) <= WARMUP_FATAL_BUILD_LIMIT
+    assert counts[deferred4[0]] > WARMUP_FATAL_BUILD_LIMIT
+    assert partition_rust_warmup_others(slot3) == ((), (but, vendor))
+    assert partition_rust_warmup_others(slot0) == ((v8_native,), ())
     assert partition_rust_warmup_others((goose, cargo_sha2, goose)) == (
         (cargo_sha2,),
         (goose,),
@@ -3700,11 +3633,6 @@ def test_linux_builder_image_command_matches_arm_validate_drv() -> None:
     assert warmup_fatal_line(fifty) is not None
     assert warmup_fatal_line(fifty, keep_going=True) is None
     raise_if_warmup_fatal(fifty, keep_going=True)
-    output = "/nix/store/wy15yizd3i7z6bmg3llr43a2pflg9yyb-nixos-disk-image"
-    assert is_linux_builder_output_store_path(output)
-    assert not is_linux_builder_output_store_path(
-        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-darwin-system-26.11.57a3171"
-    )
     assert linux_builder_substitute_miss_reason(fifty) == (
         "linux-builder image missing from binary cache"
     )

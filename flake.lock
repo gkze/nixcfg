@@ -1290,22 +1290,6 @@
         "type": "github"
       }
     },
-    "mountpoint-s3": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1777390931,
-        "narHash": "sha256-nipvfM2MsQbm3rLFnHZb7t2jVbk86SL5vnx5pdnjFe8=",
-        "owner": "awslabs",
-        "repo": "mountpoint-s3",
-        "rev": "1141b9514fdd1bc85fc25683d2b386a5c185f913",
-        "type": "github"
-      },
-      "original": {
-        "owner": "awslabs",
-        "repo": "mountpoint-s3",
-        "type": "github"
-      }
-    },
     "mux": {
       "inputs": {
         "flake-utils": "flake-utils_3",
@@ -1873,7 +1857,6 @@
         "hwatch": "hwatch",
         "lumen": "lumen",
         "macfuse": "macfuse",
-        "mountpoint-s3": "mountpoint-s3",
         "mux": "mux",
         "neovim-nightly-overlay": "neovim-nightly-overlay",
         "nh": "nh",

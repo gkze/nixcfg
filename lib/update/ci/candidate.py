@@ -827,28 +827,6 @@ def _merged_index_files(
     return merged
 
 
-def merge_prepared_candidates(
-    left: Candidate,
-    right: Candidate,
-    *,
-    repo: Path,
-) -> Candidate:
-    """Merge two same-baseline native extensions into one candidate.
-
-    Both candidates' quarantine holds are applied to both sides first, so a
-    package quarantined on either platform stays at its last-good pin.
-    Overlapping file edits with different contents then fail closed, except
-    per-package ``sources.json`` files whose only disagreements are
-    ``drvHash`` or complementary native hashes. The Superset pin hold runs
-    on this completed pair. A fold of more than two extensions merges every
-    candidate before that hold.
-    """
-    return _with_superset_hold(
-        _merge_native_extensions(left, right, repo=repo),
-        repo=repo,
-    )
-
-
 def _merge_native_extensions(
     left: Candidate,
     right: Candidate,

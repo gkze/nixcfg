@@ -578,7 +578,7 @@ def test_merge_holds_the_pin_a_reverted_platform_cannot_outrank(tmp_path: Path) 
         systems=("aarch64-darwin", "x86_64-linux"),
     )
 
-    merged = pipeline.merge_prepared_candidates(pin, other, repo=root)
+    merged = pipeline.fold_prepared_candidates(pin, other, repo=root)
 
     merged.apply(root)
     flake = (root / "flake.nix").read_text(encoding="utf-8")
@@ -768,7 +768,7 @@ def test_merge_keeps_an_updater_quarantine_instead_of_adding_another(
         systems=("aarch64-darwin", "x86_64-linux"),
     )
 
-    merged = pipeline.merge_prepared_candidates(pin, other, repo=root)
+    merged = pipeline.fold_prepared_candidates(pin, other, repo=root)
 
     superset = [entry for entry in merged.quarantines if entry.package == "superset"]
     assert len(superset) == 1
@@ -805,7 +805,7 @@ def test_merge_records_the_hold_beside_another_package_quarantine(
         systems=("aarch64-darwin", "x86_64-linux"),
     )
 
-    merged = pipeline.merge_prepared_candidates(pin, other, repo=root)
+    merged = pipeline.fold_prepared_candidates(pin, other, repo=root)
 
     assert {entry.package for entry in merged.quarantines} == {"superset", "unsloth"}
     assert any(HOLD_EXCERPT in entry.error_excerpt for entry in merged.quarantines)
@@ -835,7 +835,7 @@ def test_merge_promotes_a_materialized_superset_bump(tmp_path: Path) -> None:
         systems=("aarch64-darwin", "x86_64-linux"),
     )
 
-    merged = pipeline.merge_prepared_candidates(pin, other, repo=root)
+    merged = pipeline.fold_prepared_candidates(pin, other, repo=root)
 
     merged.apply(root)
     _assert_flake_input_url(
@@ -880,7 +880,7 @@ def test_merge_promotes_a_materialized_bump_with_the_same_workspace_graph(
         systems=("aarch64-darwin", "x86_64-linux"),
     )
 
-    merged = pipeline.merge_prepared_candidates(pin, other, repo=root)
+    merged = pipeline.fold_prepared_candidates(pin, other, repo=root)
 
     merged.apply(root)
     _assert_flake_input_url(

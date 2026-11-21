@@ -138,36 +138,6 @@ def parse_canary_crates(raw: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(part for part in raw.replace(",", " ").split() if part))
 
 
-_KICK_CANARY_SLOTS = re.compile(r"(?m)^canary-slots:\s*(.+?)\s*$")
-_KICK_CANARY_CRATES = re.compile(r"(?m)^canary-crates:\s*(.+?)\s*$")
-
-
-def parse_kick_canary_slots(text: str) -> tuple[int, ...]:
-    """Parse ``canary-slots: 3,4`` from an update-kick file.
-
-    Kick-file pushes cannot set ``workflow_dispatch`` inputs (App token
-    403). #1268 skipped canary-warm-rust for that reason; a kick line is
-    the push-path equivalent of ``inputs.canary_slots``.
-    """
-    match = _KICK_CANARY_SLOTS.search(text)
-    if not match:
-        return ()
-    return parse_canary_slots(match.group(1))
-
-
-def parse_kick_canary_crates(text: str) -> tuple[str, ...]:
-    """Parse ``canary-crates: settings settings_content`` from an update-kick file.
-
-    Push-path canary cannot set ``inputs.canary_crates``. #1269's
-    slot-only canary never reached rust_settings (2h20m, still
-    in_progress) so the settings SVH mix landed on validate slot 3.
-    """
-    match = _KICK_CANARY_CRATES.search(text)
-    if not match:
-        return ()
-    return parse_canary_crates(match.group(1))
-
-
 def canary_crate_warmup_paths(
     layers: Sequence[Sequence[str]],
     crates: Sequence[str],
@@ -225,11 +195,6 @@ _THIS_WILL_BE_BUILT = re.compile(r"this derivation will be built", re.IGNORECASE
 def is_linux_builder_image_command(command: str) -> bool:
     """Return whether this hosted command realizes the linux-builder VM."""
     return _LINUX_BUILDER_IMAGE in command
-
-
-def is_linux_builder_output_store_path(path: str) -> bool:
-    """Return whether *path* is the linux-builder / Rosetta VM image output."""
-    return _LINUX_BUILDER_IMAGE in path
 
 
 def linux_builder_substitute_miss_reason(line: str) -> str | None:
@@ -616,16 +581,6 @@ def eval_darwin_package_graph(
     )
 
 
-def eval_root_darwin_outputs(
-    flake_root: Path,
-    root_name: str,
-    *,
-    run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
-) -> frozenset[str]:
-    """Instantiate one Darwin root's drv graph and return Darwin output paths."""
-    return darwin_output_paths(eval_root_darwin_graph(flake_root, root_name, run=run))
-
-
 def _drv_basename(name: str) -> str:
     """Return the store basename of a derivation path or key."""
     return name.rsplit("/", 1)[-1]
@@ -893,44 +848,6 @@ def _auto_gc_off_args() -> tuple[str, ...]:
     ``nix build`` could not see the just-imported ``.drv`` files.
     """
     return ("--option", "min-free", "0", "--option", "max-free", "0")
-
-
-# ``nix-store --add-root`` is a modifier. Determinate Nix 3.22 on macos-15
-# prints ``error: no operation specified`` unless an operation such as
-# ``--realise`` is also present (``37879308953`` / #1256).
-_NIX_STORE_OPERATIONS = frozenset({
-    "--realise",
-    "-r",
-    "--query",
-    "-q",
-    "--add",
-    "--delete",
-    "--gc",
-    "--dump",
-    "--restore",
-    "--export",
-    "--import",
-    "--verify",
-    "--optimise",
-    "--read-log",
-    "-l",
-    "--dump-db",
-    "--load-db",
-    "--print-env",
-    "--serve",
-})
-
-
-def nix_store_argv_has_operation(args: Sequence[str]) -> bool:
-    """Return whether a ``nix-store`` argv includes a real operation.
-
-    The #1256 argv ``nix-store --add-root ROOT --indirect DRV`` does not.
-    """
-    return (
-        bool(args)
-        and args[0] == "nix-store"
-        and bool(_NIX_STORE_OPERATIONS & set(args))
-    )
 
 
 def warmup_drv_root_args(root: Path, drv: str) -> list[str]:
@@ -1488,28 +1405,6 @@ def rust_warmup_probe_paths(
         for path in dict.fromkeys(paths)
         if is_gitbutler_family_store_path(path) and present(path)
     )
-
-
-def rust_warmup_realize_paths(
-    paths: Sequence[str],
-    *,
-    present: Callable[[str], bool],
-) -> tuple[str, ...]:
-    """Skip cached rust-warmup paths except the GitButler crate family.
-
-    38867194218: ``nix path-info --store https://gkze.cachix.org`` treated
-    rust_gitbutler-* / rust_but-* / rust_sqlx-* as present (plan
-    warmupOutputs=[], rust-warmup no-op'd) while ``nix build`` of the
-    machine roots compiled those exact .drv files from source. path-info
-    is not the realize oracle for this family; ``nix build`` substitutes
-    when the NAR is real. Prefer ``rust_warmup_probe_paths`` plus
-    substitute-only before compiling the cached family.
-    """
-    missing = skip_cached_warmup_paths(paths, present=present)
-    family = tuple(
-        path for path in dict.fromkeys(paths) if is_gitbutler_family_store_path(path)
-    )
-    return tuple(dict.fromkeys((*missing, *family)))
 
 
 def substitutable_paths(
@@ -2185,13 +2080,6 @@ def language_models_warmup_outputs(layers: Sequence[Sequence[str]]) -> tuple[str
     return _warmup_outputs_matching(layers, is_rust_language_models_store_path)
 
 
-def gitbutler_family_warmup_outputs(
-    layers: Sequence[Sequence[str]],
-) -> tuple[str, ...]:
-    """Return GitButler-family rust_* from every warmup layer, first-seen."""
-    return _warmup_outputs_matching(layers, is_gitbutler_family_store_path)
-
-
 def gitbutler_family_slot_from_package(
     flake_root: Path,
     slot: int,
@@ -2209,13 +2097,6 @@ def gitbutler_family_slot_from_package(
     layers = rust_warmup_layers(outputs, (payload,))
     output_drvs = warmup_output_drvs(outputs, (payload,))
     return slot_warmup_paths(layers, slot, output_drvs=output_drvs), output_drvs
-
-
-def extension_host_family_warmup_outputs(
-    layers: Sequence[Sequence[str]],
-) -> tuple[str, ...]:
-    """Return extension_host-family outputs from every warmup layer, first-seen."""
-    return _warmup_outputs_matching(layers, is_extension_host_family_store_path)
 
 
 # Parents per ``nix-store --query`` process: about 40 KiB of argv, far below
@@ -2333,25 +2214,6 @@ def rust_zed_member_warmup_outputs(
         for path in zed_family_warmup_outputs(layers)
         if not is_rust_zed_store_path(path)
         and not is_zed_editor_nightly_store_path(path)
-    )
-
-
-def rust_compile_input_drvs(
-    parent_drvs: Sequence[str],
-    *,
-    run: _StoreRun | None = None,
-) -> tuple[str, ...]:
-    """Return every crate2nix ``rust_*`` ``.drv`` the family intern's.
-
-    #1270 canary 114295702356: ``--max-jobs 0`` substituted
-    ``rust_tree-sitter`` as a compiler input, then force-local
-    ``rust_settings_json`` E0463'd with that rlib on the rustc line
-    (nixpkgs#482646). Workspace-only family is not enough.
-    """
-    return tuple(
-        path
-        for path in drv_input_references(parent_drvs, run=run)
-        if is_crate2nix_rust_output(path)
     )
 
 
@@ -2590,23 +2452,6 @@ def partition_rust_warmup_others(
         else:
             deferred.append(drv)
     return tuple(safe), tuple(deferred)
-
-
-def classify_slot_warmup_will_be_built(
-    paths: Sequence[str],
-    *,
-    will_be_built: Mapping[str, int],
-) -> tuple[tuple[tuple[str, int], ...], tuple[tuple[str, int], ...]]:
-    """Pair slot paths with dry-run will-be-built counts, split safe/deferred.
-
-    Hosted Darwin logs are the count oracle: this Linux workspace cannot
-    ``nix build`` aarch64-darwin closures. Tests pass the #1268 counts.
-    """
-    safe, deferred = partition_rust_warmup_others(paths)
-    return (
-        tuple((path, will_be_built[path]) for path in safe),
-        tuple((path, will_be_built[path]) for path in deferred),
-    )
 
 
 def partition_compiler_input_drvs(

@@ -117,14 +117,6 @@ type UpdateEventPayload = (
 )
 
 
-def expect_command_result(payload: object) -> CommandResult:
-    """Return payload as :class:`CommandResult` or raise ``TypeError``."""
-    if isinstance(payload, CommandResult):
-        return payload
-    msg = f"Expected CommandResult payload, got {type(payload).__name__}"
-    raise TypeError(msg)
-
-
 def raise_failed_command(action: str, result: CommandResult) -> None:
     """Raise a concise ``RuntimeError`` when *result* reports failure."""
     if result.returncode == 0:
@@ -132,14 +124,6 @@ def raise_failed_command(action: str, result: CommandResult) -> None:
     detail = result.stderr.strip() or result.stdout.strip()
     message = f"{action} failed (exit {result.returncode})"
     raise RuntimeError(redact_urls(f"{message}: {detail}" if detail else message))
-
-
-def expect_source_entry(payload: object) -> SourceEntry:
-    """Return payload as :class:`SourceEntry` or raise ``TypeError``."""
-    if isinstance(payload, SourceEntry):
-        return payload
-    msg = f"Expected SourceEntry payload, got {type(payload).__name__}"
-    raise TypeError(msg)
 
 
 def expect_artifact_updates(payload: object) -> ArtifactUpdates:

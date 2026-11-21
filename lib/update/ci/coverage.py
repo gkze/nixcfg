@@ -33,13 +33,11 @@ from lib.update.derivation_validation import (
     RootClosureManifest,
     resolve_derivation_validations,
     root_closure_check_attr,
-    root_closure_installable,
 )
 from lib.update.derivation_validation import (
     composed_root_name as compose_kind_name,
 )
 from lib.update.io import atomic_write_text
-from lib.update.nix import get_current_nix_platform
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -911,16 +909,6 @@ def nixos_cache_store() -> str:
 def required_coverage_jobs() -> tuple[str, ...]:
     """Return the job names whose results coverage must receive."""
     return (*_REQUIRED_JOBS, *_RETRY_JOBS)
-
-
-def coverage_platform() -> str:
-    """Return the platform the coverage job itself is running on."""
-    return get_current_nix_platform()
-
-
-def root_installable_for(system: str, name: str | None = None) -> str:
-    """Return the flake installable coverage evaluates for one root."""
-    return root_closure_installable(system, name)
 
 
 def dump_job_results(results: Mapping[str, str]) -> str:
