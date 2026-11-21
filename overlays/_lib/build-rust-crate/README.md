@@ -41,10 +41,21 @@ the `targetAlreadyIncluded` toolchain choice and the `stdenvNoCC` fallback.
 
 `vendored-base.json` records the nixpkgs revision and the sha256 of the
 upstream `default.nix` the copy was taken from; `default.nix` reads it. When
-`builtins.hashFile` of the current upstream file differs, the overlay returns
-`prev.buildRustCrate` unchanged and emits a `lib.warn`. A stale copy can
-therefore cost evaluation time but cannot change a derivation. Treat the
-warning as the signal to re-vendor or remove this directory.
+`builtins.hashFile` of the current upstream file differs, the overlay uses
+`prev.buildRustCrate` for the crate graph and emits a `lib.warn`. A stale
+copy can therefore cost evaluation time but cannot change dependency order.
+Treat the warning as the signal to re-vendor or remove the vendored file.
+
+The overlay always wraps that builder with an output check. `postInstall`
+rejects an rlib that does not start with an archive header, a one-byte
+`lib/link` other than a newline, and a link file that is not text. Closure
+gate run 44910664125 substituted `rust_zerocopy-0.8.52-lib` and
+`rust_serde_core-1.0.228-lib` from gkze whose signed nars fail those checks:
+rustc then saw a bare `+` or `@`, and a later crate reported a missing
+dependency whose rlib was the same kind of bytes. The check changes crate
+hashes so those paths are not substituted, and a later faulted build fails
+before it can publish a replacement. `cfg-if` from that cache is a real
+archive and is unaffected except for the new hash.
 
 ## Evidence
 
@@ -58,7 +69,9 @@ warning as the signal to re-vendor or remove this directory.
   evaluation CPU, with all 3,403 Rust crate derivations byte-identical.
 - `tests/nix/build-rust-crate-unique-drvs.nix` checks that the vendored builder
   and the upstream builder produce identical drvPaths for a synthetic graph
-  with duplicated transitive dependencies and for a real codex crate.
+  with duplicated transitive dependencies and for a real codex crate. The
+  output check is outside that comparison. It must change the installed
+  builder's drvPath, including after `.override`.
 
 ## Alternatives considered
 

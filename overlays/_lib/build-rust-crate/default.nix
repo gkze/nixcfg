@@ -62,23 +62,98 @@ let
   upstreamFor = pkgs: pkgs.callPackage (upstreamDirFor pkgs) (callArgsFor pkgs);
 in
 {
+  # Refuse a crate output that is not what buildRustCrate just wrote.
+  #
+  # Run 44910664125 substituted rust_zerocopy-0.8.52-lib and
+  # rust_serde_core-1.0.228-lib from gkze. Their nars are signed and their
+  # narinfos are 200, and the bytes are not a crate: the rlib does not start
+  # with an archive header, and lib/link is the single byte "+" or "@".
+  # setup_link_paths then passes that byte to rustc twice (LINK and
+  # EXTRA_BUILD). half fails with "multiple input filenames" on "+", bitflags
+  # fails loading an argument file named "@", and reqwest reports E0463 for
+  # tower whose rlib is the same class of garbage. cfg-if from the same cache,
+  # whose rlib is a real archive and whose link file is a newline, is fine.
+  # The check fails the producing build, so a faulted store cannot publish
+  # another one. Wrapping the builder changes every crate hash, so the
+  # published paths are not substituted again.
+  addCrateOutputCheck =
+    drv:
+    drv.overrideAttrs (old: {
+      postInstall = (old.postInstall or "") + ''
+        nixcfg-verify-crate-outputs() {
+          local root rlib magic size byte
+          for root in "$out" ''${lib:+"$lib"}; do
+            if [[ -d $root/lib ]]; then
+              for rlib in "$root"/lib/*.rlib; do
+                [[ -f $rlib ]] || continue
+                # Command substitution strips the trailing newline, so the
+                # eight-byte '!<arch>\n' header compares as '!<arch>'.
+                magic=$(head -c 8 "$rlib" || true)
+                if [[ $magic != '!<arch>'* ]]; then
+                  echo "buildRustCrate: corrupt rlib $rlib" >&2
+                  exit 1
+                fi
+              done
+              if [[ -f $root/lib/link ]]; then
+                size=$(wc -c < "$root/lib/link" | tr -d '[:space:]')
+                # A crate with no linker flags installs a single newline.
+                # head/command substitution would drop that newline and reject it.
+                if [[ $size == 1 ]]; then
+                  byte=$(od -An -tu1 "$root/lib/link" | tr -d '[:space:]')
+                  if [[ $byte != 10 ]]; then
+                    echo "buildRustCrate: corrupt link file $root/lib/link" >&2
+                    exit 1
+                  fi
+                fi
+                # grep treats a NUL pattern as empty and ignores NUL in the
+                # file. Count the bytes that are neither printable nor space.
+                if [[ $(
+                  LC_ALL=C tr -d '[:print:][:space:]' < "$root/lib/link" \
+                    | wc -c \
+                    | tr -d '[:space:]'
+                ) != 0 ]]; then
+                  echo "buildRustCrate: corrupt link file $root/lib/link" >&2
+                  exit 1
+                fi
+              fi
+            fi
+          done
+        }
+        nixcfg-verify-crate-outputs
+      '';
+    });
+
+  # Keep callPackage's `.override { rustc = ...; }` formals. crate2nix and
+  # zed call that attrset override; a bare `f:` lambda drops `upstreamDir`
+  # from `lib.functionArgs` and fails the functor check.
+  withIntegrityCheck =
+    lib: inner:
+    let
+      wrappedOverride = newArgs: withIntegrityCheck lib (inner.override newArgs);
+    in
+    {
+      __functor = _self: args: addCrateOutputCheck (inner args);
+      override = lib.mirrorFunctionArgs inner.override wrappedOverride;
+    };
+
   inherit
+    addCrateOutputCheck
     baseHash
     baseNixpkgsRev
     isCurrentFor
     upstreamFor
     vendoredFor
+    withIntegrityCheck
     ;
 
-  # Fail open: a stale vendored copy must never change build semantics, so
-  # fall back to nixpkgs' own builder and say so.
+  # The uniqueDrvs copy fails open: a stale vendored file must not change
+  # crate graphs, so fall back to nixpkgs' builder. The output check stays
+  # either way. A published corrupt path is reused until its hash changes.
   overlay =
     final: prev:
     let
       vendored = vendoredFor final;
-    in
-    {
-      buildRustCrate =
+      base =
         if vendored != null then
           vendored
         else
@@ -87,5 +162,8 @@ in
             + "matches the vendored base (nixpkgs ${baseNixpkgsRev}); using the upstream "
             + "buildRustCrate. Re-vendor or drop the override (see README.md)."
           ) prev.buildRustCrate;
+    in
+    {
+      buildRustCrate = withIntegrityCheck prev.lib base;
     };
 }

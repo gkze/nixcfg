@@ -887,7 +887,14 @@ can write a path that is not UTF-8, and a strict decode drops the exit code.
 Run 44817523361's home-george slice died that way twice, on byte 0xdd, and
 recorded neither the build result nor a device fault. The same run's
 rocinante slice rejected `GoogleDrive.dmg` on both VMs with one hash, now in
-`packages/google-drive/sources.json`. Run 44888080350 recorded
+`packages/google-drive/sources.json`. Run 44910664125 then substituted
+`rust_zerocopy-0.8.52-lib` and `rust_serde_core-1.0.228-lib` from gkze.
+Both narinfos were 200 and both nars were signed, and neither rlib was an
+archive: `lib/link` was the single byte `+` or `@`, which `setup_link_paths`
+passed to rustc. `overlays/_lib/build-rust-crate` rejects that output and
+changes the crate hash so the published path is not reused. The same run's
+rocinante slice stopped on Reason 0.1.118 because the public 307 named
+`/desktop/stable/0.1.131/`; `packages/reason/sources.json` pins that object. Run 44888080350 recorded
 `device_fault=false` on home-george only. The matrix exposes one output, so
 that false skipped the fresh VM for the faulted argus and zeus slices and
 for rocinante, whose runner received a shutdown signal before it recorded
