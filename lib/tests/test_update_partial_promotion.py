@@ -1761,3 +1761,80 @@ def test_withhold_holds_both_flake_files_after_a_whole_file_revert(
         paths=("flake.lock", "flake.nix", "packages/tool-src/sources.json")
     )
     assert {Path("flake.nix"), Path("flake.lock")} <= set(workspace.restored)
+
+
+def test_withhold_holds_a_pin_inherited_from_the_pins_seed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Update 44258507999: a coupled failure restores files the pins seed bumped.
+
+    This shard's lock already matches its baseline, so the failure did not move
+    goose. Paseo failed in the electron-runtimes cluster, and goose-cli's
+    files go back to the original baseline with that pin. Codex, updated on
+    its own input, stays. The shard does not rewrite the lock; the fold does,
+    from the recorded input.
+    """
+    monkeypatch.chdir(tmp_path)
+    pin = _nodes_lock(goose="c" * 40, codex="b" * 40)
+    (tmp_path / "flake.lock").write_text(pin, encoding="utf-8")
+
+    class _Paseo(Updater):
+        aggregate_into = ("electron-runtimes",)
+
+    class _Goose(Updater):
+        input_name = "goose"
+        aggregate_into = ("electron-runtimes",)
+
+    class _Runtimes(Updater):
+        pass
+
+    class _Codex(Updater):
+        input_name = "codex"
+
+    class _Notes(Updater):
+        input_name = "goose"
+
+    outcome = _RunOutcome()
+    outcome.summary.accumulate({
+        "paseo": "error",
+        "goose-cli": "updated",
+        "electron-runtimes": "updated",
+        "codex-cli": "updated",
+        "goose-notes": "no_change",
+    })
+    outcome.written_paths = (
+        _source_path("goose-cli"),
+        _source_path("codex-cli"),
+        _source_path("paseo"),
+    )
+    _withhold_for_hold(
+        monkeypatch,
+        _HoldWorkspace(pin.encode()),
+        make_run_plan(
+            source_names=(
+                "paseo",
+                "goose-cli",
+                "electron-runtimes",
+                "codex-cli",
+                "goose-notes",
+            )
+        ),
+        outcome,
+        {
+            "paseo": _Paseo,
+            "goose-cli": _Goose,
+            "electron-runtimes": _Runtimes,
+            "codex-cli": _Codex,
+            "goose-notes": _Notes,
+        },
+    )
+
+    assert outcome.quarantine_hold.inputs == ("goose",)
+    assert "packages/goose-cli/sources.json" in outcome.quarantine_hold.paths
+    assert "packages/goose-notes/sources.json" in outcome.quarantine_hold.paths
+    assert "packages/codex-cli/sources.json" not in outcome.quarantine_hold.paths
+    assert "flake.lock" not in outcome.quarantine_hold.paths
+    assert (tmp_path / "flake.lock").read_text(encoding="utf-8") == pin
+    assert "codex-cli" not in outcome.dropped
+    assert "goose-cli" in outcome.dropped

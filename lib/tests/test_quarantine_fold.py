@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from lib.tests._update_workspace_helpers import init_update_workspace_repo
-from lib.update.candidate import Candidate, git
+from lib.update.candidate import Candidate, ResolvedVersion, git
 from lib.update.ci import candidate as pipeline
 from lib.update.flake_inputs import input_declaration_text
 from lib.update.prepare_shard import PrepareShardCoverage, partition_prepare_targets
@@ -724,6 +724,150 @@ def test_held_declarations_leave_a_flake_they_cannot_splice() -> None:
         held, {"flake.nix": _blob("{ inputs = { }; }\n")}, ("github-desktop",)
     )
     assert held["flake.nix"] == bare
+
+
+def test_fold_rewinds_a_pin_whose_source_entry_stayed_on_the_baseline(
+    tmp_path: Path,
+) -> None:
+    """Updates 44258507999 and 44694691236: goose's pin moved and its files did not.
+
+    44694691236 evaluated ``fb55b5a6`` / ``v1.60.2`` against sources.json
+    ``2bcb8583`` / ``v1.55.0``. The withhold restored the source files and the
+    crate artifacts, and the hold did not name the goose input. The rewind
+    puts that pin back after the fold and does not quarantine the package.
+    Codex, whose source files are not part of the goose entry, stays on the
+    candidate pin.
+    """
+    root = tmp_path / "repo"
+    baseline_rev = "2bcb8583a18a0623eb78c9ed845d597ed99fae48"
+    pinned_rev = "fb55b5a6d7f5b5df96c8f817f1cde6a81880d9f1"
+    sources = json.dumps({
+        "commit": baseline_rev,
+        "hashes": [],
+        "version": "1.55.0",
+    })
+    artifacts = {
+        "overlays/goose-cli/Cargo.nix": "{ }\n",
+        "overlays/goose-cli/crate-hashes.json": "{}\n",
+        "overlays/goose-cli/crate-sources.json": "{}\n",
+    }
+    baseline_nix = _input_flake(desktop="v1.55.0", codex="v1").replace(
+        "github-desktop", "goose"
+    )
+    pinned_nix = _input_flake(desktop="v1.60.2", codex="v2").replace(
+        "github-desktop", "goose"
+    )
+    init_update_workspace_repo(
+        root,
+        tracked_files={
+            "flake.nix": baseline_nix,
+            "flake.lock": _lock(goose=baseline_rev, codex="b" * 40),
+            "overlays/goose-cli/sources.json": sources + "\n",
+            **artifacts,
+        },
+    )
+    merged = pipeline.fold_prepared_candidates(
+        _candidate(
+            root,
+            {
+                "flake.nix": pinned_nix,
+                "flake.lock": _lock(goose=pinned_rev, codex="e" * 40),
+            },
+            systems=_X86,
+        ),
+        repo=root,
+    )
+
+    merged.apply(root)
+    flake = (root / "flake.nix").read_text(encoding="utf-8")
+    assert input_declaration_text(flake, "goose") == input_declaration_text(
+        baseline_nix, "goose"
+    )
+    assert input_declaration_text(flake, "codex") == input_declaration_text(
+        pinned_nix, "codex"
+    )
+    assert _locked_revs(root)["goose"] == baseline_rev
+    assert _locked_revs(root)["codex"] == "e" * 40
+    for relative, content in artifacts.items():
+        assert (root / relative).read_text(encoding="utf-8") == content
+    assert merged.quarantines == ()
+    assert (root / "overlays/goose-cli/sources.json").read_text(
+        encoding="utf-8"
+    ) == sources + "\n"
+
+
+def test_fold_restores_a_consumer_ahead_of_the_electron_inventory(
+    tmp_path: Path,
+) -> None:
+    """Update 44479330250: the inventory went back and Superset's Electron did not.
+
+    The fold restores Superset's source entry and its flake input. It does
+    not quarantine Superset. Codex, which does not name that runtime, stays.
+    """
+    root = tmp_path / "repo"
+    inventory = json.dumps({"schemaVersion": 1, "versions": ["41.10.3"]}) + "\n"
+    baseline_sources = json.dumps({
+        "commit": "a" * 40,
+        "electronVersion": "41.10.3",
+        "hashes": [],
+        "version": "1.30.2",
+    })
+    pinned_sources = json.dumps({
+        "commit": "d" * 40,
+        "electronVersion": "44.10.0",
+        "hashes": [],
+        "version": "2.0.10",
+    })
+    baseline_nix = _input_flake(desktop="v1.30.2", codex="v1").replace(
+        "github-desktop", "superset"
+    )
+    pinned_nix = _input_flake(desktop="v2.0.10", codex="v2").replace(
+        "github-desktop", "superset"
+    )
+    init_update_workspace_repo(
+        root,
+        tracked_files={
+            "flake.nix": baseline_nix,
+            "flake.lock": _lock(superset="a" * 40, codex="b" * 40),
+            "packages/superset/sources.json": baseline_sources + "\n",
+            "packages/electron-runtimes/versions.json": inventory,
+        },
+    )
+    candidate = _candidate(
+        root,
+        {
+            "flake.nix": pinned_nix,
+            "flake.lock": _lock(superset="d" * 40, codex="e" * 40),
+            "packages/superset/sources.json": pinned_sources + "\n",
+        },
+        systems=_X86,
+    ).model_copy(
+        update={
+            "resolutions": {
+                "superset": ResolvedVersion(version="2.0.10"),
+                "codex": ResolvedVersion(version="2"),
+            }
+        }
+    )
+
+    merged = pipeline.fold_prepared_candidates(candidate, repo=root)
+
+    merged.apply(root)
+    flake = (root / "flake.nix").read_text(encoding="utf-8")
+    assert input_declaration_text(flake, "superset") == input_declaration_text(
+        baseline_nix, "superset"
+    )
+    assert input_declaration_text(flake, "codex") == input_declaration_text(
+        pinned_nix, "codex"
+    )
+    assert _locked_revs(root)["superset"] == "a" * 40
+    assert _locked_revs(root)["codex"] == "e" * 40
+    assert (
+        root / "packages/superset/sources.json"
+    ).read_text() == baseline_sources + "\n"
+    assert merged.quarantines == ()
+    assert "superset" not in merged.resolutions
+    assert merged.resolutions["codex"].version == "2"
 
 
 def test_candidate_without_a_recorded_hold_still_loads(tmp_path: Path) -> None:

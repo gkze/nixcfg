@@ -154,6 +154,10 @@ class _Runner:
         """Realize *installables* and return their output store paths."""
         raise NotImplementedError
 
+    def settle(self, paths: tuple[str, ...]) -> None:
+        """Keep *paths* and drop the build directory before the next one."""
+        raise NotImplementedError
+
     def push(self, paths: tuple[str, ...]) -> None:
         """Upload *paths* to gkze or raise when the upload does not finish."""
         raise NotImplementedError
@@ -354,6 +358,8 @@ def build_args(installables: tuple[str, ...]) -> list[str]:
         "--no-link",
         "--keep-going",
         "--fallback",
+        "--max-jobs",
+        "1",
         "--print-out-paths",
         *normalized,
     ]
@@ -567,13 +573,119 @@ def _inventory_from_changed(
     return {"packages": packages, "roots": roots}
 
 
+def retain_store_paths(
+    paths: tuple[str, ...],
+    root_dir: Path,
+    run: Callable[[list[str]], object],
+) -> None:
+    """Register *paths* as GC roots so the next ``nix store gc`` keeps them."""
+    root_dir.mkdir(parents=True, exist_ok=True)
+    for path in paths:
+        link = root_dir / Path(path).name
+        run(["nix-store", "--realise", "--add-root", str(link), path])
+
+
+_STORE_BUILD_DIR = Path("/nix/var/nix/builds")
+
+
+def clear_nix_build_directories(root: Path) -> int:
+    """Delete leftover ``nix-*`` build directories under *root*.
+
+    Nix's deleter uses ``std::filesystem::remove``. On APFS that reports
+    ``Illegal byte sequence`` and then ``Directory not empty``, and a second
+    build deleting at the same time becomes an ``IOStorageFamily`` storm
+    (44158690416). This walk unlinks the names ``os.scandir`` returns before
+    the next installable starts. The directory stays the Nix store build
+    directory: Determinate Nix rejects ``/private/tmp`` as world-writable
+    (44569736549).
+    """
+    if not root.is_dir():
+        return 0
+    removed = 0
+    for child in list(root.iterdir()):
+        if not child.name.startswith("nix-"):
+            continue
+        _delete_build_tree(child)
+        removed += 1
+    return removed
+
+
+def _delete_build_tree(path: Path) -> None:
+    if path.is_symlink() or not path.is_dir():
+        path.unlink(missing_ok=True)
+        return
+    for _attempt in (1, 2):
+        if not path.exists():
+            return
+        for dirpath, dirnames, filenames in os.walk(
+            path, topdown=False, followlinks=False
+        ):
+            directory = Path(dirpath)
+            for name in filenames:
+                _unlink_build_entry(directory / name)
+            for name in dirnames:
+                child = directory / name
+                if child.is_symlink():
+                    _unlink_build_entry(child)
+                else:
+                    _rmdir_build_entry(child)
+        try:
+            path.rmdir()
+        except FileNotFoundError:
+            return
+        except OSError:
+            continue
+        return
+    sys.stdout.write(f"closure-gate left build directory {path}\n")
+    sys.stdout.flush()
+
+
+def _unlink_build_entry(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as error:
+        sys.stdout.write(f"closure-gate could not unlink {path}: {error}\n")
+
+
+def _rmdir_build_entry(path: Path) -> None:
+    try:
+        path.rmdir()
+    except OSError:
+        return
+
+
+def select_slice(
+    changed: Sequence[ChangedOutput], slice_name: str
+) -> tuple[ChangedOutput, ...]:
+    """Return the plan entries one Darwin VM realizes.
+
+    An empty slice is the whole plan, which is what Linux still builds.
+    ``packages`` is every changed package output. A ``root-closure-*`` name
+    is that one root, or nothing when the root's drv did not change. One
+    hosted macOS job cannot keep every changed Darwin root, and a runner
+    that dies before the final push leaves the finished outputs unpublished.
+    """
+    if slice_name == "":
+        return tuple(changed)
+    if slice_name == "packages":
+        return tuple(item for item in changed if item.kind == "package")
+    if slice_name.startswith("root-closure-"):
+        return tuple(
+            item for item in changed if item.kind == "root" and item.name == slice_name
+        )
+    msg = f"unknown closure-gate slice: {slice_name}"
+    raise GateError(msg)
+
+
 def realize_changed(changed: Sequence[ChangedOutput], runner: _Runner) -> RealizeResult:
     """Build the selected installables and push paths gkze does not have.
 
     ``nix build --print-out-paths`` is the receipt. Derivation show of a
     Darwin system names a different output than that build realizes, so it
     cannot choose the push set. A path already on gkze is substituted and
-    is not pushed again. A push that does not finish raises.
+    is not pushed again. Each installable is pushed before the next build,
+    so a later runner loss keeps the outputs that already finished. A push
+    that does not finish raises.
     """
     for item in changed:
         instantiated = runner.instantiate(item.attr)
@@ -583,27 +695,36 @@ def realize_changed(changed: Sequence[ChangedOutput], runner: _Runner) -> Realiz
                 f"plan_drv={item.drv} build_drv={instantiated}\n"
             )
             sys.stdout.flush()
-    built = runner.build(tuple(item.installable() for item in changed))
-    if len(built) < len(changed):
-        msg = f"nix build returned {len(built)} paths for {len(changed)} installables"
-        raise GateError(msg)
+    pushed: list[str] = []
     cached: list[str] = []
-    to_push: list[str] = []
     seen: set[str] = set()
-    for path in built:
-        if path in seen:
-            continue
-        seen.add(path)
-        if runner.presence(path) == "present":
-            cached.append(path)
-        else:
-            to_push.append(path)
-    pushed = tuple(to_push)
-    if pushed:
-        runner.push(pushed)
+    for item in changed:
+        # 44713152415 built every Darwin output in one nix invocation.
+        # The first runner disappeared, and the retry was SIGTERM'd.
+        # 44158690416 faulted disk2s7 while two vendor trees were unlinked
+        # together. One installable, then its build directory, at a time.
+        # 44744612180 and 44776913311 lost both the first VM and the retry
+        # before the single push, so none of the finished outputs reached gkze.
+        realized = runner.build((item.installable(),))
+        if not realized:
+            msg = f"nix build returned 0 paths for {item.installable()}"
+            raise GateError(msg)
+        runner.settle(realized)
+        to_push: list[str] = []
+        for path in realized:
+            if path in seen:
+                continue
+            seen.add(path)
+            if runner.presence(path) == "present":
+                cached.append(path)
+            else:
+                to_push.append(path)
+        if to_push:
+            runner.push(tuple(to_push))
+            pushed.extend(to_push)
     return RealizeResult(
-        pushed=pushed,
-        cached=tuple(sorted(cached)),
+        pushed=tuple(pushed),
+        cached=tuple(cached),
         installables=tuple(item.installable() for item in changed),
     )
 
@@ -647,6 +768,44 @@ def gate_problems(
             continue
         problems.extend(_result_problems(system, count, result))
     return tuple(problems)
+
+
+def combine_realize_payloads(
+    system: str, parts: Sequence[Mapping[str, object]]
+) -> dict[str, object]:
+    """Join one result per Darwin slice into the aggregate's single result.
+
+    Slices partition the plan. An unchanged root contributes no result file.
+    """
+    pushed: list[str] = []
+    cached: list[str] = []
+    installables: list[str] = []
+    for part in parts:
+        if part.get("system") != system or part.get("ok") is not True:
+            msg = f"{system} slice result is not an ok result for that system"
+            raise GateError(msg)
+        for key, sink in (
+            ("pushed", pushed),
+            ("cached", cached),
+            ("installables", installables),
+        ):
+            values = part.get(key)
+            if not isinstance(values, list) or not all(
+                isinstance(value, str) for value in values
+            ):
+                msg = f"{system} slice result {key} is not a list of strings"
+                raise GateError(msg)
+            sink.extend(values)
+    if len(installables) != len(set(installables)):
+        msg = f"{system} slice results repeat an installable"
+        raise GateError(msg)
+    return {
+        "system": system,
+        "ok": True,
+        "pushed": pushed,
+        "cached": cached,
+        "installables": installables,
+    }
 
 
 def _result_problems(
@@ -765,6 +924,36 @@ def _git(repo: Path, *args: str) -> str:
     return result.stdout
 
 
+def _retain_process_failure(detail: str) -> None:
+    """Keep a nix failure in the artifact uploaded before the action post.
+
+    44388423654's Darwin retry lost its job log: the realize step had already
+    failed, then the action post hung until the job was cancelled. The
+    artifact upload happens before that post.
+    """
+    temp = os.environ.get("RUNNER_TEMP", "").strip()
+    if not temp:
+        return
+    directory = Path(temp) / "update-artifacts"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "realize-error.txt").write_text(detail, encoding="utf-8")
+
+
+def _process_text(value: bytes | str | None) -> str:
+    """Decode process output without dropping a non-UTF-8 byte.
+
+    Nix on Darwin can write a path that is not valid UTF-8. The hosted
+    Python then raises UnicodeDecodeError inside ``subprocess.run`` and the
+    gate never records the build result. Run 44817523361's home-george slice
+    died that way twice, on byte 0xdd.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "replace")
+    return value
+
+
 def _run(args: list[str], *, timeout: float, cwd: Path | None = None) -> str:
     try:
         result = subprocess.run(  # noqa: S603 -- nix or cachix argv, never a shell
@@ -772,18 +961,24 @@ def _run(args: list[str], *, timeout: float, cwd: Path | None = None) -> str:
             cwd=cwd,
             check=False,
             capture_output=True,
-            text=True,
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as error:
+        text = _process_text(error.stderr) or _process_text(error.stdout)
+        tail = "\n".join(text.splitlines()[-20:])
         msg = f"{args[0]} timed out after {timeout:.0f}s"
+        if tail:
+            msg = f"{msg}: {tail}"
+        _retain_process_failure(msg)
         raise GateError(msg) from error
+    stdout = _process_text(result.stdout)
     if result.returncode != 0:
-        detail = (result.stderr or result.stdout).strip()
+        detail = (_process_text(result.stderr) or stdout).strip()
         tail = "\n".join(detail.splitlines()[-20:])
         msg = f"{' '.join(args[:4])} failed: {tail}"
+        _retain_process_failure(msg)
         raise GateError(msg)
-    return result.stdout
+    return stdout
 
 
 def _eval_inventory(inventory: Path, flake_path: Path, system: str) -> object:
@@ -851,6 +1046,21 @@ class _ProcessRunner(_Runner):
             if _STORE_PATH_RE.fullmatch(line.strip())
         )
         return tuple(_store_path(path, derivation=False) for path in paths)
+
+    def settle(self, paths: tuple[str, ...]) -> None:
+        temp = os.environ.get("RUNNER_TEMP")
+        if not temp:
+            msg = "RUNNER_TEMP is unset"
+            raise GateError(msg)
+        retain_store_paths(
+            paths,
+            Path(temp) / "closure-gate-gcroots",
+            lambda args: _run(args, timeout=_INSTANTIATE_TIMEOUT_SECONDS),
+        )
+        removed = clear_nix_build_directories(_STORE_BUILD_DIR)
+        sys.stdout.write(f"closure-gate cleared {removed} leftover build directories\n")
+        sys.stdout.flush()
+        _load_jobs().reclaim_hosted_store()
 
     def push(self, paths: tuple[str, ...]) -> None:
         for start in range(0, len(paths), _PUSH_CHUNK):
@@ -985,9 +1195,15 @@ def _command_realize() -> None:
     if not plan.changed:
         msg = f"{system} has an empty plan; the realize job should have been skipped"
         raise GateError(msg)
-    if any(item.kind == "root" for item in plan.changed):
-        _load_jobs().reclaim_hosted_store()
-    result = realize_changed(plan.changed, _ProcessRunner())
+    selected = select_slice(
+        plan.changed, os.environ.get("NIXCFG_CLOSURE_GATE_SLICE", "")
+    )
+    if not selected:
+        result = RealizeResult(pushed=(), cached=(), installables=())
+    else:
+        if any(item.kind == "root" for item in selected):
+            _load_jobs().reclaim_hosted_store()
+        result = realize_changed(selected, _ProcessRunner())
     _remember(result.pushed)
     artifact = Path(os.environ["RUNNER_TEMP"]) / "update-artifacts"
     artifact.mkdir(parents=True, exist_ok=True)
@@ -1015,6 +1231,32 @@ def _load_result(path: Path) -> dict[str, object] | None:
     return payload
 
 
+def _fault_artifact(path: Path) -> bool:
+    return "device-fault" in path.parent.name or "runner-fault" in path.parent.name
+
+
+def load_system_result(results_root: Path, system: str) -> dict[str, object] | None:
+    """Read one system's result, joining Darwin slice artifacts when present."""
+    direct = _load_result(results_root / system / "closure-gate-result.json")
+    if direct is not None:
+        return direct
+    parts: list[dict[str, object]] = []
+    system_root = results_root / system
+    if not system_root.is_dir():
+        return None
+    for path in sorted(system_root.glob("*/closure-gate-result.json")):
+        if _fault_artifact(path):
+            continue
+        payload = _load_result(path)
+        if payload is not None:
+            parts.append(payload)
+    if not parts:
+        return None
+    if len(parts) == 1:
+        return parts[0]
+    return combine_realize_payloads(system, parts)
+
+
 def _command_aggregate() -> None:
     policy = Path("lib/system-policy.json").read_text(encoding="utf-8")
     required = required_systems(policy)
@@ -1036,7 +1278,7 @@ def _command_aggregate() -> None:
     results: dict[str, Mapping[str, object]] = {}
     loaded: list[RealizeResult] = []
     for system in required:
-        payload = _load_result(results_root / system / "closure-gate-result.json")
+        payload = load_system_result(results_root, system)
         if payload is None:
             continue
         results[system] = payload

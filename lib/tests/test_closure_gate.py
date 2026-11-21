@@ -65,8 +65,12 @@ class _Runner:
         self.present: set[str] = set()
         self.presence_value = "absent"
         self.built: tuple[str, ...] | None = None
+        self.builds: list[tuple[str, ...]] = []
+        self.settled: list[tuple[str, ...]] = []
         self.build_result: tuple[str, ...] = ()
+        self.build_results: list[tuple[str, ...]] | None = None
         self.pushed: tuple[str, ...] | None = None
+        self.pushes: list[tuple[str, ...]] = []
         self.push_error: Exception | None = None
 
     def instantiate(self, attr: str) -> str:
@@ -82,11 +86,18 @@ class _Runner:
 
     def build(self, installables: tuple[str, ...]) -> tuple[str, ...]:
         self.built = installables
+        self.builds.append(installables)
+        if self.build_results is not None:
+            return self.build_results.pop(0)
         return self.build_result
+
+    def settle(self, paths: tuple[str, ...]) -> None:
+        self.settled.append(paths)
 
     def push(self, paths: tuple[str, ...]) -> None:
         if self.push_error is not None:
             raise self.push_error
+        self.pushes.append(paths)
         self.pushed = paths
 
 
@@ -239,7 +250,13 @@ def test_build_args_match_validation_plus_the_output_receipt() -> None:
     )
     expected = _batch_validation_args(requests, flake_root=None)
     first = expected.index("path:.#packages.aarch64-darwin.tool")
-    expected = [*expected[:first], "--print-out-paths", *expected[first:]]
+    expected = [
+        *expected[:first],
+        "--max-jobs",
+        "1",
+        "--print-out-paths",
+        *expected[first:],
+    ]
     assert gate.build_args(installables) == expected
     with pytest.raises(gate.GateError, match="at least one"):
         gate.build_args(())
@@ -335,6 +352,147 @@ def test_narinfo_queries_gkze_by_digest() -> None:
         raise OSError("timed out")
 
     assert gate.gkze_presence(path, broken, lambda _seconds: None) == "unknown"
+
+
+def test_realize_builds_one_installable_and_settles_before_the_next() -> None:
+    """44713152415 died inside one combined Darwin build.
+
+    Each output is realized and settled before the next starts, so two
+    vendor-tree teardowns are not on the store volume together.
+    """
+    first = _changed("package", "comet", _drv("comet"))
+    second = _changed("root", "root-closure-darwin-argus", _drv("argus"))
+    runner = _Runner()
+    runner.drvs[first.attr] = first.drv
+    runner.drvs[second.attr] = second.drv
+    runner.build_result = (_out("built"),)
+    gate.realize_changed((first, second), runner)
+    assert runner.builds == [(first.installable(),), (second.installable(),)]
+    assert runner.settled == [(_out("built"),), (_out("built"),)]
+
+
+def test_realize_pushes_one_installable_before_building_the_next() -> None:
+    """44744612180 lost the VM before the single end-of-job push.
+
+    A finished output has to be on gkze before the next build starts, or
+    the retry rebuilds everything the dead runner already produced.
+    """
+    first = _changed("package", "comet", _drv("comet"))
+    second = _changed("package", "spotify", _drv("spotify"))
+    runner = _Runner()
+    runner.drvs[first.attr] = first.drv
+    runner.drvs[second.attr] = second.drv
+    runner.build_results = [(_out("comet"),), (_out("spotify"),)]
+    result = gate.realize_changed((first, second), runner)
+    assert runner.pushes == [(_out("comet"),), (_out("spotify"),)]
+    assert runner.builds == [(first.installable(),), (second.installable(),)]
+    assert result.pushed == (_out("comet"), _out("spotify"))
+    assert result.installables == (first.installable(), second.installable())
+
+
+def test_select_slice_keeps_linux_whole_and_splits_darwin() -> None:
+    """A Darwin VM realizes packages, or one root, not the whole plan."""
+    packages = _changed("package", "comet", _drv("comet"))
+    argus = _changed("root", "root-closure-darwin-argus", _drv("argus"))
+    zeus = _changed("root", "root-closure-darwin-zeus", _drv("zeus"))
+    changed = (packages, argus, zeus)
+    assert gate.select_slice(changed, "") == changed
+    assert gate.select_slice(changed, "packages") == (packages,)
+    assert gate.select_slice(changed, "root-closure-darwin-argus") == (argus,)
+    assert gate.select_slice(changed, "root-closure-darwin-rocinante") == ()
+    with pytest.raises(gate.GateError, match="unknown closure-gate slice"):
+        gate.select_slice(changed, "all")
+
+
+def test_unchanged_slice_records_an_empty_success(tmp_path: Path, monkeypatch) -> None:
+    """A root whose drv did not change does not build and does not fail."""
+    plan = gate.Plan(
+        system="aarch64-darwin",
+        merge_base="a" * 40,
+        head="b" * 40,
+        eval_seconds=1.0,
+        changed=(_changed("package", "comet", _drv("comet")),),
+    )
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(plan.to_json(), encoding="utf-8")
+    monkeypatch.setenv("NIXCFG_CLOSURE_GATE_PLAN", str(plan_path))
+    monkeypatch.setenv("NIXCFG_CLOSURE_GATE_COMMAND", "realize")
+    monkeypatch.setenv("NIXCFG_CLOSURE_GATE_SLICE", "root-closure-darwin-zeus")
+    monkeypatch.setenv("SYSTEM", "aarch64-darwin")
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    gate.main()
+    result = json.loads(
+        (tmp_path / "update-artifacts" / "closure-gate-result.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert result["ok"] is True
+    assert result["installables"] == []
+
+
+def test_aggregate_joins_darwin_slice_results(tmp_path: Path) -> None:
+    """The gate's one result is the union of the slice artifacts."""
+    system = tmp_path / "aarch64-darwin"
+    for name, installable in (
+        (
+            "closure-gate-aarch64-darwin-gate-packages",
+            ".#packages.aarch64-darwin.comet",
+        ),
+        (
+            "closure-gate-aarch64-darwin-gate-root-closure-darwin-argus",
+            ".#checks.aarch64-darwin.root-closure-darwin-argus",
+        ),
+    ):
+        directory = system / name
+        directory.mkdir(parents=True)
+        (directory / "closure-gate-result.json").write_text(
+            json.dumps({
+                "system": "aarch64-darwin",
+                "ok": True,
+                "pushed": [],
+                "cached": [_out(name)],
+                "installables": [installable],
+            }),
+            encoding="utf-8",
+        )
+    fault = system / "closure-gate-aarch64-darwin-gate-packages-device-fault"
+    fault.mkdir()
+    (fault / "closure-gate-result.json").write_text(
+        json.dumps({
+            "system": "aarch64-darwin",
+            "ok": True,
+            "pushed": [_out("fault")],
+            "cached": [],
+            "installables": [".#packages.aarch64-darwin.comet"],
+        }),
+        encoding="utf-8",
+    )
+    loaded = gate.load_system_result(tmp_path, "aarch64-darwin")
+    assert loaded is not None
+    assert loaded["installables"] == [
+        ".#packages.aarch64-darwin.comet",
+        ".#checks.aarch64-darwin.root-closure-darwin-argus",
+    ]
+    assert _out("fault") not in loaded["pushed"]
+
+
+def test_clear_nix_build_directories_removes_only_nix_trees(tmp_path: Path) -> None:
+    """Leftover build directories are removed before the next installable."""
+    assert gate.clear_nix_build_directories(tmp_path / "missing") == 0
+    root = tmp_path / "builds"
+    root.mkdir()
+    tree = root / "nix-1"
+    tree.mkdir()
+    (tree / "file").write_text("x", encoding="utf-8")
+    link = root / "nix-link"
+    link.symlink_to(tree)
+    (root / "keep").mkdir()
+    assert gate.clear_nix_build_directories(root) == 2
+    assert not tree.exists()
+    assert not link.exists()
+    assert (root / "keep").is_dir()
 
 
 def test_realize_skips_outputs_already_on_gkze() -> None:
@@ -762,8 +920,10 @@ def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -
     """44005867871: a faulted Nix Store read is not a closure result.
 
     substituteInPlace reported null bytes after disk2s7 I/O errors. The first
-    job must not satisfy the gate. The fresh VM's result does, and only when
-    the first job recorded device_fault.
+    job must not satisfy the gate. The fresh VM's result does when the first
+    job recorded device_fault, and when the realize died before it could
+    record one (44498744364 attempt 2). A finished realize that recorded
+    device_fault=false is a build failure and does not rerun.
     """
     jobs = _workflow("pr-closure-gate.yml")["jobs"]
     first = jobs["realize-aarch64-darwin"]
@@ -773,12 +933,27 @@ def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -
         "always() && !cancelled() && "
         "github.event.pull_request.head.repo.full_name == github.repository && "
         "needs.route.result == 'success' && "
-        "needs.realize-aarch64-darwin.outputs.device_fault == 'true'"
+        "needs.realize-aarch64-darwin.result == 'failure' && "
+        "needs.realize-aarch64-darwin.outputs.device_fault != 'false'"
     )
     assert retry["concurrency"] == first["concurrency"]
+    assert retry["strategy"] == first["strategy"]
     assert retry["uses"] == first["uses"]
     assert retry["secrets"] == first["secrets"]
     assert retry["with"] == {**first["with"], "device_fault_retry": "true"}
+    darwin_roots = sorted(path.stem for path in (ROOT / "darwin").glob("*.nix"))
+    home_roots = sorted(
+        path.name
+        for path in (ROOT / "home").iterdir()
+        if (path / "default.nix").is_file()
+    )
+    assert first["strategy"]["matrix"]["slice"] == [
+        "packages",
+        *[f"root-closure-darwin-{name}" for name in darwin_roots],
+        *[f"root-closure-home-{name}" for name in home_roots],
+    ]
+    assert first["with"]["closure_gate_slice"] == "${{ matrix.slice }}"
+    assert first["with"]["shard"] == "${{ matrix.slice }}"
     assert "realize-aarch64-darwin-retry" in jobs["closure-gate"]["needs"]
     aggregate = next(
         step
@@ -787,10 +962,20 @@ def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -
     )
     realized = " ".join(aggregate["env"]["REALIZE_RESULTS"].split())
     assert (
-        "needs.realize-aarch64-darwin.outputs.device_fault == 'true' && "
+        "needs.realize-aarch64-darwin.result == 'failure' && "
+        "needs.realize-aarch64-darwin.outputs.device_fault != 'false' && "
         "needs.realize-aarch64-darwin-retry.result || "
         "needs.realize-aarch64-darwin.result"
     ) in realized
+    download = next(
+        step
+        for step in jobs["closure-gate"]["steps"]
+        if step.get("with", {}).get("pattern") == "closure-gate-aarch64-darwin-gate-*"
+    )
+    assert " ".join(download["if"].split()) == (
+        "needs.realize-aarch64-darwin.result == 'success' || "
+        "needs.realize-aarch64-darwin-retry.result == 'success'"
+    )
 
 
 def test_realize_reuses_the_update_native_runner() -> None:
@@ -809,6 +994,7 @@ def test_realize_reuses_the_update_native_runner() -> None:
     assert candidate["if"] == "inputs.stage != 'closure-gate'"
     assert flush["if"] == "always()"
     assert realize["env"]["NIXCFG_CLOSURE_GATE_COMMAND"] == "realize"
+    assert "inputs.closure_gate_slice" in realize["env"]["NIXCFG_CLOSURE_GATE_SLICE"]
     update = _workflow("update.yml")
     budgets = [
         job["with"]["closure_budget_seconds"]
@@ -818,3 +1004,53 @@ def test_realize_reuses_the_update_native_runner() -> None:
     assert budgets
     assert set(budgets) == {"18000"}
     assert gate.BUILD_BUDGET_SECONDS == 18000
+
+
+def test_realize_failure_is_kept_for_the_uploaded_artifact(
+    tmp_path, monkeypatch
+) -> None:
+    """A wedged action post can drop the job log after realize already failed."""
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setattr(gate, "_executable", lambda name: name)
+
+    def time_out(args, **_kwargs):
+        raise subprocess.TimeoutExpired(args, 18000, stderr="error: signal 10\n")
+
+    monkeypatch.setattr(gate.subprocess, "run", time_out)
+    with pytest.raises(gate.GateError, match="signal 10"):
+        gate._run(["nix", "build"], timeout=18000)
+    assert (
+        "signal 10" in (tmp_path / "update-artifacts" / "realize-error.txt").read_text()
+    )
+
+    def fail(args, **_kwargs):
+        return subprocess.CompletedProcess(
+            args, 1, stdout="", stderr="error: hash mismatch\n"
+        )
+
+    monkeypatch.setattr(gate.subprocess, "run", fail)
+    with pytest.raises(gate.GateError, match="hash mismatch"):
+        gate._run(["nix", "build"], timeout=30)
+    assert (
+        "hash mismatch"
+        in (tmp_path / "update-artifacts" / "realize-error.txt").read_text()
+    )
+
+    def fail_with_binary_stderr(args, **_kwargs):
+        return subprocess.CompletedProcess(
+            args, 1, stdout=b"", stderr=b"error: bad \xdd path\n"
+        )
+
+    monkeypatch.setattr(gate.subprocess, "run", fail_with_binary_stderr)
+    with pytest.raises(gate.GateError, match="bad"):
+        gate._run(["nix", "build"], timeout=30)
+    assert "bad" in (tmp_path / "update-artifacts" / "realize-error.txt").read_text()
+
+    monkeypatch.delenv("RUNNER_TEMP")
+
+    def time_out_quietly(args, **_kwargs):
+        raise subprocess.TimeoutExpired(args, 1)
+
+    monkeypatch.setattr(gate.subprocess, "run", time_out_quietly)
+    with pytest.raises(gate.GateError, match="nix timed out after 1s"):
+        gate._run(["nix"], timeout=1)

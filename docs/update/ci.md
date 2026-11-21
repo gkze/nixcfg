@@ -855,7 +855,15 @@ aggregate.
 Realize calls the Update reusable workflow (`update-native.yml`) with stage
 `closure-gate` on `macos-15`, `ubuntu-24.04-arm`, and `ubuntu-24.04`. The
 build flags are the validation build (`nix build --no-update-lock-file
---no-link --keep-going --fallback`) plus `--print-out-paths`. The build
+--no-link --keep-going --fallback`) plus `--max-jobs 1` and
+`--print-out-paths`. Each changed installable is its own build. After it,
+the gate roots the printed paths, deletes leftover `nix-*` directories
+under `/nix/var/nix/builds`, and reclaims the store when free space is
+under the skip threshold. Run 44713152415 lost the first Darwin runner
+and the retry was stopped during one combined build of all eight outputs.
+Run 44158690416 faulted `disk2s7` while two vendor trees were unlinked
+together. The build directory stays on the Nix store volume: Determinate
+Nix rejects `/private/tmp` as world-writable (44569736549). The build
 budget is the Darwin shard budget, 18000 seconds, inside the 360-minute job.
 The receipt is `--print-out-paths`. Derivation show of a Darwin system
 names a different output than the build realizes, so it does not choose
@@ -864,6 +872,19 @@ pushes only printed paths whose gkze narinfo is not 200. `cachix push`
 must exit 0 and the narinfo must then be 200, or the job fails. The flush step still runs and
 fails closed. The aggregating step writes the pushed and already-cached
 store paths into the job summary.
+
+Darwin realize is one VM per slice: the changed packages, then each
+`root-closure-*` on its own. The slices share the Darwin lane, so they queue
+rather than taking a runner each. Each installable is pushed before the next
+build. Runs 44744612180 and 44776913311 lost both the first VM and its retry
+while one job still held every output, and the push had not run. The
+aggregate joins `closure-gate-aarch64-darwin-gate-*`. A second slice fault
+fails the gate. Process output is decoded with replacement: nix on Darwin
+can write a path that is not UTF-8, and a strict decode drops the exit code.
+Run 44817523361's home-george slice died that way twice, on byte 0xdd, and
+recorded neither the build result nor a device fault. The same run's
+rocinante slice rejected `GoogleDrive.dmg` on both VMs with one hash, now in
+`packages/google-drive/sources.json`.
 
 A Darwin realize whose kernel logged block-device I/O errors does not push.
 Flush clears the Cachix daemon directory so the action's post hook cannot
@@ -874,8 +895,13 @@ had started. Run 44005867871's `home-manager-generation` builder reported
 `substituteInPlace` reads the activation script in one pass, and that read
 hit the faulted volume. The tree had no NUL bytes. The realize job records
 `device_fault` and `realize-aarch64-darwin-retry` rebuilds the same outputs
-once on a fresh VM, which is the attempt allowed to push. A second fault
-fails the gate.
+once on a fresh VM, which is the attempt allowed to push. A realize that
+fails without recording `device_fault=false` is the same missing result:
+run 44498744364 attempt 2 died while the realize step was still running, so
+the output was never set and the retry did not start. A finished realize
+that records `device_fault=false` is a build failure and does not rerun. The
+aggregate downloads `closure-gate-aarch64-darwin-gate-*` from whichever of
+those jobs succeeded. A second fault fails the gate.
 
 Fork pull requests do not run the workflow's jobs. The trigger is
 `pull_request` for a head in this repository, and the Cachix token is passed
