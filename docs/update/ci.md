@@ -894,13 +894,18 @@ archive: `lib/link` was the single byte `+` or `@`, which `setup_link_paths`
 passed to rustc. `overlays/_lib/build-rust-crate` rejects that output and
 changes the crate hash so the published path is not reused. The same run's
 rocinante slice stopped on Reason 0.1.118 because the public 307 named
-`/desktop/stable/0.1.131/`; `packages/reason/sources.json` pins that object. Run 44888080350 recorded
+`/desktop/stable/0.1.131/`; `packages/reason/sources.json` pins that object.
+Run 44888080350 recorded
 `device_fault=false` on home-george only. The matrix exposes one output, so
 that false skipped the fresh VM for the faulted argus and zeus slices and
 for rocinante, whose runner received a shutdown signal before it recorded
 one. The retry now starts whenever the Darwin matrix failed. A cell
 rebuilds a slice whose first artifact is missing or named with a fault
 suffix, and it does not upload over a slice the first VM already finished.
+Run 44926356549's zeus slice then 404'd
+`super.engineering-nightly-c0f9eaa7-arm64.dmg`. The public download now names
+`super.engineering-nightly-e7a1b735-arm64.dmg`, last-modified 2026-11-20, and
+`packages/superconductor/sources.json` pins that object.
 
 A Darwin realize whose kernel logged block-device I/O errors does not push.
 Flush clears the Cachix daemon directory so the action's post hook cannot
