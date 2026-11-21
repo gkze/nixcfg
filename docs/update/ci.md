@@ -855,8 +855,11 @@ aggregate.
 Realize calls the Update reusable workflow (`update-native.yml`) with stage
 `closure-gate` on `macos-15`, `ubuntu-24.04-arm`, and `ubuntu-24.04`. The
 build flags are the validation build (`nix build --no-update-lock-file
---no-link --keep-going --fallback`) plus `--max-jobs 1` and
-`--print-out-paths`. Each changed installable is its own build. After it,
+--no-link --fallback`) plus `--max-jobs 1` and `--print-out-paths`. The
+gate does not pass `--keep-going`: a slice builds one installable, and
+continuing after the first failure records the dependent `Cannot build`
+lines instead of the builder that failed. Each changed installable is its
+own build. After it,
 the gate roots the printed paths, deletes leftover `nix-*` directories
 under `/nix/var/nix/builds`, and reclaims the store when free space is
 under the skip threshold. Run 44713152415 lost the first Darwin runner
@@ -884,7 +887,13 @@ can write a path that is not UTF-8, and a strict decode drops the exit code.
 Run 44817523361's home-george slice died that way twice, on byte 0xdd, and
 recorded neither the build result nor a device fault. The same run's
 rocinante slice rejected `GoogleDrive.dmg` on both VMs with one hash, now in
-`packages/google-drive/sources.json`.
+`packages/google-drive/sources.json`. Run 44888080350 recorded
+`device_fault=false` on home-george only. The matrix exposes one output, so
+that false skipped the fresh VM for the faulted argus and zeus slices and
+for rocinante, whose runner received a shutdown signal before it recorded
+one. The retry now starts whenever the Darwin matrix failed. A cell
+rebuilds a slice whose first artifact is missing or named with a fault
+suffix, and it does not upload over a slice the first VM already finished.
 
 A Darwin realize whose kernel logged block-device I/O errors does not push.
 Flush clears the Cachix daemon directory so the action's post hook cannot

@@ -343,9 +343,12 @@ def derivation_show_args(drv: str) -> list[str]:
 def build_args(installables: tuple[str, ...]) -> list[str]:
     """Return the validation build plus ``--print-out-paths``.
 
-    The flag prefix matches ``_batch_validation_args`` for ``mode="build"``.
-    ``--print-out-paths`` is the receipt flush already uses for roots;
-    ``--no-link`` keeps the runner from retaining a result symlink.
+    The flag prefix matches ``_batch_validation_args`` for ``mode="build"``
+    except ``--keep-going``. The slice builds one installable, and that flag
+    kept compiling after the first failure. Run 44888080350 then recorded
+    home-george as a ``Cannot build`` cascade. ``--print-out-paths`` is the
+    receipt flush already uses for roots; ``--no-link`` keeps the runner from
+    retaining a result symlink.
     """
     if not installables:
         msg = "build requires at least one installable"
@@ -356,7 +359,6 @@ def build_args(installables: tuple[str, ...]) -> list[str]:
         "build",
         "--no-update-lock-file",
         "--no-link",
-        "--keep-going",
         "--fallback",
         "--max-jobs",
         "1",
@@ -924,6 +926,56 @@ def _git(repo: Path, *args: str) -> str:
     return result.stdout
 
 
+_ERROR_MARKERS = ("error:", "illegal byte sequence", "hash mismatch")
+
+
+def failure_excerpt(detail: str) -> str:
+    """Keep the first builder error when later lines are only dependents.
+
+    ``--keep-going`` used to run on after the first failure. Run 44888080350
+    then recorded home-george as twenty ``Cannot build`` lines and dropped
+    the builder that actually failed.
+    """
+    lines = detail.splitlines()
+    marked = [
+        line
+        for line in lines
+        if any(marker in line.lower() for marker in _ERROR_MARKERS)
+    ]
+    chosen: list[str] = []
+    seen: set[str] = set()
+    for line in (*marked[:12], *lines[-20:]):
+        if line in seen:
+            continue
+        seen.add(line)
+        chosen.append(line)
+    return "\n".join(chosen)
+
+
+def _bounded_text(detail: str, *, limit: int = 200_000) -> str:
+    if len(detail) <= limit:
+        return detail
+    half = limit // 2
+    return f"{detail[:half]}\n...\n{detail[-half:]}"
+
+
+def finished_slice_attempt(prior: Path) -> bool:
+    """Treat a plain artifact as a finished slice and a fault suffix as unfinished.
+
+    Run 44888080350 set one ``device_fault`` output for the whole Darwin
+    matrix. home-george recorded false, so the fresh VM never started for
+    argus, zeus, or the rocinante runner that died with exit 143.
+    """
+    if not prior.is_dir():
+        return False
+    return any(
+        child.is_dir()
+        and "device-fault" not in child.name
+        and "runner-fault" not in child.name
+        for child in prior.iterdir()
+    )
+
+
 def _retain_process_failure(detail: str) -> None:
     """Keep a nix failure in the artifact uploaded before the action post.
 
@@ -965,18 +1017,17 @@ def _run(args: list[str], *, timeout: float, cwd: Path | None = None) -> str:
         )
     except subprocess.TimeoutExpired as error:
         text = _process_text(error.stderr) or _process_text(error.stdout)
-        tail = "\n".join(text.splitlines()[-20:])
+        _retain_process_failure(_bounded_text(text))
+        tail = failure_excerpt(text)
         msg = f"{args[0]} timed out after {timeout:.0f}s"
         if tail:
             msg = f"{msg}: {tail}"
-        _retain_process_failure(msg)
         raise GateError(msg) from error
     stdout = _process_text(result.stdout)
     if result.returncode != 0:
         detail = (_process_text(result.stderr) or stdout).strip()
-        tail = "\n".join(detail.splitlines()[-20:])
-        msg = f"{' '.join(args[:4])} failed: {tail}"
-        _retain_process_failure(msg)
+        _retain_process_failure(_bounded_text(detail))
+        msg = f"{' '.join(args[:4])} failed: {failure_excerpt(detail)}"
         raise GateError(msg)
     return stdout
 
@@ -1126,6 +1177,18 @@ def _write_output(name: str, value: str) -> None:
         return
     with Path(path).open("a", encoding="utf-8") as output:
         output.write(f"{name}={value}\n")
+
+
+def _command_prior_slice() -> None:
+    """Skip a retry whose first VM already finished this slice."""
+    raw = os.environ.get("PRIOR_SLICE", "").strip()
+    skip = bool(raw) and finished_slice_attempt(Path(raw))
+    value = "true" if skip else "false"
+    output = os.environ.get("GITHUB_OUTPUT", "")
+    if output:
+        with Path(output).open("a", encoding="utf-8") as handle:
+            handle.write(f"skip={value}\n")
+    sys.stdout.write(f"prior-slice skip={value}\n")
 
 
 def _command_plan() -> None:
@@ -1342,6 +1405,7 @@ def main() -> None:
     """Run the command selected by ``NIXCFG_CLOSURE_GATE_COMMAND``."""
     command = os.environ.get("NIXCFG_CLOSURE_GATE_COMMAND", "")
     commands = {
+        "prior-slice": _command_prior_slice,
         "plan": _command_plan,
         "route": _command_route,
         "realize": _command_realize,

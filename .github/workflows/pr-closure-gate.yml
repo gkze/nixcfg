@@ -143,6 +143,12 @@ jobs:
   # device_fault was never set and the retry did not start. A failure that
   # did not record device_fault=false is the same missing result. A finished
   # realize that recorded false is a build failure and does not rerun.
+  # 44888080350 recorded that false on home-george only. The matrix has one
+  # device_fault output, so that false also skipped the fresh VM for the
+  # faulted argus and zeus slices and for rocinante, whose runner died
+  # before it could record anything. The retry starts for the failed matrix.
+  # Each cell rebuilds only a slice whose first artifact is a fault suffix
+  # or missing.
   realize-aarch64-darwin-retry:
     needs:
       - route
@@ -152,8 +158,7 @@ jobs:
       !cancelled() &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       needs.route.result == 'success' &&
-      needs.realize-aarch64-darwin.result == 'failure' &&
-      needs.realize-aarch64-darwin.outputs.device_fault != 'false'
+      needs.realize-aarch64-darwin.result == 'failure'
     concurrency:
       group: ${{ format('nixcfg-darwin-{0}', contains(github.event.pull_request.labels.*.name, 'main-fix') && 'main-fix' || contains(github.event.pull_request.labels.*.name, 'security') && 'security' || contains(github.event.pull_request.labels.*.name, 'heal') && 'heal' || 'routine') }}
       cancel-in-progress: false
@@ -265,7 +270,7 @@ jobs:
             ${{ format(
             '{{"aarch64-darwin":"{0}","aarch64-linux":"{1}","x86_64-linux":"{2}"}}',
             needs.realize-aarch64-darwin.result == 'failure'
-            && needs.realize-aarch64-darwin.outputs.device_fault != 'false'
+            && needs.realize-aarch64-darwin-retry.result != 'skipped'
             && needs.realize-aarch64-darwin-retry.result
             || needs.realize-aarch64-darwin.result,
             needs.realize-aarch64-linux.result,

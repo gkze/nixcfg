@@ -249,6 +249,7 @@ def test_build_args_match_validation_plus_the_output_receipt() -> None:
         for item in installables
     )
     expected = _batch_validation_args(requests, flake_root=None)
+    expected = [arg for arg in expected if arg != "--keep-going"]
     first = expected.index("path:.#packages.aarch64-darwin.tool")
     expected = [
         *expected[:first],
@@ -922,8 +923,11 @@ def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -
     substituteInPlace reported null bytes after disk2s7 I/O errors. The first
     job must not satisfy the gate. The fresh VM's result does when the first
     job recorded device_fault, and when the realize died before it could
-    record one (44498744364 attempt 2). A finished realize that recorded
-    device_fault=false is a build failure and does not rerun.
+    record one (44498744364 attempt 2). A finished slice that recorded
+    device_fault=false does not rerun. That decision is per slice: run
+    44888080350 recorded false only for home-george, and the one matrix
+    output also skipped the fresh VM for the faulted slices and the lost
+    rocinante runner.
     """
     jobs = _workflow("pr-closure-gate.yml")["jobs"]
     first = jobs["realize-aarch64-darwin"]
@@ -933,8 +937,7 @@ def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -
         "always() && !cancelled() && "
         "github.event.pull_request.head.repo.full_name == github.repository && "
         "needs.route.result == 'success' && "
-        "needs.realize-aarch64-darwin.result == 'failure' && "
-        "needs.realize-aarch64-darwin.outputs.device_fault != 'false'"
+        "needs.realize-aarch64-darwin.result == 'failure'"
     )
     assert retry["concurrency"] == first["concurrency"]
     assert retry["strategy"] == first["strategy"]
@@ -963,7 +966,7 @@ def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -
     realized = " ".join(aggregate["env"]["REALIZE_RESULTS"].split())
     assert (
         "needs.realize-aarch64-darwin.result == 'failure' && "
-        "needs.realize-aarch64-darwin.outputs.device_fault != 'false' && "
+        "needs.realize-aarch64-darwin-retry.result != 'skipped' && "
         "needs.realize-aarch64-darwin-retry.result || "
         "needs.realize-aarch64-darwin.result"
     ) in realized
@@ -993,6 +996,15 @@ def test_realize_reuses_the_update_native_runner() -> None:
     )
     assert candidate["if"] == "inputs.stage != 'closure-gate'"
     assert flush["if"] == "always()"
+    retry_slice = next(step for step in steps if step.get("id") == "retry-slice")
+    assert retry_slice["env"]["NIXCFG_CLOSURE_GATE_COMMAND"] == "prior-slice"
+    assert "steps.retry-slice.outputs.skip != 'true'" in " ".join(realize["if"].split())
+    upload = next(
+        step
+        for step in steps
+        if step.get("name") == "Retain candidate and failure evidence"
+    )
+    assert "steps.retry-slice.outputs.skip != 'true'" in upload["if"]
     assert realize["env"]["NIXCFG_CLOSURE_GATE_COMMAND"] == "realize"
     assert "inputs.closure_gate_slice" in realize["env"]["NIXCFG_CLOSURE_GATE_SLICE"]
     update = _workflow("update.yml")
@@ -1054,3 +1066,43 @@ def test_realize_failure_is_kept_for_the_uploaded_artifact(
     monkeypatch.setattr(gate.subprocess, "run", time_out_quietly)
     with pytest.raises(gate.GateError, match="nix timed out after 1s"):
         gate._run(["nix"], timeout=1)
+
+
+def test_failure_excerpt_keeps_the_builder_before_the_cascade() -> None:
+    """44888080350's home-george tail was only Cannot build lines."""
+    detail = "\n".join([
+        "error: builder for '/nix/store/abc.drv' failed with exit code 1",
+        *(f"error: Cannot build '/nix/store/dep-{index}.drv'" for index in range(30)),
+    ])
+    excerpt = gate.failure_excerpt(detail)
+    assert "builder for" in excerpt
+    assert excerpt.index("builder for") < excerpt.index("Cannot build")
+
+
+def test_finished_slice_attempt_ignores_a_fault_artifact(tmp_path: Path) -> None:
+    """A device-fault artifact is not a finished slice. A plain one is."""
+    assert gate.finished_slice_attempt(tmp_path / "missing") is False
+    assert gate.finished_slice_attempt(tmp_path) is False
+    (
+        tmp_path
+        / "closure-gate-aarch64-darwin-gate-root-closure-darwin-zeus-device-fault"
+    ).mkdir()
+    assert gate.finished_slice_attempt(tmp_path) is False
+    plain = tmp_path / "closure-gate-aarch64-darwin-gate-root-closure-home-george"
+    plain.mkdir()
+    assert gate.finished_slice_attempt(tmp_path) is True
+
+
+def test_prior_slice_skips_only_a_finished_attempt(tmp_path: Path, monkeypatch) -> None:
+    """The retry cell records skip so it does not overwrite the first artifact."""
+    output = tmp_path / "github-output.txt"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("NIXCFG_CLOSURE_GATE_COMMAND", "prior-slice")
+    monkeypatch.setenv("PRIOR_SLICE", str(tmp_path / "prior"))
+    gate.main()
+    assert output.read_text(encoding="utf-8") == "skip=false\n"
+    output.unlink()
+    plain = tmp_path / "prior" / "closure-gate-aarch64-darwin-gate-packages"
+    plain.mkdir(parents=True)
+    gate.main()
+    assert output.read_text(encoding="utf-8") == "skip=true\n"
