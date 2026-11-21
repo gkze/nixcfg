@@ -146,10 +146,8 @@ let
         [
           code-cursor
           emdash
-          github-desktop
           jetbrains.datagrip
           config.fonts.monospace.package
-          postman
           slack
         ]
         ++ lib.optionals (stdenv.hostPlatform.isDarwin || stdenv.hostPlatform.system == "x86_64-linux") [

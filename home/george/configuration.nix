@@ -232,8 +232,6 @@
           package = pkgs.figma;
           preventDowngrade = true;
         };
-        framer.package = pkgs.framer;
-        "github-desktop".package = pkgs.github-desktop;
         ghostty.package = pkgs.ghostty-tip;
         gitbutler.package = pkgs.gitbutler;
         "google-chrome".package = pkgs.google-chrome;
@@ -244,10 +242,7 @@
           cli.granola.path = "Contents/MacOS/Granola";
         };
         iina.package = pkgs.iina;
-        jacq.package = pkgs.jacq;
         linear.package = pkgs.linear;
-        "logi-options-plus".package = pkgs.logi-options-plus;
-        loom.package = pkgs.loom;
         netnewswire.package = pkgs.netnewswire;
         nordvpn = {
           package = pkgs.nordvpn;
@@ -262,7 +257,6 @@
           scope = "system";
         };
         pica.package = pkgs.pica;
-        postman.package = pkgs.postman;
         raycast.package = pkgs.raycast;
         reason.package = pkgs.reason;
         rectangle.package = pkgs.rectangle;

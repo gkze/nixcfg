@@ -29,7 +29,6 @@ let
     devin = systemApp pkgs.devin;
     energy = systemApp pkgs.energy;
     factory = systemApp pkgs.factory;
-    freelens.package = pkgs.freelens;
     gemini = {
       package = pkgs.gemini;
       preventDowngrade = true;
@@ -57,7 +56,6 @@ let
         env.TAILSCALE_BE_CLI = "1";
       };
     };
-    thorium = systemApp pkgs.thorium;
     "town-assistant".package = pkgs.town-assistant-nightly;
     unsloth = systemApp pkgs.unsloth;
     voiceos = systemApp pkgs.voiceos;
