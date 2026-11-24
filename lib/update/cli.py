@@ -1548,7 +1548,11 @@ def _withhold_failed_clusters(
 ) -> None:
     """Revert candidates coupled to failed targets so the rest can be promoted.
 
-    Coupling follows companion, aggregate, and flake-input edges. When a failure
+    Coupling follows companion and flake-input edges. A failed member also
+    withholds the aggregate it feeds, because that inventory is derived from
+    the members. Sibling members stay, so a per-platform hash the updater
+    wrote for the new pin is not replaced by the baseline hash (Update
+    45347647927, emdash-pnpm-deps). When a failure
     left flake.lock changed, the failed targets' lock nodes are rolled back
     per input so unrelated input-backed candidates survive. A ref whose
     ``flake.nix`` declaration is an attribute set is restored the same way:
@@ -1575,7 +1579,15 @@ def _withhold_failed_clusters(
         entries=plan.sources.entries,
         input_names=[ref.name for ref in plan.resolved.ref_inputs],
     )
-    closure = set(update_planner.failure_closure(failed, clusters))
+    closure = set(
+        update_planner.promotion_failure_closure(
+            failed,
+            names=plan.order,
+            updaters=updaters,
+            entries=plan.sources.entries,
+            input_names=[ref.name for ref in plan.resolved.ref_inputs],
+        )
+    )
     touched = _failed_targets_touched_flake(workspace, plan, failed, updaters)
     rolled_back_inputs: frozenset[str] = frozenset()
     global_flake_revert = False

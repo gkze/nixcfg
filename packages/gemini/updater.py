@@ -212,15 +212,16 @@ class GeminiUpdater(DownloadUrlMetadataUpdater):
             msg = f"Gemini Omaha download URL is not a CRX3 container: {container_url}"
             raise RuntimeError(msg)
         inner_path = _inner_crx3_path(updatecheck)
-        # Mirrors mkCrx3DmgApp's default innerDmgName in
-        # overlays/_lib/helpers/darwin-apps.nix:
-        # "${capitalizedAppName}-${info.version}.dmg".
-        # test_gemini_inner_dmg_name_contract_is_pinned_by_the_helper pins it.
+        # mkCrx3DmgApp installs either layout. The historical Omaha payload
+        # names an inner DMG, "${capitalizedAppName}-${info.version}.dmg".
+        # Current payloads name the zip root ("."), and that zip's root is
+        # Gemini.app. test_gemini_inner_dmg_name_contract_is_pinned_by_the_helper
+        # pins the DMG name the helper still unpacks.
         expected_inner = f"Gemini-{version}.dmg"
-        if inner_path != expected_inner:
+        if inner_path not in {expected_inner, "."}:
             msg = (
                 "Gemini Omaha payload named inner artifact "
-                f"{inner_path!r}, expected {expected_inner!r}"
+                f"{inner_path!r}, expected {expected_inner!r} or '.'"
             )
             raise RuntimeError(msg)
         return container_url

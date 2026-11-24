@@ -21,7 +21,7 @@ from lib.tests._nix_ast import (
     expect_binding,
     parse_nix_expr,
 )
-from lib.tests._nix_source import nix_source_fragment_expr
+from lib.tests._nix_source import nix_source_fragment, nix_source_fragment_expr
 from lib.tests._shell_ast import command_texts, indented_string_body, parse_shell
 from lib.tests._source_metadata import (
     assert_https_url,
@@ -382,6 +382,7 @@ def test_gemini_rejects_malformed_or_unsuccessful_omaha_responses(
         ),
         ({"crx3_path": "Gemini-9.9.9.9.dmg"}, "named inner artifact"),
         ({"crx3_path": None}, "omitted its inner artifact path"),
+        ({"crx3_path": ""}, "named inner artifact"),
         ({"download_urls": (None,)}, "URL must be a string"),
         ({"update_status": "noupdate"}, "updatecheck returned status"),
     ],
@@ -400,8 +401,29 @@ def test_gemini_rejects_ambiguous_or_mismatched_crx3_payloads(
         )
 
 
+def test_gemini_accepts_a_crx_whose_zip_root_is_the_app_bundle() -> None:
+    """Omaha path '.' means the zip root is Gemini.app, which the helper installs."""
+    module = _load_module()
+    url = module.GeminiUpdater._parse_download_url(
+        _omaha_response(crx3_path="."),
+        version=_VERSION,
+    )
+    assert url == _URL
+
+    script = nix_source_fragment(
+        "overlays/_lib/helpers/darwin-apps.nix",
+        '            magic="$(head -c 4 "$src")"\n',
+        "            runHook postInstall\n",
+        strip_trailing_semicolon=False,
+    )
+    shell = parse_shell(script)
+    unzip_commands = command_texts(shell, "unzip")
+    assert any(command.startswith("unzip -qq -j ") for command in unzip_commands)
+    assert any("__NIX_INTERP__/*" in command for command in unzip_commands)
+
+
 def test_gemini_inner_dmg_name_contract_is_pinned_by_the_helper() -> None:
-    """Updater and helper share one rule: the inner artifact is Gemini-<version>.dmg."""
+    """The helper still unpacks an inner Gemini-<version>.dmg when Omaha names one."""
     inner_dmg_name = expect_instance(
         nix_source_fragment_expr(
             "overlays/_lib/helpers/darwin-apps.nix",

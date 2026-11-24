@@ -48,9 +48,14 @@ configuration.
 Targets are promoted individually. A failing target is withheld together with
 the targets coupled to it:
 
-- companion and aggregate sources
+- companion sources, and the aggregate inventory a failed member feeds
 - every target hashed against the same flake input, when that input moved during
   the run
+
+Sibling members of an aggregate stay. Their pins and per-platform hashes do
+not depend on the failed sibling, and restoring the baseline hash beside the
+new pin is the mismatch the canary rejects. A consumer whose Electron runtime
+is absent from the restored inventory is put back with its pin.
 
 `flake.nix` and `flake.lock` revert as a unit. The remaining candidate is
 validated again, at most three rounds, and then promoted. Any failure still sets
