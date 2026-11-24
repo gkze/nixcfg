@@ -83,8 +83,16 @@ let
         lib.hasInfix "nixcfg-verify-crate-outputs" (integrityLeaf.postInstall or "")
       ) "crate output check must run from postInstall")
       (lib.assertMsg (
+        lib.hasInfix "rust-end-file" (integrityLeaf.postInstall or "")
+      ) "crate output check must reject metadata rustc's decoder rejects")
+      (lib.assertMsg (
+        lib.hasInfix "nixcfg-verify-crate-outputs" (integrityLeaf.postFixup or "")
+      ) "crate output check must run again after fixup")
+      (lib.assertMsg integrityLeaf.dontStrip "crate outputs must not be stripped")
+      (lib.assertMsg (
         lib.hasInfix "nixcfg-verify-crate-outputs" (overriddenLeaf.postInstall or "")
       ) "crate output check must survive .override")
+      (lib.assertMsg overriddenLeaf.dontStrip "dontStrip must survive .override")
       (lib.assertMsg (
         integrityLeaf.drvPath != (buildRustCrateOverride.upstreamFor pkgs {
           crateName = "leaf";

@@ -892,7 +892,21 @@ rocinante slice rejected `GoogleDrive.dmg` on both VMs with one hash, now in
 Both narinfos were 200 and both nars were signed, and neither rlib was an
 archive: `lib/link` was the single byte `+` or `@`, which `setup_link_paths`
 passed to rustc. `overlays/_lib/build-rust-crate` rejects that output and
-changes the crate hash so the published path is not reused. The same run's
+changes the crate hash so the published path is not reused. Run 45379398481
+was a compiler failure on both platforms, not a timeout or a device fault:
+x86_64 gitbutler aborted in `adler32furious` because Rust 1.99's stdarch
+emits an LLVM 23 intrinsic that this nixpkgs' LLVM 21 rustc rejects, and
+Darwin substituted `rust_crossbeam-utils-0.8.21-lib` whose rlib had an
+archive header but no `rust-end-file` trailer, so `crossbeam-channel`
+reported E0786. The builder now uses `llvmPackages_23` and refuses to
+publish an rlib without that trailer. The zeus, home-george, packages, and
+argus retries of that run skipped: their first artifacts were finished
+build failures (Coast Local's DMG digest moved, and HQ 0.11.15's asset
+404s), and a finished slice does not rebuild.
+`packages/coast-local/sources.json` now pins the digest the Darwin builder
+and a second fetch of the same URL both got.
+`packages/hq/sources.json` pins `HQ_0.11.39_universal.app.tar.gz`, the asset
+the current release publishes. Run 44910664125's
 rocinante slice stopped on Reason 0.1.118 because the public 307 named
 `/desktop/stable/0.1.131/`; `packages/reason/sources.json` pins that object.
 Run 44888080350 recorded

@@ -1,5 +1,6 @@
-# Performance-only `buildRustCrate` override. See ./README.md for the
-# rationale, the upstream PR intent, and the removal condition.
+# `buildRustCrate` override: a faster vendored builder when it matches
+# upstream, an LLVM 23 rustc for Rust 1.99, and an output check that
+# refuses a crate rustc cannot load. See ./README.md.
 #
 # This file is deliberately not an overlay fragment (it lives under
 # overlays/_lib, which fragment discovery skips). lib/package-overlays.nix
@@ -21,9 +22,10 @@ let
   # copied from; any upstream change means it may be stale.
   isCurrentFor = pkgs: builtins.hashFile "sha256" (upstreamDirFor pkgs + "/default.nix") == baseHash;
 
-  # Mirror of the `buildRustCrate` call arguments in nixpkgs
-  # pkgs/top-level/all-packages.nix, so both builders see the same toolchain.
-  callArgsFor =
+  # The package set whose rustc runs the build. Native builds use
+  # pkgsBuildBuild; a target the build compiler was not configured for uses
+  # pkgsBuildHost. This is the same choice as nixpkgs all-packages.nix.
+  buildPlatformFor =
     pkgs:
     let
       inherit (pkgs) lib stdenv;
@@ -38,16 +40,47 @@ let
         )
       );
     in
+    if targetAlreadyIncluded then pkgs.pkgsBuildBuild else pkgs.pkgsBuildHost;
+
+  # Mirror of the `buildRustCrate` call arguments in nixpkgs
+  # pkgs/top-level/all-packages.nix. The exported builder below replaces
+  # rustc and cargo; this set stays the nixpkgs toolchain so the vendored
+  # and upstream graphs remain comparable.
+  callArgsFor =
+    pkgs:
+    let
+      inherit (pkgs) lib stdenv;
+    in
     lib.optionalAttrs (stdenv.hostPlatform.libc == null) {
       # Some build targets without libc fail to evaluate with a normal stdenv.
       stdenv = pkgs.stdenvNoCC;
     }
-    // (
-      if targetAlreadyIncluded then
-        { inherit (pkgs.pkgsBuildBuild) rustc cargo; }
-      else
-        { inherit (pkgs.pkgsBuildHost) rustc cargo; }
-    );
+    // {
+      inherit (buildPlatformFor pkgs) rustc cargo;
+    };
+
+  # Rust 1.99's stdarch emits LLVM 23 intrinsic signatures. Nixpkgs
+  # 02c087f3 still builds that rustc against llvmPackages, which is LLVM 21
+  # (all-packages.nix), so rustc aborts with
+  # `intrinsic signature mismatch for llvm.x86.avx512.vpdpbusd.256` while
+  # compiling adler32furious. Closure gate 45379398481 failed
+  # packages.x86_64-linux.gitbutler on that error. Upstream
+  # af7d40097fd91bb31e682f28052a450a0c17e972 points 1_99.nix at
+  # llvmPackages_23, including llvmSharedFor, which reads
+  # pkgSet.llvmPackages rather than the llvmPackages argument. The package
+  # sets passed into that one call expose LLVM 23 under that name.
+  llvm23Toolchain =
+    pkgSet:
+    let
+      withLlvm23 = ps: ps // { llvmPackages = ps.llvmPackages_23; };
+    in
+    (pkgSet.rust_1_99.override {
+      llvmPackages = pkgSet.llvmPackages_23;
+      pkgsBuildBuild = withLlvm23 pkgSet.pkgsBuildBuild;
+      pkgsBuildHost = withLlvm23 pkgSet.pkgsBuildHost;
+      pkgsBuildTarget = withLlvm23 pkgSet.pkgsBuildTarget;
+      pkgsHostTarget = withLlvm23 pkgSet.pkgsHostTarget;
+    }).packages.stable;
 
   # `pkgs.buildRustCrate` built from the vendored file, or `null` when the
   # upstream file no longer matches the vendored base.
@@ -74,51 +107,71 @@ let
   # fine. The check fails the producing build, so a faulted store cannot
   # publish another one. Wrapping the builder changes every crate hash, so
   # the published paths are not substituted again.
+  # Shared by postInstall and postFixup. postFixup is a separate script,
+  # so the function has to be defined in both phases.
+  crateOutputCheck = ''
+    nixcfg-verify-crate-outputs() {
+      local root rlib magic size byte
+      for root in "$out" ''${lib:+"$lib"}; do
+        if [[ -d $root/lib ]]; then
+          for rlib in "$root"/lib/*.rlib; do
+            [[ -f $rlib ]] || continue
+            # Command substitution strips the trailing newline, so the
+            # eight-byte '!<arch>\n' header compares as '!<arch>'.
+            magic=$(head -c 8 "$rlib" || true)
+            if [[ $magic != '!<arch>'* ]]; then
+              echo "buildRustCrate: corrupt rlib $rlib" >&2
+              exit 1
+            fi
+            # rustc 1.99's MemDecoder requires the metadata to end with this
+            # trailer. Closure gate 45379398481 substituted
+            # rust_crossbeam-utils-0.8.21-lib from gkze: the rlib was an
+            # archive and its .rmeta section started with the metadata
+            # header, but the trailer was absent, so crossbeam-channel
+            # failed with E0786. An archive header alone does not prove that.
+            if ! LC_ALL=C grep -a -q -F 'rust-end-file' "$rlib"; then
+              echo "buildRustCrate: rlib metadata missing rust-end-file trailer: $rlib" >&2
+              exit 1
+            fi
+          done
+          if [[ -f $root/lib/link ]]; then
+            size=$(wc -c < "$root/lib/link" | tr -d '[:space:]')
+            # A crate with no linker flags installs a single newline.
+            # head/command substitution would drop that newline and reject it.
+            if [[ $size == 1 ]]; then
+              byte=$(od -An -tu1 "$root/lib/link" | tr -d '[:space:]')
+              if [[ $byte != 10 ]]; then
+                echo "buildRustCrate: corrupt link file $root/lib/link" >&2
+                exit 1
+              fi
+            fi
+            # grep treats a NUL pattern as empty and ignores NUL in the
+            # file. Count the bytes that are neither printable nor space.
+            if [[ $(
+              LC_ALL=C tr -d '[:print:][:space:]' < "$root/lib/link" \
+                | wc -c \
+                | tr -d '[:space:]'
+            ) != 0 ]]; then
+              echo "buildRustCrate: corrupt link file $root/lib/link" >&2
+              exit 1
+            fi
+          fi
+        fi
+      done
+    }
+    nixcfg-verify-crate-outputs
+  '';
+
   addCrateOutputCheck =
     drv:
     drv.overrideAttrs (old: {
-      postInstall = (old.postInstall or "") + ''
-        nixcfg-verify-crate-outputs() {
-          local root rlib magic size byte
-          for root in "$out" ''${lib:+"$lib"}; do
-            if [[ -d $root/lib ]]; then
-              for rlib in "$root"/lib/*.rlib; do
-                [[ -f $rlib ]] || continue
-                # Command substitution strips the trailing newline, so the
-                # eight-byte '!<arch>\n' header compares as '!<arch>'.
-                magic=$(head -c 8 "$rlib" || true)
-                if [[ $magic != '!<arch>'* ]]; then
-                  echo "buildRustCrate: corrupt rlib $rlib" >&2
-                  exit 1
-                fi
-              done
-              if [[ -f $root/lib/link ]]; then
-                size=$(wc -c < "$root/lib/link" | tr -d '[:space:]')
-                # A crate with no linker flags installs a single newline.
-                # head/command substitution would drop that newline and reject it.
-                if [[ $size == 1 ]]; then
-                  byte=$(od -An -tu1 "$root/lib/link" | tr -d '[:space:]')
-                  if [[ $byte != 10 ]]; then
-                    echo "buildRustCrate: corrupt link file $root/lib/link" >&2
-                    exit 1
-                  fi
-                fi
-                # grep treats a NUL pattern as empty and ignores NUL in the
-                # file. Count the bytes that are neither printable nor space.
-                if [[ $(
-                  LC_ALL=C tr -d '[:print:][:space:]' < "$root/lib/link" \
-                    | wc -c \
-                    | tr -d '[:space:]'
-                ) != 0 ]]; then
-                  echo "buildRustCrate: corrupt link file $root/lib/link" >&2
-                  exit 1
-                fi
-              fi
-            fi
-          done
-        }
-        nixcfg-verify-crate-outputs
-      '';
+      # Release crates set dontStrip = false and rely on stripExclude for
+      # *.rlib. The crossbeam-utils output above was published with a
+      # damaged archive after that exclude, and strip runs after postInstall.
+      # Leaving the compiler's bytes in place keeps the trailer rustc wrote.
+      dontStrip = true;
+      postInstall = (old.postInstall or "") + crateOutputCheck;
+      postFixup = (old.postFixup or "") + crateOutputCheck;
     });
 
   # Keep callPackage's `.override { rustc = ...; }` formals. crate2nix and
@@ -161,8 +214,15 @@ in
             + "matches the vendored base (nixpkgs ${baseNixpkgsRev}); using the upstream "
             + "buildRustCrate. Re-vendor or drop the override (see README.md)."
           ) prev.buildRustCrate;
+      # prev, not final: the build-platform package set is already fixed, and
+      # reading it through final would re-enter this overlay.
+      toolchain = llvm23Toolchain (buildPlatformFor prev);
     in
     {
-      buildRustCrate = withIntegrityCheck prev.lib base;
+      buildRustCrate = withIntegrityCheck prev.lib (
+        base.override {
+          inherit (toolchain) rustc cargo;
+        }
+      );
     };
 }

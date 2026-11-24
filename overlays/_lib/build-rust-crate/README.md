@@ -1,7 +1,10 @@
 # `buildRustCrate` evaluation-speed override
 
-This directory holds a performance-only mitigation. It does not change build
-semantics, and it fails open to nixpkgs' own `buildRustCrate`.
+This directory holds the `buildRustCrate` override. The vendored file is a
+performance-only mitigation: it does not change dependency order, and it
+fails open to nixpkgs' own `buildRustCrate` when the upstream file moves.
+The exported builder then selects a Rust 1.99 built with LLVM 23 and
+checks the installed crate.
 
 ## Problem
 
@@ -47,15 +50,29 @@ copy can therefore cost evaluation time but cannot change dependency order.
 Treat the warning as the signal to re-vendor or remove the vendored file.
 
 The overlay always wraps that builder with an output check. `postInstall`
-rejects an rlib that does not start with an archive header, a one-byte
-`lib/link` other than a newline, and a link file that is not text. Closure
-gate run 44910664125 substituted `rust_zerocopy-0.8.52-lib` and
-`rust_serde_core-1.0.228-lib` from gkze whose signed nars fail those checks:
-rustc then saw a bare `+` or `@`, and a later crate reported a missing
-dependency whose rlib was the same kind of bytes. The check changes crate
-hashes so those paths are not substituted, and a later faulted build fails
-before it can publish a replacement. `cfg-if` from that cache is a real
-archive and is unaffected except for the new hash.
+and `postFixup` reject an rlib that does not start with an archive header
+or does not contain rustc's `rust-end-file` metadata trailer, a one-byte
+`lib/link` other than a newline, and a link file that is not text. Crate
+outputs set `dontStrip`, because fixup runs after `postInstall` and a
+stripped rlib can keep the archive header while losing the trailer.
+Closure gate run 44910664125 substituted `rust_zerocopy-0.8.52-lib` and
+`rust_serde_core-1.0.228-lib` from gkze whose signed nars fail the header
+check: rustc then saw a bare `+` or `@`, and a later crate reported a
+missing dependency whose rlib was the same kind of bytes. Run 45379398481
+substituted `rust_crossbeam-utils-0.8.21-lib` whose rlib was an archive and
+whose `.rmeta` section started with the metadata header, but the trailer
+was gone, so `crossbeam-channel` failed with E0786. The same run's x86_64
+gitbutler failed inside `adler32furious` with
+`intrinsic signature mismatch for llvm.x86.avx512.vpdpbusd.256`. Rust 1.99
+emits LLVM 23 intrinsic signatures and this nixpkgs still builds
+`rust_1_99` with `llvmPackages` (LLVM 21). The exported builder uses
+`rust_1_99` overridden onto `llvmPackages_23`, including the package sets
+`llvmSharedFor` reads as `pkgSet.llvmPackages`. That is the change in
+nixpkgs `af7d40097fd91bb31e682f28052a450a0c17e972`. The check and the
+compiler both change crate hashes, so those published paths are not
+substituted, and a later bad build fails before it can publish a
+replacement. `cfg-if` from that cache is a real archive and is unaffected
+except for the new hash.
 
 ## Evidence
 
@@ -71,7 +88,9 @@ archive and is unaffected except for the new hash.
   and the upstream builder produce identical drvPaths for a synthetic graph
   with duplicated transitive dependencies and for a real codex crate. The
   output check is outside that comparison. It must change the installed
-  builder's drvPath, including after `.override`.
+  builder's drvPath, including after `.override`. The LLVM 23 rustc is also
+  outside that comparison: `callArgsFor` still passes nixpkgs' rustc so the
+  two graphs stay comparable, and the exported builder replaces it.
 
 ## Alternatives considered
 
@@ -92,8 +111,12 @@ request has been opened yet. Record its URL here when one exists.
 
 ## Removal condition
 
-Delete this directory and its line in `lib/package-overlays.nix` when the
-locked nixpkgs contains an equivalent fix, or when the `lib.warn` fires and
-re-vendoring is not worth it. To re-vendor, copy the new upstream file, reapply
-the two deltas above, update `nixpkgsRev` and `upstreamDefaultNixSha256` in
+The vendored file and its patch can go when the locked nixpkgs contains an
+equivalent `uniqueDrvs` fix, or when the `lib.warn` fires and re-vendoring is
+not worth it. To re-vendor, copy the new upstream file, reapply the two deltas
+above, update `nixpkgsRev` and `upstreamDefaultNixSha256` in
 `vendored-base.json`, regenerate the patch, and run the equivalence check.
+The LLVM 23 override stays until this nixpkgs builds Rust 1.99 with
+`llvmPackages_23` (nixpkgs `af7d40097fd91bb31e682f28052a450a0c17e972`). The
+output check stays with the builder: it is what stops a signed, archive-shaped
+rlib that rustc cannot decode from being published again.
