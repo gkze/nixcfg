@@ -1,7 +1,20 @@
-"""Updater for the Zen Twilight channel DMG."""
+"""Updater for the Zen Twilight channel DMG.
+
+Zen publishes Twilight by replacing the assets on the single ``twilight-1``
+release. ``releases/download/twilight-1/zen.macos-universal.dmg`` therefore
+changes bytes without changing URL, which is why a pinned hash drifts between
+Updates. The release asset id is not reused: the next build deletes it and
+uploads a new one. The pin stores that asset's API URL. ``fetchurl`` follows
+it only when it sends ``Accept: application/octet-stream``. The hash is the
+pipeline prefetch of the bytes whose GitHub digest matches that asset, so the
+stored URL and the stored hash name one upload.
+"""
 
 import asyncio
+import hashlib
+from dataclasses import dataclass
 from functools import partial
+from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 from defusedxml import ElementTree
@@ -14,13 +27,15 @@ from lib.update.events import (
     UpdateEvent,
     ignore_event,
 )
-from lib.update.net import fetch_url
+from lib.update.net import fetch_github_api, fetch_url
 from lib.update.updaters import (
     DownloadHashUpdater,
     UpdateContext,
     VersionInfo,
     register_updater,
+    stream_url_hash_mapping,
 )
+from lib.update.updaters.metadata import DownloadUrlMetadata, metadata_get_str
 from lib.update.updaters.vendor_feeds import require_version
 
 if TYPE_CHECKING:
@@ -38,13 +53,31 @@ def _twilight_build_id(version: str) -> str:
     return build_id
 
 
+def twilight_asset_url(asset_id: int) -> str:
+    """Return the GitHub API URL for one Twilight DMG upload."""
+    if asset_id < 1:
+        msg = f"Twilight release asset id must be positive, got {asset_id}"
+        raise RuntimeError(msg)
+    return (
+        f"https://api.github.com/repos/zen-browser/desktop/releases/assets/{asset_id}"
+    )
+
+
 class _TwilightSnapshotChangedError(RuntimeError):
     """Signal that the mutable channel moved around one hash attempt."""
 
-    def __init__(self, *, phase: str, expected: str, observed: str) -> None:
+    def __init__(
+        self,
+        *,
+        phase: str,
+        expected: str,
+        observed: str,
+        asset_url: str,
+    ) -> None:
         self.phase = phase
         self.expected = expected
         self.observed = observed
+        self.asset_url = asset_url
         super().__init__(
             f"Twilight channel changed {phase} hashing: "
             f"expected {expected}, observed {observed}"
@@ -53,13 +86,36 @@ class _TwilightSnapshotChangedError(RuntimeError):
     def __reduce__(self) -> tuple[partial[_TwilightSnapshotChangedError], tuple[()]]:
         """Retain the typed retry signal across DBOS step replay."""
         return partial(
-            type(self), phase=self.phase, expected=self.expected, observed=self.observed
+            type(self),
+            phase=self.phase,
+            expected=self.expected,
+            observed=self.observed,
+            asset_url=self.asset_url,
         ), ()
+
+
+@dataclass(frozen=True, slots=True)
+class _TwilightAsset:
+    """One ``zen.macos-universal.dmg`` upload on the Twilight release."""
+
+    asset_id: int
+    digest: str
+    browser_download_url: str
+
+    @property
+    def api_url(self) -> str:
+        """Return the URL stored in ``sources.json``."""
+        return twilight_asset_url(self.asset_id)
+
+
+def _sha256_file(path: Path) -> str:
+    with path.open("rb") as handle:
+        return hashlib.file_digest(handle, "sha256").hexdigest()
 
 
 @register_updater
 class ZenTwilightUpdater(DownloadHashUpdater):
-    """Track the mutable Twilight channel DMG and its published build metadata."""
+    """Track one Twilight DMG upload, not the floating ``twilight-1`` URL."""
 
     name = "zen-twilight"
     SNAPSHOT_ATTEMPTS = 2
@@ -70,10 +126,13 @@ class ZenTwilightUpdater(DownloadHashUpdater):
         "https://updates.zen-browser.app/updates/browser/"
         "Darwin_aarch64-gcc3/twilight/update.xml"
     )
+    # The channel Zen rewrites. Stored pins use the release asset id instead.
     TWILIGHT_DMG_URL = (
         "https://github.com/zen-browser/desktop/releases/download/"
         "twilight-1/zen.macos-universal.dmg"
     )
+    TWILIGHT_RELEASE_API = "repos/zen-browser/desktop/releases/tags/twilight-1"
+    TWILIGHT_ASSET_NAME = "zen.macos-universal.dmg"
     PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": TWILIGHT_DMG_URL,
         "x86_64-darwin": TWILIGHT_DMG_URL,
@@ -89,10 +148,106 @@ class ZenTwilightUpdater(DownloadHashUpdater):
     # Recompute hashes for the pinned channel artifact before comparing.
     always_rehash = True
 
+    def get_download_url(self, platform: str, info: VersionInfo) -> str:
+        """Return the release-asset URL resolved for this snapshot."""
+        _ = platform
+        url = metadata_get_str(info.metadata, "url")
+        if url is None:
+            msg = "Twilight asset URL was not resolved"
+            raise RuntimeError(msg)
+        return url
+
+    async def _resolve_asset(self, session: aiohttp.ClientSession) -> _TwilightAsset:
+        """Return the current DMG upload on the Twilight release."""
+        payload = await fetch_github_api(
+            session,
+            self.TWILIGHT_RELEASE_API,
+            config=self.config,
+        )
+        if not isinstance(payload, dict):
+            msg = f"Twilight release {self.TWILIGHT_RELEASE_API} is not an object"
+            raise TypeError(msg)
+        assets = payload.get("assets")
+        if not isinstance(assets, list):
+            msg = f"Twilight release {self.TWILIGHT_RELEASE_API} has no assets"
+            raise TypeError(msg)
+        matches: list[_TwilightAsset] = []
+        for asset in assets:
+            if (
+                not isinstance(asset, dict)
+                or asset.get("name") != self.TWILIGHT_ASSET_NAME
+            ):
+                continue
+            asset_id = asset.get("id")
+            digest = asset.get("digest")
+            download_url = asset.get("browser_download_url")
+            if not isinstance(asset_id, int) or isinstance(asset_id, bool):
+                msg = f"Twilight asset {self.TWILIGHT_ASSET_NAME} has no id"
+                raise TypeError(msg)
+            if not isinstance(digest, str) or not digest.startswith("sha256:"):
+                msg = (
+                    f"Twilight asset {asset_id} has no sha256 digest; "
+                    "the floating download URL cannot be pinned"
+                )
+                raise RuntimeError(msg)
+            if (
+                not isinstance(download_url, str)
+                or not download_url.startswith("https://")
+                or not download_url.endswith(f"/{self.TWILIGHT_ASSET_NAME}")
+            ):
+                msg = f"Twilight asset {asset_id} has no HTTPS DMG download"
+                raise RuntimeError(msg)
+            matches.append(
+                _TwilightAsset(
+                    asset_id=asset_id,
+                    digest=digest,
+                    browser_download_url=download_url,
+                )
+            )
+        if len(matches) != 1:
+            msg = (
+                f"Twilight release has {len(matches)} {self.TWILIGHT_ASSET_NAME} assets"
+            )
+            raise RuntimeError(msg)
+        return matches[0]
+
+    async def _require_asset_digest(self, asset: _TwilightAsset) -> None:
+        """Require the prefetched DMG to be the release asset's bytes."""
+        from lib.nix.commands.hash import nix_prefetch_url_result  # noqa: PLC0415
+
+        result = await nix_prefetch_url_result(
+            asset.browser_download_url,
+            name=self.TWILIGHT_ASSET_NAME,
+            command_timeout=self.config.default_subprocess_timeout,
+        )
+        raw = _sha256_file(Path(result.storePath))
+        if asset.digest != f"sha256:{raw}":
+            msg = (
+                f"Twilight DMG does not match release asset {asset.asset_id}: "
+                f"expected {asset.digest}, got sha256:{raw}"
+            )
+            raise RuntimeError(msg)
+
+    async def _snapshot_changed(
+        self,
+        session: aiohttp.ClientSession,
+        *,
+        phase: str,
+        expected: str,
+        observed: str,
+    ) -> None:
+        asset = await self._resolve_asset(session)
+        raise _TwilightSnapshotChangedError(
+            phase=phase,
+            expected=expected,
+            observed=observed,
+            asset_url=asset.api_url,
+        )
+
     async def fetch_latest(
         self, session: aiohttp.ClientSession, *, context: UpdateContext
     ) -> VersionInfo:
-        """Combine Twilight's published app version and build ID."""
+        """Combine Twilight's published app version, build ID, and asset id."""
         _ = context
         payload = await fetch_url(
             session,
@@ -122,7 +277,11 @@ class ZenTwilightUpdater(DownloadHashUpdater):
             update.attrib.get("buildID"),
             context=self.TWILIGHT_UPDATE_URL,
         )
-        return VersionInfo(version=f"{app_version}-{build_id}")
+        asset = await self._resolve_asset(session)
+        return VersionInfo(
+            version=f"{app_version}-{build_id}",
+            metadata=DownloadUrlMetadata(url=asset.api_url),
+        )
 
     async def _observe_snapshot(
         self,
@@ -141,17 +300,28 @@ class ZenTwilightUpdater(DownloadHashUpdater):
         stale_reads = 0
         while True:
             observed = await self.fetch_latest(session, context=context)
-            if observed == info:
-                return
+            if observed.version == info.version:
+                info_url = metadata_get_str(info.metadata, "url")
+                observed_url = metadata_get_str(observed.metadata, "url")
+                if info_url is None or info_url == observed_url:
+                    return
+                await self._snapshot_changed(
+                    session,
+                    phase=phase,
+                    expected=info.version,
+                    observed=observed.version,
+                )
             if _twilight_build_id(observed.version) > _twilight_build_id(info.version):
-                raise _TwilightSnapshotChangedError(
+                await self._snapshot_changed(
+                    session,
                     phase=phase,
                     expected=info.version,
                     observed=observed.version,
                 )
             stale_reads += 1
             if stale_reads >= self.STALE_READS:
-                raise _TwilightSnapshotChangedError(
+                await self._snapshot_changed(
+                    session,
                     phase=phase,
                     expected=info.version,
                     observed=observed.version,
@@ -166,11 +336,33 @@ class ZenTwilightUpdater(DownloadHashUpdater):
         context: UpdateContext,
         emit: EventSink = ignore_event,
     ) -> SourceHashes:
-        """Hash only a channel artifact bracketed by matching feed snapshots."""
+        """Hash the DMG only while its release asset and feed snapshot hold."""
         await self._observe_snapshot(session, context, info, phase="before")
-        hashes = await super().fetch_hashes(info, session, context=context, emit=emit)
+        asset = await self._resolve_asset(session)
+        pinned = metadata_get_str(info.metadata, "url")
+        if pinned is not None and pinned != asset.api_url:
+            await self._snapshot_changed(
+                session,
+                phase="before",
+                expected=info.version,
+                observed=info.version,
+            )
+        hashed = await stream_url_hash_mapping(
+            self.name,
+            dict.fromkeys(self.PLATFORMS, asset.browser_download_url),
+            config=self.config,
+            emit=emit,
+        )
+        await self._require_asset_digest(asset)
         await self._observe_snapshot(session, context, info, phase="after")
-        return hashes
+        if (await self._resolve_asset(session)).api_url != asset.api_url:
+            await self._snapshot_changed(
+                session,
+                phase="after",
+                expected=info.version,
+                observed=info.version,
+            )
+        return hashed
 
     async def update_stream(
         self,
@@ -183,7 +375,8 @@ class ZenTwilightUpdater(DownloadHashUpdater):
         """Resolve a fresh version and retry after channel movement.
 
         The resolve step is checkpointed, so a retry would otherwise keep
-        hashing the first build. A newer live read replaces that target.
+        hashing the first build. A newer live read replaces that target and
+        the asset URL captured with it.
         """
         context = context if context is not None else UpdateContext(current=current)
         attempt = 1
@@ -194,7 +387,10 @@ class ZenTwilightUpdater(DownloadHashUpdater):
                 )
             except _TwilightSnapshotChangedError as exc:
                 if _twilight_build_id(exc.observed) > _twilight_build_id(exc.expected):
-                    context.resolved_version = VersionInfo(version=exc.observed)
+                    context.resolved_version = VersionInfo(
+                        version=exc.observed,
+                        metadata=DownloadUrlMetadata(url=exc.asset_url),
+                    )
                 if attempt >= self.SNAPSHOT_ATTEMPTS:
                     msg = (
                         "Twilight channel changed repeatedly while hashing; "

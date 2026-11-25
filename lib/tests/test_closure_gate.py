@@ -255,6 +255,7 @@ def test_build_args_match_validation_plus_the_output_receipt() -> None:
         *expected[:first],
         "--max-jobs",
         "1",
+        "--print-build-logs",
         "--print-out-paths",
         *expected[first:],
     ]
@@ -1066,6 +1067,118 @@ def test_realize_failure_is_kept_for_the_uploaded_artifact(
     monkeypatch.setattr(gate.subprocess, "run", time_out_quietly)
     with pytest.raises(gate.GateError, match="nix timed out after 1s"):
         gate._run(["nix"], timeout=1)
+
+
+def test_stream_build_emits_the_log_before_the_build_exits(monkeypatch, capsys) -> None:
+    """A long nix build must show its log before the process returns."""
+    monkeypatch.setattr(gate, "_BUILD_HEARTBEAT_SECONDS", 0.05)
+    script = (
+        "import sys, time\n"
+        "sys.stderr.write('building goose-cli-v8-native\\n')\n"
+        "sys.stderr.flush()\n"
+        "sys.stdout.write('/nix/store/" + ("a" * 32) + "-out\\n')\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(0.2)\n"
+    )
+    stdout = gate._stream_build(
+        ["python3", "-c", script],
+        timeout=5,
+        label=".#packages.x86_64-linux.goose-cli",
+    )
+    output = capsys.readouterr().out
+    assert "closure-gate building .#packages.x86_64-linux.goose-cli\n" in output
+    assert "building goose-cli-v8-native" in output
+    assert "still running after" in output
+    assert stdout.strip() == "/nix/store/" + ("a" * 32) + "-out"
+
+
+def test_stream_build_emits_progress_and_keeps_a_timeout(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """Killing a silent build still leaves the lines it already printed."""
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setattr(gate, "_BUILD_HEARTBEAT_SECONDS", 0.05)
+    script = (
+        "import sys, time\n"
+        "sys.stderr.write('still compiling\\n')\n"
+        "sys.stderr.flush()\n"
+        "time.sleep(30)\n"
+    )
+    with pytest.raises(gate.GateError, match="goose-cli timed out after"):
+        gate._stream_build(
+            ["python3", "-c", script],
+            timeout=0.35,
+            label=".#packages.aarch64-darwin.goose-cli",
+        )
+    output = capsys.readouterr().out
+    assert "closure-gate building .#packages.aarch64-darwin.goose-cli\n" in output
+    assert "still compiling" in output
+    assert "still running after" in output
+    retained = (tmp_path / "update-artifacts" / "realize-error.txt").read_text()
+    assert "still compiling" in retained
+
+
+def test_stream_build_retains_a_failed_builder_log(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """A configure failure is in the step log and the uploaded excerpt."""
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    script = (
+        "import sys\nsys.stderr.write('Could not run pkg-config.\\n')\nsys.exit(1)\n"
+    )
+    with pytest.raises(gate.GateError, match="pkg-config"):
+        gate._stream_build(["python3", "-c", script], timeout=5, label="v8")
+    output = capsys.readouterr().out
+    assert "Could not run pkg-config." in output
+    retained = (tmp_path / "update-artifacts" / "realize-error.txt").read_text()
+    assert "Could not run pkg-config." in retained
+
+
+def test_stream_build_closes_the_pty_when_spawn_fails(monkeypatch) -> None:
+    """A failed spawn must not leak the pty master."""
+
+    def _fail_spawn(*_args: object, **_kwargs: object) -> None:
+        msg = "spawn failed"
+        raise OSError(msg)
+
+    monkeypatch.setattr(gate.subprocess, "Popen", _fail_spawn)
+    with pytest.raises(OSError, match="spawn failed"):
+        gate._stream_build(["python3", "-c", "pass"], timeout=1, label="spawn")
+
+
+def test_read_build_stdout_requires_a_captured_pipe() -> None:
+    """The stdout reader fails closed when Popen did not capture stdout."""
+
+    class _Process:
+        stdout = None
+
+    with pytest.raises(gate.GateError, match="not captured"):
+        gate._read_build_stdout(_Process(), [])  # type: ignore[arg-type]
+
+
+def test_stream_build_reports_a_missing_tool() -> None:
+    """The build names a missing runner tool before it opens a pty."""
+    with pytest.raises(gate.GateError, match="not on PATH"):
+        gate._stream_build(["nixcfg-missing-build-tool"], timeout=1, label="missing")
+
+
+def test_realize_build_streams_one_named_installable(monkeypatch) -> None:
+    """The packages slice names the installable whose nix log is streaming."""
+    seen: dict[str, object] = {}
+
+    def fake_stream(args: list[str], *, timeout: float, label: str) -> str:
+        seen["args"] = args
+        seen["timeout"] = timeout
+        seen["label"] = label
+        return "/nix/store/" + ("b" * 32) + "-goose-cli\n"
+
+    monkeypatch.setattr(gate, "_stream_build", fake_stream)
+    paths = gate._ProcessRunner().build((".#packages.aarch64-darwin.goose-cli",))
+    assert seen["label"] == ".#packages.aarch64-darwin.goose-cli"
+    assert seen["timeout"] == gate.BUILD_BUDGET_SECONDS
+    assert isinstance(seen["args"], list)
+    assert "--print-build-logs" in seen["args"]
+    assert paths == ("/nix/store/" + ("b" * 32) + "-goose-cli",)
 
 
 def test_failure_excerpt_keeps_the_builder_before_the_cascade() -> None:

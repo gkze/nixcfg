@@ -166,6 +166,10 @@ Run 36672202468 failed Darwin closure builds that a later shard still had
 to rebuild. Those pins stay in the closure, and the build correction is
 in tree. Comet rematerializes the mutable `comet_latest.dmg` hashes on
 Darwin prepare; Linux ARM reuses those hashes instead of prefetching R2.
+Zen Twilight's `twilight-1` GitHub release replaces
+`zen.macos-universal.dmg` in place, so that download URL cannot be a
+fixed-output pin. The updater records the release asset id and the hash of
+the upload whose GitHub digest matches the prefetched DMG.
 
 The app executable of Superconductor is `super.engineering`. The
 `CFBundleExecutable` of Reason is `Reason`. OpenCode 1.18 ships

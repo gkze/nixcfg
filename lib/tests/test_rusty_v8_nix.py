@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING
 
 from nix_manipulator import parse
 
+from lib.tests._nix_ast import assert_nix_ast_equal, parse_nix_expr
+from lib.tests._nix_source import nix_source_fragment_expr
 from lib.update.paths import REPO_ROOT
 
 if TYPE_CHECKING:
@@ -41,3 +43,24 @@ def test_rusty_v8_derives_clang_resource_version_from_immutable_source() -> None
     ]
     assert formal_names == ["rustyV8Src"]
     assert [child.type for child in formals[0].named_children] == ["identifier"]
+
+
+def test_rusty_v8_linux_gn_can_run_pkg_config() -> None:
+    """The Linux compiler config probes glib, so the native build needs pkg-config."""
+    assert_nix_ast_equal(
+        nix_source_fragment_expr(
+            "lib/rusty-v8.nix",
+            "lib.optionals pkgs.stdenv.hostPlatform.isLinux ",
+            ";",
+        ),
+        parse_nix_expr("[ pkgs.pkg-config ]"),
+    )
+    assert_nix_ast_equal(
+        nix_source_fragment_expr(
+            "lib/rusty-v8.nix",
+            "lib.optionals pkgs.stdenv.hostPlatform.isLinux ",
+            ";",
+            occurrence=1,
+        ),
+        parse_nix_expr("[ pkgs.glib ]"),
+    )

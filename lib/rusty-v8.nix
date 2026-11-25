@@ -228,7 +228,15 @@ in
               pkgs.ninja
               pkgs.python3
             ]
-            ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ pkgs.xcodebuild ];
+            ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ pkgs.xcodebuild ]
+            # Importing //build/config/linux:compiler evaluates pkg_config("glib")
+            # whenever use_glib is true. The script's "Could not run pkg-config"
+            # is the missing binary or a non-zero probe, and both look the same.
+            ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.pkg-config ];
+
+            # The pkg-config hook exports buildInputs' .pc files. glib provides
+            # glib-2.0, gmodule-2.0, gobject-2.0, and gthread-2.0.
+            buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.glib ];
 
             dontConfigure = true;
             dontFixup = true;

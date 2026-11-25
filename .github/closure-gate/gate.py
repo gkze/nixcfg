@@ -19,10 +19,12 @@ import ast
 import importlib.util
 import json
 import os
+import pty
 import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -43,6 +45,10 @@ if str(_REPO_ROOT) not in sys.path:
 # Same budget as Update's Darwin closure shards: the reusable job is 360
 # minutes, and flush needs the remainder after this build stops.
 BUILD_BUDGET_SECONDS = 18000
+# A build that prints nothing for a minute is still a running build.
+# 45562201170's packages slice spent the rest of the 6h job inside one
+# nix build whose captured output never reached the log.
+_BUILD_HEARTBEAT_SECONDS = 60.0
 _INVENTORY_EVAL_TIMEOUT_SECONDS = 50 * 60
 _INSTANTIATE_TIMEOUT_SECONDS = 50 * 60
 _PUSH_TIMEOUT_SECONDS = 1200.0
@@ -362,6 +368,7 @@ def build_args(installables: tuple[str, ...]) -> list[str]:
         "--fallback",
         "--max-jobs",
         "1",
+        "--print-build-logs",
         "--print-out-paths",
         *normalized,
     ]
@@ -1006,6 +1013,142 @@ def _process_text(value: bytes | str | None) -> str:
     return value
 
 
+def _write_build_log(chunk: bytes) -> None:
+    text = _process_text(chunk).replace("\r\n", "\n").replace("\r", "\n")
+    sys.stdout.write(text)
+    sys.stdout.flush()
+
+
+def _read_build_stderr(master: int, chunks: list[bytes]) -> None:
+    while True:
+        try:
+            chunk = os.read(master, 4096)
+        except OSError:
+            return
+        if not chunk:
+            return
+        chunks.append(chunk)
+        _write_build_log(chunk)
+
+
+def _read_build_stdout(process: subprocess.Popen[bytes], chunks: list[bytes]) -> None:
+    stdout = process.stdout
+    if stdout is None:
+        msg = "build stdout was not captured"
+        raise GateError(msg)
+    chunks.append(stdout.read())
+
+
+def _wait_for_build(
+    process: subprocess.Popen[bytes],
+    *,
+    timeout: float,
+    label: str,
+) -> bool:
+    """Return whether the build exceeded ``timeout``. Print a heartbeat until then."""
+    started = time.monotonic()
+    deadline = started + timeout
+    while process.poll() is None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            process.kill()
+            process.wait(timeout=30)
+            return True
+        try:
+            process.wait(timeout=min(_BUILD_HEARTBEAT_SECONDS, remaining))
+        except subprocess.TimeoutExpired:
+            if time.monotonic() >= deadline:
+                continue
+            elapsed = time.monotonic() - started
+            sys.stdout.write(
+                f"closure-gate building {label} still running after {elapsed:.0f}s\n"
+            )
+            sys.stdout.flush()
+    return False
+
+
+def _join_build_logs(
+    process: subprocess.Popen[bytes],
+    *,
+    master: int,
+    stdout_thread: threading.Thread,
+    stderr_thread: threading.Thread,
+) -> None:
+    if process.poll() is None:  # pragma: no cover -- the wait loop owns the timeout
+        process.kill()
+        process.wait(timeout=30)
+    stdout_thread.join(timeout=5)
+    if stderr_thread.is_alive():
+        os.close(master)
+        stderr_thread.join(timeout=5)
+        return
+    os.close(master)
+
+
+def _stream_build(args: list[str], *, timeout: float, label: str) -> str:
+    """Run one build and copy its log to the Actions log while it is running.
+
+    ``subprocess.run(capture_output=True)`` keeps both pipes until the process
+    exits. A multi-hour ``nix build`` then looks idle, and the 6h job kills it
+    before ``communicate`` can return a log. Nix block-buffers stderr on a
+    pipe, so the builder log is a pty. A heartbeat covers a compile that
+    prints nothing. The job timeout and ``BUILD_BUDGET_SECONDS`` stay put.
+    """
+    argv = [_executable(args[0]), *args[1:]]
+    sys.stdout.write(f"closure-gate building {label}\n")
+    sys.stdout.flush()
+    master, slave = pty.openpty()
+    try:
+        process = subprocess.Popen(  # noqa: S603 -- nix argv, never a shell
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=slave,
+        )
+    except Exception:
+        os.close(master)
+        raise
+    finally:
+        os.close(slave)
+
+    stdout_chunks: list[bytes] = []
+    stderr_chunks: list[bytes] = []
+    stdout_thread = threading.Thread(
+        target=_read_build_stdout, args=(process, stdout_chunks)
+    )
+    stderr_thread = threading.Thread(
+        target=_read_build_stderr, args=(master, stderr_chunks)
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+    try:
+        timed_out = _wait_for_build(process, timeout=timeout, label=label)
+    finally:
+        _join_build_logs(
+            process,
+            master=master,
+            stdout_thread=stdout_thread,
+            stderr_thread=stderr_thread,
+        )
+    stdout = _process_text(b"".join(stdout_chunks))
+    stderr = (
+        _process_text(b"".join(stderr_chunks)).replace("\r\n", "\n").replace("\r", "\n")
+    )
+    if timed_out:
+        detail = stderr or stdout
+        _retain_process_failure(_bounded_text(detail))
+        tail = failure_excerpt(detail)
+        msg = f"closure-gate building {label} timed out after {timeout:.0f}s"
+        if tail:
+            msg = f"{msg}: {tail}"
+        raise GateError(msg)
+    if process.returncode != 0:
+        detail = (stderr or stdout).strip()
+        _retain_process_failure(_bounded_text(detail))
+        msg = f"{' '.join(args[:4])} failed: {failure_excerpt(detail)}"
+        raise GateError(msg)
+    return stdout
+
+
 def _run(args: list[str], *, timeout: float, cwd: Path | None = None) -> str:
     try:
         result = subprocess.run(  # noqa: S603 -- nix or cachix argv, never a shell
@@ -1090,7 +1233,11 @@ class _ProcessRunner(_Runner):
         return gkze_presence(path, _http_status, time.sleep)
 
     def build(self, installables: tuple[str, ...]) -> tuple[str, ...]:
-        stdout = _run(build_args(installables), timeout=BUILD_BUDGET_SECONDS)
+        stdout = _stream_build(
+            build_args(installables),
+            timeout=BUILD_BUDGET_SECONDS,
+            label=" ".join(installables),
+        )
         paths = tuple(
             line.strip()
             for line in stdout.splitlines()

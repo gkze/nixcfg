@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Iterable
+from pathlib import Path
 from types import ModuleType
 
 import pytest
@@ -33,6 +34,34 @@ from lib.update.updaters.core import UpdateContext
 from lib.update.updaters.metadata import DownloadUrlMetadata
 from lib.update.updaters.vendor_feeds import SparkleAppcastItem
 
+_TWILIGHT_ASSET_ID = 4242
+
+
+def _install_twilight_release(
+    monkeypatch: pytest.MonkeyPatch,
+    module: ModuleType,
+    *,
+    asset_id: int = _TWILIGHT_ASSET_ID,
+) -> str:
+    payload = {
+        "assets": [
+            {
+                "name": module.ZenTwilightUpdater.TWILIGHT_ASSET_NAME,
+                "id": asset_id,
+                "digest": "sha256:" + ("ab" * 32),
+                "browser_download_url": module.ZenTwilightUpdater.TWILIGHT_DMG_URL,
+            }
+        ]
+    }
+
+    async def _fetch_github_api(
+        _session: object, _path: str, **_kwargs: object
+    ) -> dict[str, object]:
+        return payload
+
+    monkeypatch.setattr(module, "fetch_github_api", _fetch_github_api)
+    return module.twilight_asset_url(asset_id)
+
 
 def _install_twilight_feed(
     monkeypatch: pytest.MonkeyPatch,
@@ -50,11 +79,13 @@ def _install_twilight_feed(
         ).encode()
 
     monkeypatch.setattr(module, "fetch_url", _fetch_url)
+    _install_twilight_release(monkeypatch, module)
     return calls
 
 
 def _install_twilight_hashes(
     monkeypatch: pytest.MonkeyPatch,
+    module: ModuleType,
     hash_values: Iterable[str],
 ) -> list[tuple[str, ...]]:
     values = iter(hash_values)
@@ -75,6 +106,15 @@ def _install_twilight_hashes(
     monkeypatch.setattr(
         "lib.update.process.compute_url_hashes",
         _compute_url_hashes,
+    )
+
+    async def _accept_digest(_self: object, _asset: object) -> None:
+        return None
+
+    monkeypatch.setattr(
+        module.ZenTwilightUpdater,
+        "_require_asset_digest",
+        _accept_digest,
     )
     return calls
 
@@ -334,10 +374,16 @@ def test_zen_twilight_reads_channel_version_and_recomputes_hashes(
         )
 
     monkeypatch.setattr(module, "fetch_url", _fetch_url)
+    asset_url = _install_twilight_release(monkeypatch, module)
 
     latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
-    assert latest == VersionInfo(version="1.22t-20260803113308")
+    assert latest.version == "1.22t-20260803113308"
+    assert latest.metadata == DownloadUrlMetadata(url=asset_url)
+    assert updater.get_download_url("aarch64-darwin", latest) == asset_url
+    assert (
+        updater.get_download_url("aarch64-darwin", latest) != updater.TWILIGHT_DMG_URL
+    )
     assert updater.PLATFORMS == {
         "aarch64-darwin": updater.TWILIGHT_DMG_URL,
         "x86_64-darwin": updater.TWILIGHT_DMG_URL,
@@ -424,7 +470,7 @@ def test_zen_twilight_hashes_one_stable_channel_snapshot(
         module,
         ("20260803113308",) * 3,
     )
-    hash_calls = _install_twilight_hashes(monkeypatch, ("sha256-stable",))
+    hash_calls = _install_twilight_hashes(monkeypatch, module, ("sha256-stable",))
 
     events = _run(
         _collect_events(lambda emit: updater.update_stream(None, object(), emit=emit))
@@ -443,8 +489,8 @@ def test_zen_twilight_hashes_one_stable_channel_snapshot(
                 "x86_64-darwin": "sha256-stable",
             },
             urls={
-                "aarch64-darwin": updater.TWILIGHT_DMG_URL,
-                "x86_64-darwin": updater.TWILIGHT_DMG_URL,
+                "aarch64-darwin": module.twilight_asset_url(_TWILIGHT_ASSET_ID),
+                "x86_64-darwin": module.twilight_asset_url(_TWILIGHT_ASSET_ID),
             },
         )
     ]
@@ -464,7 +510,7 @@ def test_zen_twilight_rejects_a_snapshot_that_moves_before_hashing(
     )
     updater = module.ZenTwilightUpdater(config=resolve_config(retry_backoff=0))
     _install_twilight_feed(monkeypatch, module, ("20260804121500",))
-    hash_calls = _install_twilight_hashes(monkeypatch, ("sha256-unexpected",))
+    hash_calls = _install_twilight_hashes(monkeypatch, module, ("sha256-unexpected",))
 
     with pytest.raises(RuntimeError, match="changed before hashing"):
         _run(
@@ -475,6 +521,106 @@ def test_zen_twilight_rejects_a_snapshot_that_moves_before_hashing(
                     emit=emit,
                     context=UpdateContext(current=None),
                 )
+            )
+        )
+
+    assert hash_calls == []
+
+
+def test_zen_twilight_rejects_an_upload_replaced_after_hashing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A release asset replaced while prefetch runs is not the hashed upload."""
+    module = _load_updater(
+        "packages/zen-twilight/updater.py",
+        "zen_twilight_updater_test_post_hash_asset",
+    )
+    updater = module.ZenTwilightUpdater(config=resolve_config(retry_backoff=0))
+    _install_twilight_feed(
+        monkeypatch,
+        module,
+        ("20260803113308", "20260803113308"),
+    )
+    resolves = 0
+
+    async def _move_the_asset_after_hash(
+        _session: object, _path: str, **_kwargs: object
+    ) -> dict[str, object]:
+        nonlocal resolves
+        resolves += 1
+        asset_id = _TWILIGHT_ASSET_ID if resolves < 4 else _TWILIGHT_ASSET_ID + 1
+        return {
+            "assets": [
+                {
+                    "name": module.ZenTwilightUpdater.TWILIGHT_ASSET_NAME,
+                    "id": asset_id,
+                    "digest": "sha256:" + ("ab" * 32),
+                    "browser_download_url": module.ZenTwilightUpdater.TWILIGHT_DMG_URL,
+                }
+            ]
+        }
+
+    monkeypatch.setattr(module, "fetch_github_api", _move_the_asset_after_hash)
+    hash_calls = _install_twilight_hashes(monkeypatch, module, ("sha256-replaced",))
+
+    with pytest.raises(module._TwilightSnapshotChangedError, match="changed after"):
+        _run(
+            updater.fetch_hashes(
+                VersionInfo(
+                    "1.22t-20260803113308",
+                    metadata=DownloadUrlMetadata(
+                        url=module.twilight_asset_url(_TWILIGHT_ASSET_ID)
+                    ),
+                ),
+                object(),
+                context=UpdateContext(current=None),
+            )
+        )
+
+    assert hash_calls == [(updater.TWILIGHT_DMG_URL, updater.TWILIGHT_DMG_URL)]
+
+
+@pytest.mark.usefixtures("_twilight_darwin_platform")
+def test_zen_twilight_does_not_publish_a_replaced_upload_as_the_old_build(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same build id with a new asset id is a different file, so retry stops."""
+    module = _load_updater(
+        "packages/zen-twilight/updater.py",
+        "zen_twilight_updater_test_same_build_new_asset",
+    )
+    updater = module.ZenTwilightUpdater(config=resolve_config(retry_backoff=0))
+    _install_twilight_feed(
+        monkeypatch,
+        module,
+        ("20260803113308",) * 4,
+    )
+    resolves = 0
+
+    async def _replace_the_upload(
+        _session: object, _path: str, **_kwargs: object
+    ) -> dict[str, object]:
+        nonlocal resolves
+        resolves += 1
+        asset_id = _TWILIGHT_ASSET_ID if resolves < 3 else _TWILIGHT_ASSET_ID + 1
+        return {
+            "assets": [
+                {
+                    "name": module.ZenTwilightUpdater.TWILIGHT_ASSET_NAME,
+                    "id": asset_id,
+                    "digest": "sha256:" + ("ab" * 32),
+                    "browser_download_url": module.ZenTwilightUpdater.TWILIGHT_DMG_URL,
+                }
+            ]
+        }
+
+    monkeypatch.setattr(module, "fetch_github_api", _replace_the_upload)
+    hash_calls = _install_twilight_hashes(monkeypatch, module, ("sha256-unused",))
+
+    with pytest.raises(RuntimeError, match="changed repeatedly"):
+        _run(
+            _collect_events(
+                lambda emit: updater.update_stream(None, object(), emit=emit)
             )
         )
 
@@ -581,6 +727,7 @@ def test_zen_twilight_retries_the_whole_unpinned_snapshot(
     )
     hash_calls = _install_twilight_hashes(
         monkeypatch,
+        module,
         ("sha256-raced", "sha256-current"),
     )
 
@@ -601,8 +748,8 @@ def test_zen_twilight_retries_the_whole_unpinned_snapshot(
                 "x86_64-darwin": "sha256-current",
             },
             urls={
-                "aarch64-darwin": updater.TWILIGHT_DMG_URL,
-                "x86_64-darwin": updater.TWILIGHT_DMG_URL,
+                "aarch64-darwin": module.twilight_asset_url(_TWILIGHT_ASSET_ID),
+                "x86_64-darwin": module.twilight_asset_url(_TWILIGHT_ASSET_ID),
             },
         )
     ]
@@ -641,6 +788,7 @@ def test_zen_twilight_bounds_repeated_snapshot_changes(
     )
     hash_calls = _install_twilight_hashes(
         monkeypatch,
+        module,
         ("sha256-first", "sha256-second"),
     )
 
@@ -686,6 +834,7 @@ def test_zen_twilight_adopts_a_newer_build_and_ignores_a_stale_reread(
     )
     hash_calls = _install_twilight_hashes(
         monkeypatch,
+        module,
         ("sha256-stale", "sha256-current"),
     )
 
@@ -706,12 +855,162 @@ def test_zen_twilight_adopts_a_newer_build_and_ignores_a_stale_reread(
                 "x86_64-darwin": "sha256-current",
             },
             urls={
-                "aarch64-darwin": updater.TWILIGHT_DMG_URL,
-                "x86_64-darwin": updater.TWILIGHT_DMG_URL,
+                "aarch64-darwin": module.twilight_asset_url(_TWILIGHT_ASSET_ID),
+                "x86_64-darwin": module.twilight_asset_url(_TWILIGHT_ASSET_ID),
             },
         )
     ]
     assert len(hash_calls) == 2
+
+
+def test_zen_twilight_rejects_an_unresolved_asset_url() -> None:
+    """A pin without a resolved release asset is not a download URL."""
+    module = _load_updater(
+        "packages/zen-twilight/updater.py",
+        "zen_twilight_updater_test_missing_asset",
+    )
+    updater = module.ZenTwilightUpdater()
+
+    with pytest.raises(RuntimeError, match="asset URL was not resolved"):
+        updater.get_download_url("aarch64-darwin", VersionInfo(version="1.22t-1"))
+    with pytest.raises(RuntimeError, match="must be positive"):
+        module.twilight_asset_url(0)
+
+
+@pytest.mark.parametrize(
+    ("payload", "match", "error"),
+    [
+        ("release", "is not an object", TypeError),
+        ({}, "has no assets", TypeError),
+        ({"assets": [None, {"name": "other"}]}, "has 0", RuntimeError),
+        (
+            {"assets": [{"name": "zen.macos-universal.dmg", "id": "1"}]},
+            "has no id",
+            TypeError,
+        ),
+        (
+            {"assets": [{"name": "zen.macos-universal.dmg", "id": True}]},
+            "has no id",
+            TypeError,
+        ),
+        (
+            {
+                "assets": [
+                    {
+                        "name": "zen.macos-universal.dmg",
+                        "id": 7,
+                        "digest": "md5:ab",
+                    }
+                ]
+            },
+            "no sha256 digest",
+            RuntimeError,
+        ),
+        (
+            {
+                "assets": [
+                    {
+                        "name": "zen.macos-universal.dmg",
+                        "id": 7,
+                        "digest": "sha256:" + ("ab" * 32),
+                        "browser_download_url": "http://example.test/zen.macos-universal.dmg",
+                    }
+                ]
+            },
+            "no HTTPS DMG",
+            RuntimeError,
+        ),
+        (
+            {
+                "assets": [
+                    {
+                        "name": "zen.macos-universal.dmg",
+                        "id": 7,
+                        "digest": "sha256:" + ("ab" * 32),
+                        "browser_download_url": (
+                            "https://example.test/zen.macos-universal.dmg"
+                        ),
+                    },
+                    {
+                        "name": "zen.macos-universal.dmg",
+                        "id": 8,
+                        "digest": "sha256:" + ("cd" * 32),
+                        "browser_download_url": (
+                            "https://example.test/zen.macos-universal.dmg"
+                        ),
+                    },
+                ]
+            },
+            "has 2",
+            RuntimeError,
+        ),
+    ],
+)
+def test_zen_twilight_rejects_a_release_without_one_dmg(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: object,
+    match: str,
+    error: type[Exception],
+) -> None:
+    """The pin exists only when the release has one digested DMG upload."""
+    module = _load_updater(
+        "packages/zen-twilight/updater.py",
+        "zen_twilight_updater_test_release_"
+        + "".join(char if char.isalnum() else "_" for char in match),
+    )
+    updater = module.ZenTwilightUpdater()
+
+    async def _fetch_github_api(*_args: object, **_kwargs: object) -> object:
+        return payload
+
+    monkeypatch.setattr(module, "fetch_github_api", _fetch_github_api)
+    with pytest.raises(error, match=match):
+        _run(updater._resolve_asset(object()))
+
+
+def test_zen_twilight_accepts_only_the_digested_upload(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The prefetched DMG must be the release asset, not a later upload."""
+    import hashlib
+
+    from lib.nix.commands.hash import PrefetchResult
+
+    module = _load_updater(
+        "packages/zen-twilight/updater.py",
+        "zen_twilight_updater_test_digest",
+    )
+    updater = module.ZenTwilightUpdater()
+    payload = b"twilight-dmg"
+    dmg = tmp_path / "zen.macos-universal.dmg"
+    dmg.write_bytes(payload)
+    digest = "sha256:" + hashlib.sha256(payload).hexdigest()
+    asset = module._TwilightAsset(
+        asset_id=7,
+        digest=digest,
+        browser_download_url=updater.TWILIGHT_DMG_URL,
+    )
+
+    async def _prefetch(*_args: object, **_kwargs: object) -> PrefetchResult:
+        return PrefetchResult(
+            hash="sha256-" + ("A" * 43) + "=",
+            storePath=str(dmg),
+        )
+
+    monkeypatch.setattr(
+        "lib.nix.commands.hash.nix_prefetch_url_result",
+        _prefetch,
+    )
+    assert _run(updater._require_asset_digest(asset)) is None
+
+    mismatched = module._TwilightAsset(
+        asset_id=7,
+        digest="sha256:" + ("00" * 32),
+        browser_download_url=updater.TWILIGHT_DMG_URL,
+    )
+    with pytest.raises(RuntimeError, match="does not match release asset 7"):
+        _run(updater._require_asset_digest(mismatched))
 
 
 def test_zen_twilight_rejects_a_version_without_a_build_id() -> None:
@@ -739,7 +1038,7 @@ def test_zen_twilight_stops_after_repeated_stale_feed_reads(
         module,
         ("20260803113308",) * module.ZenTwilightUpdater.STALE_READS,
     )
-    hash_calls = _install_twilight_hashes(monkeypatch, ("sha256-unexpected",))
+    hash_calls = _install_twilight_hashes(monkeypatch, module, ("sha256-unexpected",))
 
     with pytest.raises(RuntimeError, match="changed before hashing"):
         _run(
@@ -777,7 +1076,7 @@ def test_zen_twilight_retries_after_an_older_edge_hides_the_resolved_build(
             "20260804121500",  # retry post-hash
         ),
     )
-    hash_calls = _install_twilight_hashes(monkeypatch, ("sha256-current",))
+    hash_calls = _install_twilight_hashes(monkeypatch, module, ("sha256-current",))
 
     events = _run(
         _collect_events(lambda emit: updater.update_stream(None, object(), emit=emit))
@@ -796,8 +1095,8 @@ def test_zen_twilight_retries_after_an_older_edge_hides_the_resolved_build(
                 "x86_64-darwin": "sha256-current",
             },
             urls={
-                "aarch64-darwin": updater.TWILIGHT_DMG_URL,
-                "x86_64-darwin": updater.TWILIGHT_DMG_URL,
+                "aarch64-darwin": module.twilight_asset_url(_TWILIGHT_ASSET_ID),
+                "x86_64-darwin": module.twilight_asset_url(_TWILIGHT_ASSET_ID),
             },
         )
     ]
