@@ -102,7 +102,11 @@ let
 
     env = {
       CI = "1";
+      # pnpm 12 downloads the packageManager pin and verifies its npm
+      # signature unless these are false. turbo forwards them only after
+      # turbo_pnpm_passthrough.py names them in globalPassThroughEnv.
       npm_config_manage_package_manager_versions = "false";
+      pnpm_config_manage_package_manager_versions = "false";
     };
 
     buildPhase = ''
@@ -111,8 +115,8 @@ let
       export HOME="$TMPDIR/gitbutler-home"
       mkdir -p "$HOME"
       ${
-        # pnpm 11+ rejects this key in its global config.yaml; the
-        # npm_config_manage_package_manager_versions env above still applies.
+        # pnpm 11+ rejects this key in its global config.yaml; the env
+        # above is what pnpm 12 reads.
         lib.optionalString (pnpmRelease < 11) ''
           pnpm config set manage-package-manager-versions false
         ''
@@ -123,6 +127,7 @@ let
         echo "gitbutler: expected nixpkgs pnpm ${pnpm.version}, got $active_pnpm" >&2
         exit 1
       fi
+      ${python3}/bin/python3 ${./turbo_pnpm_passthrough.py}
       ${lib.optionalString stdenv.hostPlatform.isLinux linuxFrontendNodeFix}
       pnpm build:desktop -- --mode production
 
