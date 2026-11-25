@@ -34,7 +34,7 @@
     {
       "hash": "sha256-F7saqFMOErHI6OtGG4UCWnErvl1scRP51Y7UjBTIII4=",
       "hashType": "srcHash",
-      "url": "https://github.com/microsoft/onnxruntime/archive/8f0278c77bf44b0cc83c098c6c722b92a36ac4b5.tar.gz"
+      "url": "https://registry.npmmirror.com/-/binary/onnxruntime/v1.27.0/v1.27.0.tar.gz"
     },
     {
       "hash": "sha256-UQ8qNqoeDwkwhmVZebi++gb2GP61dr1Zv2QU9mJ6KJ8=",
@@ -49,7 +49,7 @@
     "buzz": "https://github.com/block/buzz/archive/f87c10895ea35a9a2cea629fef1d7532a3fecbc5.tar.gz",
     "llamaCpp": "https://github.com/ggml-org/llama.cpp/archive/b31b71f3a076bfc4278daad442203a9c51c6e676.tar.gz",
     "meshLlm": "https://github.com/Mesh-LLM/mesh-llm/archive/a0c1e66b0ac037dd56544b9e2d94969ea43d694f.tar.gz",
-    "onnxruntime": "https://github.com/microsoft/onnxruntime/archive/8f0278c77bf44b0cc83c098c6c722b92a36ac4b5.tar.gz",
+    "onnxruntime": "https://registry.npmmirror.com/-/binary/onnxruntime/v1.27.0/v1.27.0.tar.gz",
     "sherpaOnnx": "https://github.com/k2-fsa/sherpa-onnx/archive/142807252687d81b40d6315f23470a1512a00de3.tar.gz"
   },
   "version": "0.5.28"

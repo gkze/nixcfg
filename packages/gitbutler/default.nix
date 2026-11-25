@@ -71,6 +71,18 @@ let
         hash = npmDepsHash;
       };
 
+  # autoPatchelf rewrites the interpreter and RPATH of the official Node
+  # binary pnpm installs for devEngines.runtime. Doing both makes Node
+  # 24.21.0 exit 139 before turbo prints a task. Native addons still need
+  # that RPATH. The runtime itself is the nixpkgs node already on PATH.
+  linuxFrontendNodeFix = ''
+    autoPatchelf node_modules
+    while IFS= read -r node_bin; do
+      rm -f "$node_bin"
+      ln -s "$(type -P node)" "$node_bin"
+    done < <(find node_modules -path '*/node@runtime+*/node_modules/node/bin/node' \( -type f -o -type l \))
+  '';
+
   frontend = stdenv.mkDerivation {
     pname = "${pname}-frontend";
     inherit version src pnpmDeps;
@@ -111,9 +123,7 @@ let
         echo "gitbutler: expected nixpkgs pnpm ${pnpm.version}, got $active_pnpm" >&2
         exit 1
       fi
-      ${lib.optionalString stdenv.hostPlatform.isLinux ''
-        autoPatchelf node_modules
-      ''}
+      ${lib.optionalString stdenv.hostPlatform.isLinux linuxFrontendNodeFix}
       pnpm build:desktop -- --mode production
 
       runHook postBuild

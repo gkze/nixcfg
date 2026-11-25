@@ -1,7 +1,7 @@
 {
   abseil-cpp_202601,
   cctools,
-  fetchFromGitHub,
+  fetchzip,
   ld64,
   lib,
   nativeLock ? builtins.fromJSON (builtins.readFile ../native-lock.json),
@@ -9,6 +9,7 @@
   protobuf,
   python3,
   srcHash,
+  srcUrl,
   stdenv,
 }:
 assert stdenv.hostPlatform.system == "aarch64-darwin";
@@ -75,12 +76,14 @@ base.overrideAttrs (old: {
   pname = "buzz-onnxruntime";
   inherit version;
 
-  src = fetchFromGitHub {
-    owner = "microsoft";
-    repo = "onnxruntime";
-    rev = commit;
-    fetchSubmodules = false;
+  # microsoft/onnxruntime has been private since 2026-11-17, so the commit
+  # archive 404s. srcUrl is the official v1.27.0 tag tarball
+  # (sha256 b41d09905a3c2f3a25709d1dcce8ef3942a4c2799d1046f74be7b6bbebc45e6a).
+  # fetchzip strips the root directory, and that tree's NAR hash is unchanged.
+  src = fetchzip {
+    url = srcUrl;
     hash = srcHash;
+    stripRoot = true;
   };
 
   patches = (old.patches or [ ]) ++ [
