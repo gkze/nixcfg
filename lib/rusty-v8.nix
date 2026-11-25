@@ -89,6 +89,38 @@ in
       # Chromium records the resource-directory name beside the exact V8
       # source. Derive it there so a V8 update cannot leave a duplicate pin
       # behind in each consumer's updater metadata.
+      #
+      # clang_lib("compiler_builtins") then looks that directory up itself:
+      # lib/clang/$RELEASE_VERSION/lib/<triple>/libclang_rt.builtins.a on
+      # Linux, and lib/darwin/libclang_rt.osx.a on Darwin. Nix clang's
+      # resource directory does not ship those archives. compiler-rt does,
+      # under lib/linux and lib/darwin. Goose and Codex both use this bundle.
+      clangRuntimeLink =
+        if pkgs.stdenv.hostPlatform.isLinux then
+          ''
+            runtime_dir="$version_dir/lib/${pkgs.stdenv.hostPlatform.config}"
+            rm -rf "$runtime_dir"
+            mkdir -p "$runtime_dir"
+            ln -s ${pkgs.llvmPackages.compiler-rt}/lib/linux/libclang_rt.builtins-${pkgs.stdenv.hostPlatform.parsed.cpu.name}${pkgs.stdenv.hostPlatform.extensions.staticLibrary} \
+              "$runtime_dir/libclang_rt.builtins${pkgs.stdenv.hostPlatform.extensions.staticLibrary}"
+          ''
+        else if pkgs.stdenv.hostPlatform.isDarwin then
+          ''
+            runtime_dir="$version_dir/lib/darwin"
+            rm -rf "$runtime_dir"
+            mkdir -p "$runtime_dir"
+            if [ -d ${pkgs.llvmPackages.clang}/resource-root/lib/darwin ]; then
+              for entry in ${pkgs.llvmPackages.clang}/resource-root/lib/darwin/*; do
+                [ -e "$entry" ] || continue
+                ln -s "$entry" "$runtime_dir/$(basename "$entry")"
+              done
+            fi
+            ln -sfn ${pkgs.llvmPackages.compiler-rt}/lib/darwin/libclang_rt.osx${pkgs.stdenv.hostPlatform.extensions.staticLibrary} \
+              "$runtime_dir/libclang_rt.osx${pkgs.stdenv.hostPlatform.extensions.staticLibrary}"
+          ''
+        else
+          abort "rusty-v8 has no compiler-rt builtins layout for this platform";
+
       chromiumToolchainBundle = pkgs.runCommand "${name}-toolchain-${version}" { } ''
         clang_resource_version="$(${pkgs.python3}/bin/python3 \
           ${patchScriptsDir}/patch_compiler_gni.py --print-release-version \
@@ -127,9 +159,24 @@ in
           ln -sf ${pkgs.llvmPackages.llvm}/bin/$tool $llvm_bin/$tool
         done
 
-        mkdir -p $llvm_bundle/lib/clang
-        ln -sf ${pkgs.llvmPackages.clang}/resource-root \
-          "$llvm_bundle/lib/clang/$clang_resource_version"
+        resource=${pkgs.llvmPackages.clang}/resource-root
+        version_dir="$llvm_bundle/lib/clang/$clang_resource_version"
+        mkdir -p "$version_dir/lib"
+        for entry in "$resource"/*; do
+          [ -e "$entry" ] || continue
+          entry_name="$(basename "$entry")"
+          if [ "$entry_name" = lib ]; then
+            continue
+          fi
+          ln -s "$entry" "$version_dir/$entry_name"
+        done
+        if [ -d "$resource/lib" ]; then
+          for entry in "$resource"/lib/*; do
+            [ -e "$entry" ] || continue
+            ln -s "$entry" "$version_dir/lib/$(basename "$entry")"
+          done
+        fi
+        ${clangRuntimeLink}
       '';
 
       patchedSrc =

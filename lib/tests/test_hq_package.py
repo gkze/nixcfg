@@ -3,6 +3,7 @@
 import json
 import os
 import plistlib
+import shutil
 import subprocess
 import sys
 from dataclasses import replace
@@ -11,6 +12,7 @@ from types import ModuleType
 from urllib.parse import urlsplit
 
 import pytest
+from nix_manipulator import parse
 from nix_manipulator.expressions.assertion import Assertion
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
@@ -416,6 +418,37 @@ def test_hq_artifact_validator_rejects_drifted_disabled_control_flow(
             main_executable=executable,
             expected_version=_VERSION,
         )
+
+
+def _reviewed_hq_archive(root: Path) -> None:
+    (root / "HQ.app/Contents/MacOS").mkdir(parents=True, exist_ok=True)
+    (root / "HQ.app/Contents/Helpers/HQ Capture.app/Contents/MacOS").mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+
+def test_hq_app_inventory_requires_the_root_app_and_capture_helper(
+    tmp_path: Path,
+) -> None:
+    """The 0.11.39 archive nests HQ Capture.app; any other bundle set is rejected."""
+    module = _load_hq_module("app_inventory.py", "hq_app_inventory_test")
+    _reviewed_hq_archive(tmp_path)
+    assert module.app_inventory(tmp_path) == list(module.EXPECTED_APPS)
+    module.require_app_inventory(tmp_path)
+    module.main(["app_inventory.py", str(tmp_path)])
+
+    shutil.rmtree(tmp_path / "HQ.app/Contents/Helpers")
+    with pytest.raises(SystemExit, match=r"unexpected HQ app inventory: \['HQ.app'\]"):
+        module.require_app_inventory(tmp_path)
+
+    _reviewed_hq_archive(tmp_path)
+    (tmp_path / "HQ.app/Contents/Helpers/Other.app").mkdir()
+    with pytest.raises(SystemExit, match="unexpected HQ app inventory:"):
+        module.require_app_inventory(tmp_path)
+
+    with pytest.raises(SystemExit, match="usage: app_inventory.py"):
+        module.main(["app_inventory.py"])
 
 
 def test_hq_signature_inventory_accepts_executable_and_dylib_codesign_evidence(
@@ -1242,9 +1275,32 @@ def test_hq_package_is_an_unfree_nix_owned_signed_app() -> None:
         parse_shell(indented_string_body(install_phase.rebuild())),
         "/usr/bin/codesign",
     )
-    assert len(sign_commands) == 4
+    assert len(sign_commands) == 5
     assert all("--options runtime" in command for command in sign_commands)
     assert all("--entitlements __NIX_INTERP__" in command for command in sign_commands)
+    helper_sign = next(
+        index
+        for index, command in enumerate(sign_commands)
+        if '"$captureHelper"' in command
+    )
+    parent_sign = next(
+        index
+        for index, command in enumerate(sign_commands)
+        if command.rstrip().endswith('"$app"')
+    )
+    assert helper_sign < parent_sign
+    package_source = (_PACKAGE_DIR / "default.nix").read_text(encoding="utf-8")
+    encoded_package = package_source.encode()
+
+    def path_fragments(node: object) -> list[str]:
+        fragments: list[str] = []
+        if getattr(node, "type", None) == "path_fragment":
+            fragments.append(encoded_package[node.start_byte : node.end_byte].decode())
+        for child in getattr(node, "named_children", ()):
+            fragments.extend(path_fragments(child))
+        return fragments
+
+    assert "./app_inventory.py" in path_fragments(parse(package_source).node)
 
     install_check = expect_instance(
         expect_binding(args.values, "installCheckPhase").value,
@@ -1259,6 +1315,7 @@ def test_hq_package_is_an_unfree_nix_owned_signed_app() -> None:
         '/usr/bin/codesign -d --verbose=4 --entitlements :- "$candidate"'
         in install_check_commands
     )
+    assert any('"$captureHelper"' in command for command in install_check_commands)
     signature_cases = [
         node_text(node, install_check_shell.sanitized)
         for node in iter_nodes(install_check_shell.tree.root_node, "case_statement")
