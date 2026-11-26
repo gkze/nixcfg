@@ -125,6 +125,25 @@ in
       # __has_feature(undefined_behavior_sanitizer) stays false. Without that,
       # v8/src/sandbox/testing.cc includes the sanitizer runtime. A clang that
       # accepts the flag is linked through. Goose and Codex share this bundle.
+      #
+      # The wrapper is its own script. A heredoc nested under the if in
+      # clangLink stays indented after Nix dedents that string, so the
+      # terminator never matches and bash exits before `done`.
+      ubsanClangWrapper =
+        tool:
+        pkgs.writeScript "rusty-v8-${tool}" ''
+          #!${pkgs.python3}/bin/python3
+          import os
+          import sys
+
+          sys.path.insert(0, "${patchScriptsDir}")
+          from clang_ubsan_feature import rewrite_args
+
+          compiler = "${pkgs.llvmPackages.clang}/bin/${tool}"
+          args = rewrite_args(sys.argv[1:], ignore_flag_supported=False)
+          os.execv(compiler, [compiler, *args])
+        '';
+
       clangLink = ''
         if printf 'int nixcfg_ubsan_probe;\n' | ${pkgs.llvmPackages.clang}/bin/clang \
           -fsanitize=return \
@@ -135,19 +154,9 @@ in
           ln -sf ${pkgs.llvmPackages.clang}/bin/clang $llvm_bin/clang
           ln -sf ${pkgs.llvmPackages.clang}/bin/clang++ $llvm_bin/clang++
         else
-          for tool in clang clang++; do
-            cat > $llvm_bin/$tool <<PY
-            #!${pkgs.python3}/bin/python3
-            import os
-            import sys
-            sys.path.insert(0, "${patchScriptsDir}")
-            from clang_ubsan_feature import rewrite_args
-            compiler = "${pkgs.llvmPackages.clang}/bin/$tool"
-            args = rewrite_args(sys.argv[1:], ignore_flag_supported=False)
-            os.execv(compiler, [compiler, *args])
-            PY
-            chmod +x $llvm_bin/$tool
-          done
+          cp ${ubsanClangWrapper "clang"} $llvm_bin/clang
+          cp ${ubsanClangWrapper "clang++"} $llvm_bin/clang++
+          chmod +x $llvm_bin/clang $llvm_bin/clang++
         fi
       '';
 
