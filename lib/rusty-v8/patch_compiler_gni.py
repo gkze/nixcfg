@@ -15,7 +15,7 @@ _PRINT_RELEASE_FLAG = "--print-release-version"
 _USAGE = (
     "usage: patch_compiler_gni.py "
     "[--print-release-version] "
-    "<update.py|compiler.gni|compiler BUILD.gn|sanitizers.gni>"
+    "<update.py|compiler.gni|compiler BUILD.gn>"
 )
 _MISSING_ANCHOR = "compiler.gni use_lld anchor not found exactly once"
 
@@ -24,14 +24,12 @@ _RELEASE_VERSION = re.compile(r"[1-9][0-9]*")
 
 _USE_LLD_ASSIGNMENT = "use_lld"
 _USE_LLD_REPLACEMENT_VALUE = "false"
+# -fsanitize-ignore-for-ubsan-feature stays. clang_ubsan_feature.py drops it
+# only for a clang that rejects it, and then defines V8_NIX_TRAP_ONLY_UBSAN.
 _UNSUPPORTED_BUILD_GN_FLAGS = (
     "-fdiagnostics-show-inlining-chain",
     "/clang:-fdiagnostics-show-inlining-chain",
     "-fno-lifetime-dse",
-    "-fsanitize-ignore-for-ubsan-feature=array-bounds",
-)
-_UNSUPPORTED_SANITIZERS_GNI_FLAGS = (
-    "-fsanitize-ignore-for-ubsan-feature=${invoker.sanitizer}",
 )
 
 
@@ -101,10 +99,6 @@ def _patch_compiler_build_gn(text: str) -> str:
     return _drop_lines_containing_flags(text, _UNSUPPORTED_BUILD_GN_FLAGS)
 
 
-def _patch_sanitizers_gni(text: str) -> str:
-    return _drop_lines_containing_flags(text, _UNSUPPORTED_SANITIZERS_GNI_FLAGS)
-
-
 def read_clang_release_version(update_script: Path) -> str:
     """Return the one numeric ``RELEASE_VERSION`` assigned by Chromium."""
     tree = ast.parse(
@@ -150,9 +144,6 @@ def main() -> int:
     text = target.read_text(encoding="utf-8")
     if target.name == "BUILD.gn":
         target.write_text(_patch_compiler_build_gn(text), encoding="utf-8")
-        return 0
-    if target.name == "sanitizers.gni":
-        target.write_text(_patch_sanitizers_gni(text), encoding="utf-8")
         return 0
 
     target.write_text(

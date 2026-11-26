@@ -121,6 +121,36 @@ in
         else
           abort "rusty-v8 has no compiler-rt builtins layout for this platform";
 
+      # Chromium's trap-only checks pass -fsanitize-ignore-for-ubsan-feature so
+      # __has_feature(undefined_behavior_sanitizer) stays false. Without that,
+      # v8/src/sandbox/testing.cc includes the sanitizer runtime. A clang that
+      # accepts the flag is linked through. Goose and Codex share this bundle.
+      clangLink = ''
+        if printf 'int nixcfg_ubsan_probe;\n' | ${pkgs.llvmPackages.clang}/bin/clang \
+          -fsanitize=return \
+          -fsanitize-trap=return \
+          -fsanitize-ignore-for-ubsan-feature=return \
+          -x c -c -o /dev/null - >/dev/null 2>&1
+        then
+          ln -sf ${pkgs.llvmPackages.clang}/bin/clang $llvm_bin/clang
+          ln -sf ${pkgs.llvmPackages.clang}/bin/clang++ $llvm_bin/clang++
+        else
+          for tool in clang clang++; do
+            cat > $llvm_bin/$tool <<PY
+            #!${pkgs.python3}/bin/python3
+            import os
+            import sys
+            sys.path.insert(0, "${patchScriptsDir}")
+            from clang_ubsan_feature import rewrite_args
+            compiler = "${pkgs.llvmPackages.clang}/bin/$tool"
+            args = rewrite_args(sys.argv[1:], ignore_flag_supported=False)
+            os.execv(compiler, [compiler, *args])
+            PY
+            chmod +x $llvm_bin/$tool
+          done
+        fi
+      '';
+
       # Chromium's thin_archive config passes -S when the compiler is clang
       # and use_lld is false. GNU ld.bfd then reports "archive has no index".
       # The gcc-on-linux branch of that config passes -s. Goose and Codex
@@ -168,8 +198,7 @@ in
           $rust_toolchain/lib/rustlib/src/rust/library
 
         mkdir -p $llvm_bin
-        ln -sf ${pkgs.llvmPackages.clang}/bin/clang $llvm_bin/clang
-        ln -sf ${pkgs.llvmPackages.clang}/bin/clang++ $llvm_bin/clang++
+        ${clangLink}
         ${llvmArLink}
         for tool in \
           llvm-cxxfilt \
@@ -223,8 +252,8 @@ in
               $out/build/config/compiler/compiler.gni
             python ${patchScriptsDir}/patch_compiler_gni.py \
               $out/build/config/compiler/BUILD.gn
-            python ${patchScriptsDir}/patch_compiler_gni.py \
-              $out/build/config/sanitizers/sanitizers.gni
+            python ${patchScriptsDir}/patch_v8_ubsan_feature.py \
+              $out/v8/src/base/macros.h
             python ${patchScriptsDir}/patch_stdlib_adler.py \
               $out/build/rust/std/BUILD.gn
             python ${patchScriptsDir}/patch_allocator_build.py \

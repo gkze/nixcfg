@@ -268,7 +268,7 @@ def test_patch_compiler_gni_script_patches_build_gn_flags(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Strip newer Chromium compiler flags that packaged clangs do not support."""
+    """Strip compiler flags packaged clangs reject, and keep the UBSan feature cutout."""
     namespace = _load_script("patch_compiler_gni.py")
     target = tmp_path / "BUILD.gn"
     target.write_text(
@@ -287,7 +287,7 @@ def test_patch_compiler_gni_script_patches_build_gn_flags(
     patched = target.read_text(encoding="utf-8")
     assert "-fdiagnostics-show-inlining-chain" not in patched
     assert "-fno-lifetime-dse" not in patched
-    assert "-fsanitize-ignore-for-ubsan-feature" not in patched
+    assert "-fsanitize-ignore-for-ubsan-feature=array-bounds" in patched
     assert "-fcrash-diagnostics-dir=" in patched
 
     monkeypatch.setattr(sys, "argv", ["patch_compiler_gni.py"])
@@ -300,26 +300,106 @@ def test_patch_compiler_gni_script_patches_build_gn_flags(
     assert target.read_text(encoding="utf-8") == "no unsupported flags\n"
 
 
-def test_patch_compiler_gni_script_patches_sanitizers_gni_flags(
+def test_clang_ubsan_feature_keeps_trap_checks_off_the_sanitizer_runtime() -> None:
+    """A clang that rejects the cutout flag must not leave V8 on the runtime path."""
+    namespace = _load_script("clang_ubsan_feature.py")
+    rewrite = namespace["rewrite_args"]
+    original = [
+        "-fsanitize=array-bounds",
+        "-fsanitize-trap=array-bounds",
+        "-fsanitize-ignore-for-ubsan-feature=array-bounds",
+        "-fsanitize=return",
+        "-fsanitize-trap=return",
+        "-fsanitize-ignore-for-ubsan-feature",
+        "return",
+        "testing.cc",
+    ]
+
+    supported = rewrite(original, ignore_flag_supported=True)
+    unsupported = rewrite(original, ignore_flag_supported=False)
+    bare = rewrite(
+        ["-fsanitize-ignore-for-ubsan-feature"],
+        ignore_flag_supported=False,
+    )
+
+    assert supported == original
+    assert unsupported == [
+        "-fsanitize=array-bounds",
+        "-fsanitize-trap=array-bounds",
+        "-fsanitize=return",
+        "-fsanitize-trap=return",
+        "testing.cc",
+        "-DV8_NIX_TRAP_ONLY_UBSAN",
+    ]
+    assert bare == ["-DV8_NIX_TRAP_ONLY_UBSAN"]
+    assert rewrite(["testing.cc"], ignore_flag_supported=False) == ["testing.cc"]
+
+
+def test_patch_v8_ubsan_feature_excludes_trap_only_checks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Strip sanitizer flags that packaged clangs do not support."""
-    namespace = _load_script("patch_compiler_gni.py")
-    target = tmp_path / "sanitizers.gni"
-    target.write_text(
-        "prefix\n"
-        '        "-fsanitize=${invoker.sanitizer}",\n'
-        '        "-fsanitize-ignore-for-ubsan-feature=${invoker.sanitizer}",\n'
-        "suffix\n",
-        encoding="utf-8",
-    )
+    """Codex's feature check must ignore trap-only UBSan; Goose's header stays put."""
+    namespace = _load_script("patch_v8_ubsan_feature.py")
+    target = tmp_path / "macros.h"
+    original = f"prefix\n{namespace['_BLOCK']}suffix\n"
+    target.write_text(original, encoding="utf-8")
 
-    monkeypatch.setattr(sys, "argv", ["patch_compiler_gni.py", str(target)])
+    monkeypatch.setattr(sys, "argv", ["patch_v8_ubsan_feature.py", str(target)])
     assert _main(namespace)() == 0
     patched = target.read_text(encoding="utf-8")
-    assert "-fsanitize-ignore-for-ubsan-feature" not in patched
-    assert "-fsanitize=${invoker.sanitizer}" in patched
+    assert "&& !defined(V8_NIX_TRAP_ONLY_UBSAN)" in patched
+    assert patched.count(namespace["_FEATURE"]) == 1
+
+    older = tmp_path / "goose-macros.h"
+    goose = f"// Define {namespace['_SAFE_STACK']} macro.\n#define {namespace['_SAFE_STACK']} 1\n"
+    older.write_text(goose, encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["patch_v8_ubsan_feature.py", str(older)])
+    assert _main(namespace)() == 0
+    assert older.read_text(encoding="utf-8") == goose
+
+    drifted = tmp_path / "drifted.h"
+    drifted.write_text(
+        original.replace("#define V8_USE_UNDEFINED_BEHAVIOR_SANITIZER 1\n", ""),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys, "argv", ["patch_v8_ubsan_feature.py", str(drifted)])
+    with pytest.raises(
+        SystemExit, match="V8 UBSan feature block not found exactly once"
+    ):
+        _main(namespace)()
+    assert drifted.read_text(encoding="utf-8") == original.replace(
+        "#define V8_USE_UNDEFINED_BEHAVIOR_SANITIZER 1\n", ""
+    )
+
+    unrelated = tmp_path / "other.h"
+    unrelated.write_text("int x;\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["patch_v8_ubsan_feature.py", str(unrelated)])
+    with pytest.raises(
+        SystemExit, match="V8 UBSan feature block not found exactly once"
+    ):
+        _main(namespace)()
+
+    monkeypatch.setattr(sys, "argv", ["patch_v8_ubsan_feature.py"])
+    with pytest.raises(SystemExit, match="usage: patch_v8_ubsan_feature.py"):
+        _main(namespace)()
+
+
+def test_patch_v8_ubsan_feature_main_guard_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Execute the macros.h patch through its CLI entrypoint."""
+    script_path = _scripts_dir() / "patch_v8_ubsan_feature.py"
+    namespace = _load_script(script_path.name)
+    target = tmp_path / "macros.h"
+    target.write_text(f"{namespace['_BLOCK']}", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", [str(script_path), str(target)])
+    with pytest.raises(SystemExit) as exc:
+        runpy.run_path(str(script_path), run_name="__main__")
+    assert exc.value.code == 0
+    assert "V8_NIX_TRAP_ONLY_UBSAN" in target.read_text(encoding="utf-8")
 
 
 def test_patch_compiler_gni_main_guard_runs_for_build_gn(

@@ -78,6 +78,40 @@ def test_rusty_v8_links_compiler_rt_at_chromiums_builtins_path() -> None:
     )
 
 
+def test_rusty_v8_keeps_trap_only_ubsan_off_the_sanitizer_runtime() -> None:
+    """Goose and Codex share the clang that must not turn trap checks into UBSan."""
+    assert_nix_ast_equal(
+        nix_file_binding_expr("lib/rusty-v8.nix", "clangLink"),
+        r"""
+        ''
+          if printf 'int nixcfg_ubsan_probe;\n' | ${pkgs.llvmPackages.clang}/bin/clang \
+            -fsanitize=return \
+            -fsanitize-trap=return \
+            -fsanitize-ignore-for-ubsan-feature=return \
+            -x c -c -o /dev/null - >/dev/null 2>&1
+          then
+            ln -sf ${pkgs.llvmPackages.clang}/bin/clang $llvm_bin/clang
+            ln -sf ${pkgs.llvmPackages.clang}/bin/clang++ $llvm_bin/clang++
+          else
+            for tool in clang clang++; do
+              cat > $llvm_bin/$tool <<PY
+              #!${pkgs.python3}/bin/python3
+              import os
+              import sys
+              sys.path.insert(0, "${patchScriptsDir}")
+              from clang_ubsan_feature import rewrite_args
+              compiler = "${pkgs.llvmPackages.clang}/bin/$tool"
+              args = rewrite_args(sys.argv[1:], ignore_flag_supported=False)
+              os.execv(compiler, [compiler, *args])
+              PY
+              chmod +x $llvm_bin/$tool
+            done
+          fi
+        ''
+        """,
+    )
+
+
 def test_rusty_v8_indexes_linux_archives_for_gnu_ld() -> None:
     """Clang without lld emits a thin archive ld.bfd cannot read. Goose and Codex share the wrapper."""
     assert_nix_ast_equal(
