@@ -418,3 +418,150 @@ def test_failed_input_refresh_fails_dependents_and_keeps_independents(
     result = asyncio.run(_run())
     assert result.details == {"demo": "error"}
     assert error_events == ["RuntimeError: lock refresh failed"]
+
+
+def test_alignment_runs_after_refresh_and_records_the_moved_pin(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A rev embedded in a flake URL moves after the lock refresh, before tasks."""
+    _write_input_files(tmp_path)
+    monkeypatch.setattr(flake, "get_repo_root", lambda: tmp_path)
+    calls: list[str] = []
+
+    class _Aligning(_InputUpdater):
+        async def align_inputs(self, session: object, *, emit: EventSink) -> None:
+            _ = session, emit
+            calls.append("align")
+            path = tmp_path / "flake.nix"
+            path.write_text(
+                path.read_text(encoding="utf-8").replace(
+                    "github:owner/input/v1", "github:owner/input/v1aligned"
+                ),
+                encoding="utf-8",
+            )
+
+        async def update_stream(self, *_args: object, **_kwargs: object) -> None:
+            calls.append("update")
+
+    async def _update_inputs(input_names: list[str], **_kwargs: object) -> None:
+        calls.append(f"refresh:{','.join(input_names)}")
+
+    monkeypatch.setattr(source_runner, "UPDATERS", {"demo": _Aligning})
+    monkeypatch.setattr(flake, "update_flake_inputs", _update_inputs)
+
+    async def _run() -> UpdatePhaseResult:
+        queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
+        return await source_runner.run_sources_phase(
+            SourcesPhaseContext(
+                source_names=["demo"],
+                sources=SourcesFile(entries={"demo": SourceEntry(hashes={})}),
+                queue=queue,
+                update_input=True,
+                native_only=False,
+                config=resolve_config(),
+            )
+        )
+
+    result = asyncio.run(_run())
+
+    assert calls == ["refresh:input", "align", "update"]
+    assert result.details == {"demo": "no_change"}
+    assert b"v1aligned" in result.input_refreshes["input"][0]
+
+
+def test_alignment_failure_does_not_fail_an_independent_source(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """One source's toolchain pin failure leaves an unrelated source runnable."""
+    _write_input_files(tmp_path)
+    monkeypatch.setattr(flake, "get_repo_root", lambda: tmp_path)
+    calls: list[str] = []
+
+    class _Aligning(_InputUpdater):
+        async def align_inputs(self, session: object, *, emit: EventSink) -> None:
+            _ = session, emit
+            calls.append("align")
+            raise RuntimeError("toolchain missing")
+
+        async def update_stream(self, *_args: object, **_kwargs: object) -> None:
+            calls.append("update:demo")
+
+    class _Other(_InputUpdater):
+        input_name = "other"
+
+        async def update_stream(self, *_args: object, **_kwargs: object) -> None:
+            calls.append("update:other")
+
+    async def _update_inputs(input_names: list[str], **_kwargs: object) -> None:
+        calls.append("refresh:" + ",".join(input_names))
+
+    monkeypatch.setattr(source_runner, "UPDATERS", {"demo": _Aligning, "other": _Other})
+    monkeypatch.setattr(flake, "update_flake_inputs", _update_inputs)
+
+    async def _run() -> UpdatePhaseResult:
+        queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
+        return await source_runner.run_sources_phase(
+            SourcesPhaseContext(
+                source_names=["demo", "other"],
+                sources=SourcesFile(
+                    entries={
+                        "demo": SourceEntry(hashes={}),
+                        "other": SourceEntry(hashes={}),
+                    }
+                ),
+                queue=queue,
+                update_input=True,
+                native_only=False,
+                config=resolve_config(),
+            )
+        )
+
+    result = asyncio.run(_run())
+
+    assert result.details == {"demo": "error", "other": "no_change"}
+    assert "update:demo" not in calls
+    assert "update:other" in calls
+    assert calls.index("align") < calls.index("update:other")
+    assert "input" not in result.input_refreshes
+    assert "other" in result.input_refreshes
+
+
+def test_alignment_runs_when_the_lock_refresh_is_already_covered(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A reused receipt still lets the source advance a rev-pinned input."""
+    _write_input_files(tmp_path)
+    monkeypatch.setattr(flake, "get_repo_root", lambda: tmp_path)
+    calls: list[str] = []
+
+    class _Aligning(_InputUpdater):
+        async def align_inputs(self, session: object, *, emit: EventSink) -> None:
+            _ = session, emit
+            calls.append("align")
+
+    async def _update_inputs(*_args: object, **_kwargs: object) -> None:
+        calls.append("refresh")
+
+    monkeypatch.setattr(source_runner, "UPDATERS", {"demo": _Aligning})
+    monkeypatch.setattr(flake, "update_flake_inputs", _update_inputs)
+
+    async def _run() -> None:
+        queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
+        result = await source_runner.run_sources_phase(
+            SourcesPhaseContext(
+                source_names=["demo"],
+                sources=SourcesFile(entries={"demo": SourceEntry(hashes={})}),
+                queue=queue,
+                update_input=True,
+                native_only=False,
+                config=resolve_config(),
+                input_refreshes={"input": flake.read_flake_input_state("input")},
+            )
+        )
+        assert result.details == {"demo": "no_change"}
+
+    asyncio.run(_run())
+    assert calls == ["align"]

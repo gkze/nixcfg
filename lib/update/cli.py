@@ -1313,7 +1313,34 @@ def _failed_targets_touched_flake(
             ) != _flake_input_lock_node(current_lock, input_name):
                 touched.append(name)
                 break
+            if _attrset_declaration_changed(workspace, input_name):
+                touched.append(name)
+                break
     return tuple(touched)
+
+
+def _attrset_declaration_changed(
+    workspace: update_persistence.IsolatedUpdateWorkspace,
+    input_name: str,
+) -> bool:
+    """Return whether ``input_name``'s attrset text differs from the baseline.
+
+    Inputs that are not attribute sets on either side compare equal. A file
+    that is not a flake attribute set is not a declaration change this check
+    can see; the lock and ref comparisons still apply.
+    """
+    baseline_bytes = workspace.baseline_content(Path("flake.nix"))
+    nix_path = workspace.root / "flake.nix"
+    if baseline_bytes is None or not nix_path.is_file():
+        return False
+    try:
+        current = nix_path.read_text(encoding="utf-8")
+        baseline = baseline_bytes.decode()
+        return input_declaration_text(current, input_name) != input_declaration_text(
+            baseline, input_name
+        )
+    except UnicodeError, ValueError:
+        return False
 
 
 def _restore_ref_declarations(
@@ -1348,6 +1375,50 @@ def _restore_ref_declarations(
         except ValueError:
             return None
     return restored
+
+
+def _restore_changed_attrsets(
+    current: str, baseline: str, input_names: frozenset[str]
+) -> str | None:
+    """Put changed attrset pins in ``current`` back on their baseline text.
+
+    Inputs whose attrset text already matches, and inputs that are not
+    attrsets on either side, stay byte for byte. ``None`` means some input's
+    declaration changed across a shape this splice cannot restore, so the
+    caller reverts both flake files instead of promoting a split pin.
+    """
+    restored = current
+    for name in sorted(input_names):
+        try:
+            current_text = input_declaration_text(restored, name)
+            baseline_text = input_declaration_text(baseline, name)
+            if current_text == baseline_text:
+                continue
+            if current_text is None or baseline_text is None:
+                return None
+            restored = restore_input_declaration(restored, baseline, name)
+        except ValueError:
+            return None
+    return restored
+
+
+def _restore_rolled_attrsets(
+    workspace: update_persistence.IsolatedUpdateWorkspace,
+    current: str,
+    input_names: frozenset[str],
+) -> str | None:
+    """Restore changed attrsets in ``current`` from the baseline flake.nix."""
+    baseline_bytes = workspace.baseline_content(Path("flake.nix"))
+    if baseline_bytes is None:
+        return None
+    try:
+        baseline = baseline_bytes.decode()
+    except UnicodeError:
+        return None
+    return _restore_changed_attrsets(current, baseline, input_names)
+
+
+_UNRESTORABLE_PIN = "a rev-pinned input declaration could not be restored with its lock"
 
 
 def _ref_rollback_covers(
@@ -1469,15 +1540,37 @@ def _roll_back_touched_inputs(
             commit=False,
         )
         if _ref_rollback_covers(rollback, touched_refs):
+            if isinstance(rollback, update_lock_policy.LockRollback):
+                merged = _restore_rolled_attrsets(
+                    workspace, restored_nix, frozenset(rollback.inputs)
+                )
+                if merged is None:
+                    return frozenset(), _UNRESTORABLE_PIN
+                restored_nix = merged
             _commit_surgical_ref_rollback(workspace, rollback, restored_nix)
             rolled = set(touched_refs)
             if isinstance(rollback, update_lock_policy.LockRollback):
                 rolled.update(rollback.inputs)
             return frozenset(rolled), None
     rollback = _rollback_failed_input_locks(workspace, plan, failed, updaters)
-    if isinstance(rollback, update_lock_policy.LockRollback):
+    if not isinstance(rollback, update_lock_policy.LockRollback):
+        return frozenset(), rollback.reason
+    nix_path = workspace.root / "flake.nix"
+    if not nix_path.is_file():
         return frozenset(rollback.inputs), None
-    return frozenset(), rollback.reason
+    try:
+        current_nix = nix_path.read_text(encoding="utf-8")
+    except UnicodeError:
+        return frozenset(), _UNRESTORABLE_PIN
+    restored_attrsets = _restore_rolled_attrsets(
+        workspace, current_nix, frozenset(rollback.inputs)
+    )
+    if restored_attrsets is None:
+        return frozenset(), _UNRESTORABLE_PIN
+    if restored_attrsets != current_nix:
+        nix_path.write_text(restored_attrsets, encoding="utf-8")
+        update_flake.invalidate_flake_lock()
+    return frozenset(rollback.inputs), None
 
 
 def _input_backed_targets(
@@ -1502,13 +1595,13 @@ def _withhold_failed_clusters(
 
     Coupling follows companion, aggregate, and flake-input edges. When a failure
     left flake.lock changed, the failed targets' lock nodes are rolled back
-    per input so unrelated input-backed candidates survive. A ref whose
-    ``flake.nix`` declaration is an attribute set is restored the same way:
-    that declaration goes back to the baseline and the lock node follows it.
-    Other inputs, including a crate2nix package's source pin and the artifacts
-    generated for it, stay. A ref that is not an attribute set still reverts
-    both flake files and every input-backed candidate, because splitting that
-    pin across the two files cannot be proven.
+    per input so unrelated input-backed candidates survive. A ref or a
+    rev-pinned URL whose ``flake.nix`` declaration is an attribute set is
+    restored the same way: that declaration goes back to the baseline and the
+    lock node follows it. Other inputs, including a crate2nix package's source
+    pin and the artifacts generated for it, stay. A pin that is not an
+    attribute set still reverts both flake files and every input-backed
+    candidate, because splitting that pin across the two files cannot be proven.
     """
     statuses = outcome.summary.statuses
     failed = [name for name, status in statuses.items() if status == "error"]

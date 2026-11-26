@@ -109,14 +109,15 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     rust-overlay = {
-      # Keep an exact rev. #1265 floated rust-overlay 8afee9fa→e90fafa7
-      # (nightly 2026-10-10) and plan-darwin-closures jumped from warmup=4
-      # (#1264, 4ca29632) to warmup=7812 (6515 rust_*). 87ffb7f7 (2026-10-15)
-      # is the first rev with stable 1.99.1, which Rio 0.5.29's
-      # rust-toolchain.toml requires. Every other rust-bin consumer selects
-      # an exact stable release, so their derivations do not change. Advance
-      # this pin only to gain a release a package needs.
-      url = "github:oxalica/rust-overlay/87ffb7f777aef2e2647fd8fd718a5b3cbc825588";
+      # Keep an exact rev, never a branch. #1265 floated rust-overlay
+      # 8afee9fa→e90fafa7 (nightly 2026-10-10) and plan-darwin-closures
+      # jumped from warmup=4 (#1264, 4ca29632) to warmup=7812 (6515 rust_*).
+      # Exact stable manifests stay byte-identical across later pins, so a
+      # consumer of an older release does not rebuild. This URL's rev is the
+      # first rust-overlay commit that ships the newest stable a package
+      # needs. zed-editor-nightly's updater advances it when Zed's
+      # rust-toolchain.toml asks for a channel this pin does not ship.
+      url = "github:oxalica/rust-overlay/8bbfc858c7b85f5e6ed6d6cc201ffcee1bb08a9b";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     scratch = {

@@ -2,7 +2,7 @@
 
 import asyncio
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, cast
 
 import aiohttp
 from dbos import DBOS
@@ -14,6 +14,7 @@ from lib.update import process as update_process
 from lib.update import refs as update_refs
 from lib.update import updaters as updater_module
 from lib.update.events import (
+    EventSink,
     StatusInfo,
     StatusKind,
     UpdateEvent,
@@ -49,6 +50,19 @@ if TYPE_CHECKING:
 
 def _get_updaters() -> dict[str, UpdaterClass]:
     return updater_module.resolve_registry_alias(UPDATERS, ensure_updaters_loaded)
+
+
+class _InputAligner(Protocol):
+    """A source that can move a rev-pinned input before its own task runs."""
+
+    async def align_inputs(
+        self,
+        session: aiohttp.ClientSession,
+        *,
+        emit: EventSink,
+    ) -> None:
+        """Advance inputs whose revision is embedded in a flake URL."""
+        ...  # pragma: no cover -- protocol method, not an implementation
 
 
 def publish_source_update(
@@ -229,15 +243,44 @@ def _source_input_requests(
     return requested, closures
 
 
+async def _align_source_inputs(
+    context: SourcesPhaseContext,
+    session: aiohttp.ClientSession,
+) -> dict[str, UpdateEvent]:
+    """Let a source advance a rev-pinned input its derivation evaluates.
+
+    ``nix flake update`` cannot move a revision embedded in a flake URL.
+    A source that selects a toolchain from such an input implements
+    ``align_inputs`` and runs it after the lock refresh, before any task
+    starts, so the pin and the source move in one phase. A failure stays
+    with that source; an independent source still runs.
+    """
+    updaters = _get_updaters()
+    failures: dict[str, UpdateEvent] = {}
+    for name in context.source_names:
+        if getattr(updaters[name], "align_inputs", None) is None:
+            continue
+        updater = cast("_InputAligner", updaters[name](config=context.config))
+        try:
+            await updater.align_inputs(session, emit=context.queue.put)
+        except Exception as exc:  # noqa: BLE001 -- alignment failure belongs to this source
+            message = f"{type(exc).__name__}: {exc}"
+            failures[name] = UpdateEvent.error(name, message)
+    return failures
+
+
 async def _refresh_source_inputs(
     context: SourcesPhaseContext,
+    session: aiohttp.ClientSession,
 ) -> dict[str, UpdateEvent]:
     """Resolve every selected source's input closure before any task starts.
 
     Inputs already covered by a matching receipt are skipped; the rest refresh
-    in one ``nix flake update`` so N lock evaluations become one. A failed
-    resolution fails every source whose closure includes a pending input;
-    independent sources continue.
+    in one ``nix flake update`` so N lock evaluations become one. Sources may
+    then advance a rev-pinned input their derivation evaluates. Receipts are
+    recorded from the lock after that alignment. A failed resolution fails
+    every source whose closure includes a pending input, and a failed
+    alignment fails that source; independent sources continue.
     """
     put = context.queue.put
     requested, closures = _source_input_requests(
@@ -265,30 +308,38 @@ async def _refresh_source_inputs(
         )
     for input_name in pending:
         await put(refresh_status(input_name, f"Updating flake input '{input_name}'..."))
-    if not pending:
-        return {}
+    if pending:
+        try:
+            await update_flake.update_flake_inputs(
+                pending,
+                source=requested[pending[0]],
+                emit=put,
+                config=context.config,
+            )
+        except Exception as exc:  # noqa: BLE001 -- a failed resolution fails every dependent source
+            message = f"{type(exc).__name__}: {exc}"
+            pending_set = set(pending)
+            failed = {
+                name
+                for name, inputs in closures.items()
+                if pending_set.intersection(inputs)
+            }
+            return {name: UpdateEvent.error(name, message) for name in sorted(failed)}
 
-    try:
-        await update_flake.update_flake_inputs(
-            pending,
-            source=requested[pending[0]],
-            emit=put,
-            config=context.config,
-        )
-    except Exception as exc:  # noqa: BLE001 -- a failed resolution fails every dependent source
-        message = f"{type(exc).__name__}: {exc}"
-        pending_set = set(pending)
-        failed = {
-            name
-            for name, inputs in closures.items()
-            if pending_set.intersection(inputs)
-        }
-        return {name: UpdateEvent.error(name, message) for name in sorted(failed)}
-    for input_name in pending:
+    failures = await _align_source_inputs(context, session)
+    failed_inputs = {
+        input_name
+        for name, inputs in closures.items()
+        if name in failures
+        for input_name in inputs
+    }
+    for input_name in requested:
+        if input_name in failed_inputs:
+            continue
         context.input_refreshes[input_name] = update_flake.read_flake_input_state(
             input_name
         )
-    return {}
+    return failures
 
 
 async def update_source_task(
@@ -478,7 +529,7 @@ async def run_sources_phase(context: SourcesPhaseContext) -> UpdatePhaseResult:
         async def refresh() -> tuple[
             dict[str, UpdateEvent], dict[str, FlakeInputState]
         ]:
-            failed = await _refresh_source_inputs(context)
+            failed = await _refresh_source_inputs(context, session)
             return failed, dict(context.input_refreshes)
 
         refresh_failures: dict[str, UpdateEvent] = {}

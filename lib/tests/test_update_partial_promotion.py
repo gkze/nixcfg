@@ -15,11 +15,13 @@ from lib.tests._update_workspace_helpers import init_update_workspace_repo
 from lib.update.cli import (
     OutputOptions,
     UpdateOptions,
+    _attrset_declaration_changed,
     _execute_run_plan_result,
     _failed_targets_touched_flake,
     _handle_status_request,
     _input_backed_targets,
     _live_ui_enabled,
+    _restore_changed_attrsets,
     _run_log_root,
     _RunOutcome,
     _start_run_monitor,
@@ -1761,3 +1763,534 @@ def test_withhold_holds_both_flake_files_after_a_whole_file_revert(
         paths=("flake.lock", "flake.nix", "packages/tool-src/sources.json")
     )
     assert {Path("flake.nix"), Path("flake.lock")} <= set(workspace.restored)
+
+
+_OLD_REV = "1" * 40
+_NEW_REV = "2" * 40
+_ZED_OLD = "3" * 40
+_ZED_NEW = "4" * 40
+_CODEX_OLD = "5" * 40
+_CODEX_NEW = "6" * 40
+_DESKTOP_OLD = "7" * 40
+_DESKTOP_NEW = "8" * 40
+
+
+def _rev_nix(*, overlay: str, codex: str, desktop_ref: str | None = None) -> str:
+    desktop = ""
+    if desktop_ref is not None:
+        desktop = (
+            "    github-desktop = {\n"
+            '      type = "git";\n'
+            '      url = "https://github.com/desktop/desktop.git";\n'
+            f'      ref = "{desktop_ref}";\n'
+            "      flake = false;\n"
+            "    };\n"
+        )
+    return (
+        "{\n"
+        "  inputs = {\n"
+        f"{desktop}"
+        "    rust-overlay = {\n"
+        "      # exact rev\n"
+        f'      url = "github:oxalica/rust-overlay/{overlay}"; # pin\n'
+        '      inputs.nixpkgs.follows = "nixpkgs";\n'
+        "    };\n"
+        "    codex = {\n"
+        f'      url = "github:openai/codex/{codex}";\n'
+        "      flake = false;\n"
+        "    };\n"
+        "  };\n"
+        "  outputs = { self, ... }: { };\n"
+        "}\n"
+    )
+
+
+class _RevZed(Updater):
+    input_name = "zed"
+    additional_input_names = ("rust-overlay",)
+
+
+class _RevCodex(Updater):
+    input_name = "codex"
+
+
+class _RevDesktop(Updater):
+    input_name = "github-desktop"
+
+
+def _withhold_rev_pin(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    baseline_nix: str,
+    candidate_nix: str,
+    baseline_revs: dict[str, str],
+    candidate_revs: dict[str, str],
+    statuses: dict[str, str],
+    updaters: dict[str, type[object]],
+    ref_inputs: tuple[FlakeInputRef, ...] = (),
+    current_refs: tuple[FlakeInputRef, ...] = (),
+) -> _BaselineFiles:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "flake.nix").write_text(candidate_nix, encoding="utf-8")
+    (tmp_path / "flake.lock").write_text(
+        _nodes_lock(**candidate_revs), encoding="utf-8"
+    )
+    outcome = _RunOutcome()
+    outcome.summary.accumulate(statuses)
+    outcome.written_paths = (
+        tmp_path / "flake.nix",
+        tmp_path / "flake.lock",
+        *(_source_path(name) for name in statuses),
+    )
+    monkeypatch.setattr("lib.update.persistence.planned_update_paths", _planned_paths)
+    monkeypatch.setattr("lib.update.flake.invalidate_flake_lock", lambda: None)
+    if current_refs:
+        monkeypatch.setattr(
+            "lib.update.cli.get_flake_inputs_with_refs", lambda: list(current_refs)
+        )
+    workspace = _BaselineFiles(
+        tmp_path,
+        {
+            "flake.nix": baseline_nix,
+            "flake.lock": _nodes_lock(**baseline_revs),
+        },
+    )
+    _withhold_failed_clusters(
+        cast("Any", workspace),
+        make_run_plan(
+            source_names=tuple(
+                name
+                for name in statuses
+                if name not in {ref.name for ref in ref_inputs}
+            ),
+            ref_inputs=ref_inputs,
+        ),
+        outcome,
+        updaters,
+        OutputOptions(),
+        None,
+    )
+    return workspace
+
+
+def test_withhold_restores_a_rev_pinned_url_and_keeps_unrelated_pins(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A failed Zed rolls its rust-overlay URL and lock back together.
+
+    codex's bumped URL stays. The rev lives in the attrset, so restoring only
+    the lock would leave flake.nix and flake.lock describing different pins.
+    """
+    _withhold_rev_pin(
+        monkeypatch,
+        tmp_path,
+        baseline_nix=_rev_nix(overlay=_OLD_REV, codex=_CODEX_OLD),
+        candidate_nix=_rev_nix(overlay=_NEW_REV, codex=_CODEX_NEW),
+        baseline_revs={
+            "zed": _ZED_OLD,
+            "rust-overlay": _OLD_REV,
+            "codex": _CODEX_OLD,
+        },
+        candidate_revs={
+            "zed": _ZED_NEW,
+            "rust-overlay": _NEW_REV,
+            "codex": _CODEX_NEW,
+        },
+        statuses={"zed-editor-nightly": "error", "codex-cli": "updated"},
+        updaters={"zed-editor-nightly": _RevZed, "codex-cli": _RevCodex},
+    )
+
+    flake = (tmp_path / "flake.nix").read_text(encoding="utf-8")
+    assert f"github:oxalica/rust-overlay/{_OLD_REV}" in flake
+    assert "# pin" in flake
+    assert f"github:openai/codex/{_CODEX_NEW}" in flake
+    assert _locked_node_revs(tmp_path) == {
+        "zed": _ZED_OLD,
+        "rust-overlay": _OLD_REV,
+        "codex": _CODEX_NEW,
+    }
+
+
+def test_withhold_restores_a_rev_pin_alongside_a_ref(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A ref restore and a rev-pinned URL restore commit as one flake.nix."""
+    old_ref = "refs/tags/release-3.6.6"
+    new_ref = "refs/tags/release-3.6.10"
+    _withhold_rev_pin(
+        monkeypatch,
+        tmp_path,
+        baseline_nix=_rev_nix(overlay=_OLD_REV, codex=_CODEX_OLD, desktop_ref=old_ref),
+        candidate_nix=_rev_nix(overlay=_NEW_REV, codex=_CODEX_NEW, desktop_ref=new_ref),
+        baseline_revs={
+            "github-desktop": _DESKTOP_OLD,
+            "zed": _ZED_OLD,
+            "rust-overlay": _OLD_REV,
+            "codex": _CODEX_OLD,
+        },
+        candidate_revs={
+            "github-desktop": _DESKTOP_NEW,
+            "zed": _ZED_NEW,
+            "rust-overlay": _NEW_REV,
+            "codex": _CODEX_NEW,
+        },
+        statuses={
+            "github-desktop": "updated",
+            "desktop": "error",
+            "zed-editor-nightly": "error",
+            "codex-cli": "updated",
+        },
+        updaters={
+            "desktop": _RevDesktop,
+            "zed-editor-nightly": _RevZed,
+            "codex-cli": _RevCodex,
+        },
+        ref_inputs=(
+            FlakeInputRef("github-desktop", "desktop", "desktop", old_ref, "git"),
+        ),
+        current_refs=(
+            FlakeInputRef("github-desktop", "desktop", "desktop", new_ref, "git"),
+        ),
+    )
+
+    flake = (tmp_path / "flake.nix").read_text(encoding="utf-8")
+    assert f'ref = "{old_ref}"' in flake
+    assert f"github:oxalica/rust-overlay/{_OLD_REV}" in flake
+    assert f"github:openai/codex/{_CODEX_NEW}" in flake
+    assert _locked_node_revs(tmp_path)["github-desktop"] == _DESKTOP_OLD
+    assert _locked_node_revs(tmp_path)["rust-overlay"] == _OLD_REV
+    assert _locked_node_revs(tmp_path)["codex"] == _CODEX_NEW
+
+
+def test_withhold_leaves_an_unchanged_rev_pin_declaration_byte_for_byte(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A lock-only move rolls the node back and does not rewrite flake.nix."""
+    nix = _rev_nix(overlay=_OLD_REV, codex=_CODEX_OLD)
+    _withhold_rev_pin(
+        monkeypatch,
+        tmp_path,
+        baseline_nix=nix,
+        candidate_nix=nix,
+        baseline_revs={"zed": _ZED_OLD, "rust-overlay": _OLD_REV, "codex": _CODEX_OLD},
+        candidate_revs={"zed": _ZED_NEW, "rust-overlay": _NEW_REV, "codex": _CODEX_NEW},
+        statuses={"zed-editor-nightly": "error", "codex-cli": "updated"},
+        updaters={"zed-editor-nightly": _RevZed, "codex-cli": _RevCodex},
+    )
+
+    assert (tmp_path / "flake.nix").read_text(encoding="utf-8") == nix
+    assert _locked_node_revs(tmp_path)["rust-overlay"] == _OLD_REV
+    assert _locked_node_revs(tmp_path)["codex"] == _CODEX_NEW
+
+
+def test_withhold_reverts_both_flake_files_when_a_rev_pin_cannot_be_spliced(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A changed pin that is not an attrset on both sides takes the whole file."""
+    notes: list[str] = []
+    candidate = _rev_nix(overlay=_NEW_REV, codex=_CODEX_NEW)
+    baseline = '{\n  inputs = {\n    codex.url = "github:openai/codex/old";\n  };\n}\n'
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "flake.nix").write_text(candidate, encoding="utf-8")
+    (tmp_path / "flake.lock").write_text(
+        _nodes_lock(**{"zed": _ZED_NEW, "rust-overlay": _NEW_REV, "codex": _CODEX_NEW}),
+        encoding="utf-8",
+    )
+
+    class _Recording:
+        def __init__(self) -> None:
+            self.root = tmp_path
+            self.restored: list[Path] = []
+
+        def baseline_content(self, path: object) -> bytes | None:
+            name = Path(str(path)).name
+            if name == "flake.nix":
+                return baseline.encode()
+            if name == "flake.lock":
+                return _nodes_lock(**{
+                    "zed": _ZED_OLD,
+                    "rust-overlay": _OLD_REV,
+                    "codex": _CODEX_OLD,
+                }).encode()
+            return None
+
+        def restore_baseline(self, paths: object) -> tuple[Path, ...]:
+            restored = [Path(str(path)) for path in cast("list[object]", paths)]
+            self.restored.extend(restored)
+            for path in restored:
+                content = self.baseline_content(path)
+                if content is not None:
+                    (tmp_path / path).write_bytes(content)
+            return tuple(self.restored)
+
+        def note(self, message: str, **_kwargs: object) -> None:
+            notes.append(message)
+
+    outcome = _RunOutcome()
+    outcome.summary.accumulate({"zed-editor-nightly": "error"})
+    outcome.written_paths = (tmp_path / "flake.nix", tmp_path / "flake.lock")
+    monkeypatch.setattr("lib.update.persistence.planned_update_paths", _planned_paths)
+    monkeypatch.setattr("lib.update.flake.invalidate_flake_lock", lambda: None)
+    workspace = _Recording()
+    _withhold_failed_clusters(
+        cast("Any", workspace),
+        make_run_plan(source_names=("zed-editor-nightly",)),
+        outcome,
+        {"zed-editor-nightly": _RevZed},
+        OutputOptions(),
+        cast("Any", workspace),
+    )
+
+    assert (tmp_path / "flake.nix").read_text(encoding="utf-8") == baseline
+    assert "rust-overlay" not in (tmp_path / "flake.nix").read_text(encoding="utf-8")
+    assert any("could not be restored" in note for note in notes)
+
+
+def test_failed_targets_notice_a_rev_pinned_url_without_a_lock_change(
+    tmp_path: Path,
+) -> None:
+    """A URL rewrite whose lock refresh did not land still marks the target."""
+
+    class _Tool(Updater):
+        input_name = "rust-overlay"
+
+    nix = _rev_nix(overlay=_OLD_REV, codex=_CODEX_OLD)
+    moved = _rev_nix(overlay=_NEW_REV, codex=_CODEX_OLD)
+    lock = _nodes_lock(**{"rust-overlay": _OLD_REV, "codex": _CODEX_OLD})
+    (tmp_path / "flake.lock").write_text(lock, encoding="utf-8")
+    (tmp_path / "flake.nix").write_text(moved, encoding="utf-8")
+    plan = make_run_plan(source_names=("tool-src",))
+
+    def _baseline(path: object) -> bytes:
+        if Path(str(path)).name == "flake.nix":
+            return nix.encode()
+        return lock.encode()
+
+    workspace = SimpleNamespace(root=tmp_path, baseline_content=_baseline)
+    assert _failed_targets_touched_flake(
+        cast("Any", workspace), plan, ["tool-src"], {"tool-src": _Tool}
+    ) == ("tool-src",)
+
+    (tmp_path / "flake.nix").write_text(nix, encoding="utf-8")
+    assert (
+        _failed_targets_touched_flake(
+            cast("Any", workspace), plan, ["tool-src"], {"tool-src": _Tool}
+        )
+        == ()
+    )
+
+    (tmp_path / "flake.nix").write_bytes(b"\xff")
+    assert (
+        _failed_targets_touched_flake(
+            cast("Any", workspace), plan, ["tool-src"], {"tool-src": _Tool}
+        )
+        == ()
+    )
+    assert _attrset_declaration_changed(cast("Any", workspace), "rust-overlay") is False
+
+
+def test_restore_changed_attrsets_rejects_an_ambiguous_declaration() -> None:
+    """Two declarations of one input cannot be rolled back surgically."""
+    source = (
+        '{ inputs.rust-overlay = { url = "github:oxalica/rust-overlay/'
+        + _OLD_REV
+        + '"; }; inputs.rust-overlay = { url = "github:oxalica/rust-overlay/'
+        + _NEW_REV
+        + '"; }; }'
+    )
+    assert (
+        _restore_changed_attrsets(source, source, frozenset({"rust-overlay"})) is None
+    )
+    removed = '{\n  inputs = {\n    codex.url = "github:openai/codex/x";\n  };\n}\n'
+    assert (
+        _restore_changed_attrsets(
+            removed,
+            _rev_nix(overlay=_OLD_REV, codex=_CODEX_OLD),
+            frozenset({"rust-overlay"}),
+        )
+        is None
+    )
+
+
+def _withhold_unreadable_rev_pin(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    current: bytes,
+    baseline_nix: bytes | None,
+) -> list[str]:
+    notes: list[str] = []
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "flake.nix").write_bytes(current)
+    (tmp_path / "flake.lock").write_text(
+        _nodes_lock(**{"zed": _ZED_NEW, "rust-overlay": _NEW_REV}),
+        encoding="utf-8",
+    )
+
+    class _Recording:
+        def __init__(self) -> None:
+            self.root = tmp_path
+
+        def baseline_content(self, path: object) -> bytes | None:
+            name = Path(str(path)).name
+            if name == "flake.nix":
+                return baseline_nix
+            if name == "flake.lock":
+                return _nodes_lock(**{
+                    "zed": _ZED_OLD,
+                    "rust-overlay": _OLD_REV,
+                }).encode()
+            return None
+
+        def restore_baseline(self, paths: object) -> tuple[Path, ...]:
+            return tuple(Path(str(path)) for path in cast("list[object]", paths))
+
+        def note(self, message: str, **_kwargs: object) -> None:
+            notes.append(message)
+
+    outcome = _RunOutcome()
+    outcome.summary.accumulate({"zed-editor-nightly": "error"})
+    outcome.written_paths = (tmp_path / "flake.nix", tmp_path / "flake.lock")
+    monkeypatch.setattr("lib.update.persistence.planned_update_paths", _planned_paths)
+    monkeypatch.setattr("lib.update.flake.invalidate_flake_lock", lambda: None)
+    workspace = _Recording()
+    _withhold_failed_clusters(
+        cast("Any", workspace),
+        make_run_plan(source_names=("zed-editor-nightly",)),
+        outcome,
+        {"zed-editor-nightly": _RevZed},
+        OutputOptions(),
+        cast("Any", workspace),
+    )
+    return notes
+
+
+def test_rev_pin_rollback_fails_closed_when_baseline_nix_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """No baseline declaration means the pin cannot be restored surgically."""
+    notes = _withhold_unreadable_rev_pin(
+        monkeypatch,
+        tmp_path,
+        current=_rev_nix(overlay=_NEW_REV, codex=_CODEX_NEW).encode(),
+        baseline_nix=None,
+    )
+    assert any("could not be restored" in note for note in notes)
+
+
+def test_rev_pin_rollback_fails_closed_when_nix_is_not_utf8(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """An unreadable flake.nix is not treated as an unchanged declaration."""
+    baseline = _rev_nix(overlay=_OLD_REV, codex=_CODEX_OLD).encode()
+    notes = _withhold_unreadable_rev_pin(
+        monkeypatch,
+        tmp_path,
+        current=b"\xff",
+        baseline_nix=baseline,
+    )
+    assert any("could not be restored" in note for note in notes)
+
+    notes = _withhold_unreadable_rev_pin(
+        monkeypatch,
+        tmp_path,
+        current=_rev_nix(overlay=_NEW_REV, codex=_CODEX_NEW).encode(),
+        baseline_nix=b"\xff",
+    )
+    assert any("could not be restored" in note for note in notes)
+
+
+def test_withhold_ref_path_reverts_when_a_rev_pin_cannot_be_spliced(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A ref can roll back and still force a whole-file revert for a split rev pin."""
+    notes: list[str] = []
+    old_ref = "refs/tags/release-3.6.6"
+    new_ref = "refs/tags/release-3.6.10"
+    candidate = _rev_nix(overlay=_NEW_REV, codex=_CODEX_NEW, desktop_ref=new_ref)
+    baseline = (
+        "{\n"
+        "  inputs = {\n"
+        "    github-desktop = {\n"
+        '      type = "git";\n'
+        '      url = "https://github.com/desktop/desktop.git";\n'
+        f'      ref = "{old_ref}";\n'
+        "      flake = false;\n"
+        "    };\n"
+        "  };\n"
+        "}\n"
+    )
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "flake.nix").write_text(candidate, encoding="utf-8")
+    (tmp_path / "flake.lock").write_text(
+        _nodes_lock(**{
+            "github-desktop": _DESKTOP_NEW,
+            "zed": _ZED_NEW,
+            "rust-overlay": _NEW_REV,
+        }),
+        encoding="utf-8",
+    )
+
+    class _Recording:
+        def __init__(self) -> None:
+            self.root = tmp_path
+            self.restored: list[Path] = []
+
+        def baseline_content(self, path: object) -> bytes | None:
+            name = Path(str(path)).name
+            if name == "flake.nix":
+                return baseline.encode()
+            if name == "flake.lock":
+                return _nodes_lock(**{
+                    "github-desktop": _DESKTOP_OLD,
+                    "zed": _ZED_OLD,
+                    "rust-overlay": _OLD_REV,
+                }).encode()
+            return None
+
+        def restore_baseline(self, paths: object) -> tuple[Path, ...]:
+            restored = [Path(str(path)) for path in cast("list[object]", paths)]
+            self.restored.extend(restored)
+            for path in restored:
+                content = self.baseline_content(path)
+                if content is not None:
+                    (tmp_path / path).write_bytes(content)
+            return tuple(self.restored)
+
+        def note(self, message: str, **_kwargs: object) -> None:
+            notes.append(message)
+
+    outcome = _RunOutcome()
+    outcome.summary.accumulate({"desktop": "error", "zed-editor-nightly": "error"})
+    outcome.written_paths = (tmp_path / "flake.nix", tmp_path / "flake.lock")
+    monkeypatch.setattr("lib.update.persistence.planned_update_paths", _planned_paths)
+    monkeypatch.setattr("lib.update.flake.invalidate_flake_lock", lambda: None)
+    monkeypatch.setattr(
+        "lib.update.cli.get_flake_inputs_with_refs",
+        lambda: [FlakeInputRef("github-desktop", "desktop", "desktop", new_ref, "git")],
+    )
+    workspace = _Recording()
+    _withhold_failed_clusters(
+        cast("Any", workspace),
+        make_run_plan(
+            source_names=("desktop", "zed-editor-nightly"),
+            ref_inputs=(
+                FlakeInputRef("github-desktop", "desktop", "desktop", old_ref, "git"),
+            ),
+        ),
+        outcome,
+        {"desktop": _RevDesktop, "zed-editor-nightly": _RevZed},
+        OutputOptions(),
+        cast("Any", workspace),
+    )
+
+    assert (tmp_path / "flake.nix").read_text(encoding="utf-8") == baseline
+    assert any("could not be restored" in note for note in notes)

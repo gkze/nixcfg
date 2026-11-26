@@ -226,6 +226,100 @@ def test_zed_editor_nightly_updater_rejects_missing_manifest_version(
         _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
+def test_zed_editor_nightly_align_inputs_requests_the_toolchain_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Zed's rust-toolchain channel is what advances the root rust-overlay pin."""
+    module = _load_module("zed_editor_nightly_updater_align_test")
+    updater = module.ZedEditorNightlyUpdater()
+    node = type(
+        "Node",
+        (),
+        {
+            "locked": type(
+                "Locked",
+                (),
+                {"owner": "zed-industries", "repo": "zed", "rev": "a" * 40},
+            )(),
+        },
+    )()
+    seen: dict[str, str] = {}
+    monkeypatch.setattr(updater, "_resolve_flake_node", lambda _info: node)
+
+    async def _fetch(*_args: object, **_kwargs: object) -> bytes:
+        return b'[toolchain]\nchannel = "1.100.0"\n'
+
+    async def _ensure(
+        _session: object,
+        channel: str,
+        *,
+        source: str,
+        emit: EventSink,
+        config: object,
+    ) -> None:
+        _ = config
+        seen["channel"] = channel
+        seen["source"] = source
+        await emit(UpdateEvent.status(source, "advanced"))
+
+    monkeypatch.setattr(module, "fetch_url", _fetch)
+    monkeypatch.setattr(module, "ensure_root_rust_overlay_has_channel", _ensure)
+
+    events = _run(
+        _collect_events(lambda emit: updater.align_inputs(object(), emit=emit))
+    )
+
+    assert seen == {"channel": "1.100.0", "source": "zed-editor-nightly"}
+    assert [event.message for event in events] == ["advanced"]
+
+
+def test_zed_editor_nightly_align_inputs_rejects_a_floating_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-exact channel cannot select rust-bin.stable.<version>."""
+    module = _load_module("zed_editor_nightly_updater_align_channel_test")
+    updater = module.ZedEditorNightlyUpdater()
+    node = type(
+        "Node",
+        (),
+        {
+            "locked": type(
+                "Locked",
+                (),
+                {"owner": "zed-industries", "repo": "zed", "rev": "a" * 40},
+            )(),
+        },
+    )()
+    monkeypatch.setattr(updater, "_resolve_flake_node", lambda _info: node)
+    monkeypatch.setattr(
+        module,
+        "fetch_url",
+        lambda *_args, **_kwargs: asyncio.sleep(
+            0, result=b'[toolchain]\nchannel = "stable"\n'
+        ),
+    )
+
+    with pytest.raises(ValueError, match="exact stable"):
+        _run(updater.align_inputs(object()))
+
+
+def test_zed_editor_nightly_align_inputs_rejects_missing_locked_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Alignment reads the same locked owner, repo, and revision as metadata."""
+    module = _load_module("zed_editor_nightly_updater_align_metadata_test")
+    updater = module.ZedEditorNightlyUpdater()
+    node = type(
+        "Node",
+        (),
+        {"locked": type("Locked", (), {"owner": "", "repo": "zed", "rev": "a" * 40})()},
+    )()
+    monkeypatch.setattr(updater, "_resolve_flake_node", lambda _info: node)
+
+    with pytest.raises(RuntimeError, match="missing owner/repo/rev metadata"):
+        _run(updater.align_inputs(object()))
+
+
 def test_zed_editor_nightly_updater_rejects_missing_locked_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
