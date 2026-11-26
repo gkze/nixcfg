@@ -885,10 +885,13 @@ during the zeus closure. There was no Nix error, and the image still had
 then exited `python: command not found`: their shell was the bare word
 `python`, and the interpreter the realize step had resolved
 (`/Library/Frameworks/Python.framework/Versions/Current/bin/python`) was no
-longer on PATH. Both steps invoke that interpreter through
-`.github/closure-gate/hosted-python.sh`, with the Determinate Nix bin in
-front of PATH. Realize runs it as a child and records `runner_fault` when
-the child status is a signal (129–159). A GateError records
+longer on PATH. Realize, the storage dump, and the flush stay `shell:
+python`. `.github/closure-gate/hosted_python.py` publishes that framework
+bin and the Determinate Nix bin on `GITHUB_PATH` before the realize child
+runs, so the later steps' `shell: python` resolves the same interpreter.
+Realize runs the gate as a child and records `runner_fault` when the child
+status is a signal (129–159). Python's negative signal status is mapped
+back to that 128+signum range. A GateError records
 `runner_fault=false` and is not retried. If the shell dies with the child,
 the storage step records `runner_fault` because the realize step failed and
 left the flag empty. A job that fails with both flags still empty is a
