@@ -4,6 +4,7 @@ import ast
 import builtins
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -758,12 +759,23 @@ def test_pull_request_workflow_is_same_repo_and_keeps_darwin() -> None:
     assert "lib/tests/test_closure_gate.py" in quality
 
 
-def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -> None:
-    """44005867871: a faulted Nix Store read is not a closure result.
+_REALIZE_RETRY = (
+    "needs.realize-aarch64-darwin.outputs.device_fault == 'true' || "
+    "needs.realize-aarch64-darwin.outputs.runner_fault == 'true' || "
+    "(needs.realize-aarch64-darwin.result == 'failure' && "
+    "needs.realize-aarch64-darwin.outputs.runner_fault == '' && "
+    "needs.realize-aarch64-darwin.outputs.device_fault == '')"
+)
 
-    substituteInPlace reported null bytes after disk2s7 I/O errors. The first
-    job must not satisfy the gate. The fresh VM's result does, and only when
-    the first job recorded device_fault.
+
+def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -> None:
+    """A faulted store or a signalled realize is not a closure result.
+
+    44005867871: substituteInPlace reported null bytes after disk2s7 I/O errors.
+    45788923798: the realize process exited 138 during zeus and recorded neither
+    flag, so the retry stayed skipped. The fresh VM's result is the gate
+    result when device_fault, runner_fault, or a flagless failure selected it.
+    A GateError records runner_fault=false and does not select the retry.
     """
     jobs = _workflow("pr-closure-gate.yml")["jobs"]
     first = jobs["realize-aarch64-darwin"]
@@ -773,7 +785,7 @@ def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -
         "always() && !cancelled() && "
         "github.event.pull_request.head.repo.full_name == github.repository && "
         "needs.route.result == 'success' && "
-        "needs.realize-aarch64-darwin.outputs.device_fault == 'true'"
+        f"({_REALIZE_RETRY})"
     )
     assert retry["concurrency"] == first["concurrency"]
     assert retry["uses"] == first["uses"]
@@ -787,10 +799,20 @@ def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -
     )
     realized = " ".join(aggregate["env"]["REALIZE_RESULTS"].split())
     assert (
-        "needs.realize-aarch64-darwin.outputs.device_fault == 'true' && "
+        f"({_REALIZE_RETRY}) && "
         "needs.realize-aarch64-darwin-retry.result || "
         "needs.realize-aarch64-darwin.result"
     ) in realized
+    darwin_result = next(
+        step
+        for step in jobs["closure-gate"]["steps"]
+        if isinstance(step.get("with"), dict)
+        and step["with"].get("name") == "closure-gate-aarch64-darwin-gate"
+    )
+    assert " ".join(darwin_result["if"].split()) == (
+        "needs.realize-aarch64-darwin.result == 'success' || "
+        "needs.realize-aarch64-darwin-retry.result == 'success'"
+    )
 
 
 def test_realize_reuses_the_update_native_runner() -> None:
@@ -808,7 +830,16 @@ def test_realize_reuses_the_update_native_runner() -> None:
     )
     assert candidate["if"] == "inputs.stage != 'closure-gate'"
     assert flush["if"] == "always()"
+    assert flush["shell"] == "bash"
+    assert "hosted-python.sh" in flush["run"]
+    assert realize["id"] == "realize"
+    assert realize["shell"] == "bash"
+    assert "hosted-python.sh --record-signal" in realize["run"]
     assert realize["env"]["NIXCFG_CLOSURE_GATE_COMMAND"] == "realize"
+    storage = next(step for step in steps if step.get("id") == "storage")
+    assert storage["shell"] == "bash"
+    assert "hosted-python.sh" in storage["run"]
+    assert 'steps.realize.outcome }}" == "failure"' in storage["run"]
     update = _workflow("update.yml")
     budgets = [
         job["with"]["closure_budget_seconds"]
@@ -818,3 +849,88 @@ def test_realize_reuses_the_update_native_runner() -> None:
     assert budgets
     assert set(budgets) == {"18000"}
     assert gate.BUILD_BUDGET_SECONDS == 18000
+
+
+def _hosted_python(
+    tmp_path: Path,
+    *args: str,
+    exit_code: int = 0,
+    interpreter: Path | None = None,
+    path: str | None = None,
+) -> tuple[subprocess.CompletedProcess[str], str, str]:
+    """Run the wrapper against a stand-in interpreter and return its records."""
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    path_out = tmp_path / "path"
+    output = tmp_path / "github-output"
+    path_out.unlink(missing_ok=True)
+    output.unlink(missing_ok=True)
+    env = {
+        "PATH": path if path is not None else str(tmp_path),
+        "PATH_OUT": str(path_out),
+        "EXIT_CODE": str(exit_code),
+        "HOME": str(home),
+        "GITHUB_OUTPUT": str(output),
+    }
+    if interpreter is not None:
+        env["NIXCFG_PYTHON"] = str(interpreter)
+    proc = subprocess.run(  # noqa: S603 -- the repo's wrapper, stand-in interpreter
+        [str(ROOT / ".github/closure-gate/hosted-python.sh"), *args],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    recorded = output.read_text(encoding="utf-8") if output.exists() else ""
+    seen = path_out.read_text(encoding="utf-8") if path_out.exists() else ""
+    return proc, recorded, seen
+
+
+def _stand_in(tmp_path: Path, name: str = "python") -> Path:
+    child = tmp_path / name
+    child.write_text(
+        "#!/bin/sh\n"
+        'printf \'%s\\n\' "$PATH" > "$PATH_OUT"\n'
+        f"printf '%s\\n' '{name}' >> \"$PATH_OUT\"\n"
+        'exit "$EXIT_CODE"\n',
+        encoding="utf-8",
+    )
+    child.chmod(0o755)
+    return child
+
+
+def test_hosted_python_records_a_signal_and_keeps_nix_on_path(tmp_path: Path) -> None:
+    """45788923798: exit 138 is the realize process, and later steps need it."""
+    script = ROOT / ".github/closure-gate/hosted-python.sh"
+    assert os.access(script, os.X_OK)
+    _stand_in(tmp_path)
+    signalled, recorded, seen = _hosted_python(
+        tmp_path, "--record-signal", "-c", "ignored", exit_code=138
+    )
+    assert signalled.returncode == 138
+    assert recorded == "runner_fault=true\n"
+    assert "/nix/var/nix/profiles/default/bin" in seen
+    assert "/Library/Frameworks/Python.framework/Versions/Current/bin" in seen
+    for status in (129, 159):
+        _, again, _ = _hosted_python(tmp_path, "--record-signal", exit_code=status)
+        assert again == "runner_fault=true\n"
+    for status in (0, 1, 128, 160):
+        _, again, _ = _hosted_python(tmp_path, "--record-signal", exit_code=status)
+        assert again == "runner_fault=false\n"
+        assert _hosted_python(tmp_path, exit_code=status)[0].returncode == status
+
+
+def test_hosted_python_uses_the_recorded_interpreter(tmp_path: Path) -> None:
+    """NIXCFG_PYTHON wins, and a missing interpreter is still the lookup error."""
+    chosen = _stand_in(tmp_path, "chosen")
+    _stand_in(tmp_path, "python")
+    proc, recorded, seen = _hosted_python(tmp_path, "-c", "code", interpreter=chosen)
+    assert proc.returncode == 0
+    assert recorded == ""
+    assert seen.endswith("chosen\n")
+    missing = tmp_path / "empty"
+    missing.mkdir()
+    proc, recorded, _ = _hosted_python(tmp_path, path=str(missing))
+    assert proc.returncode == 127
+    assert "python: command not found" in proc.stderr
+    assert recorded == ""

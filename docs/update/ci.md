@@ -877,6 +877,29 @@ hit the faulted volume. The tree had no NUL bytes. The realize job records
 once on a fresh VM, which is the attempt allowed to push. A second fault
 fails the gate.
 
+The same retry runs when the realize process is signalled, or when the
+runner dies before it can record either flag. Run 45788923798 built the
+argus and rocinante closures, then the realize step exited 138 (SIGBUS)
+during the zeus closure. There was no Nix error, and the image still had
+133 GiB free when the step started. The storage dump and the Cachix flush
+then exited `python: command not found`: their shell was the bare word
+`python`, and the interpreter the realize step had resolved
+(`/Library/Frameworks/Python.framework/Versions/Current/bin/python`) was no
+longer on PATH. Both steps invoke that interpreter through
+`.github/closure-gate/hosted-python.sh`, with the Determinate Nix bin in
+front of PATH. Realize runs it as a child and records `runner_fault` when
+the child status is a signal (129–159). A GateError records
+`runner_fault=false` and is not retried. If the shell dies with the child,
+the storage step records `runner_fault` because the realize step failed and
+left the flag empty. A job that fails with both flags still empty is a
+runner that never reached those steps, and the retry runs then too. The
+aggregate downloads the fresh VM's result. The Determinate installer post
+step on that run hung until the runner received a shutdown signal. That is
+the wedged VM's uninstall, and this workflow does not bound another
+action's post hook. A real build failure is not retried. The Actions-API
+lost-runner classifier and its second retry belong to the unmerged Darwin
+job-retry design and are not duplicated here.
+
 Fork pull requests do not run the workflow's jobs. The trigger is
 `pull_request` for a head in this repository, and the Cachix token is passed
 only into the realize jobs. The gate program lives in
