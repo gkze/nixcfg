@@ -1981,6 +1981,17 @@ def test_darwin_root_pin_names_follow_the_shard(monkeypatch) -> None:
     monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "darwin-argus")
     with pytest.raises(jobs.CachixFlushError, match="expected one darwin root"):
         jobs._stable_darwin_pin_names((argus, argus))
+    monkeypatch.delenv("NIXCFG_CLOSURE_ROOTS", raising=False)
+    monkeypatch.setenv("NIXCFG_CLOSURE_GATE_SLICE", "root-closure-home-george")
+    assert jobs._stable_darwin_pin_names((home,)) == {home: "home-george"}
+    monkeypatch.setenv("NIXCFG_CLOSURE_GATE_SLICE", "root-closure-darwin-argus")
+    assert jobs._stable_darwin_pin_names((argus,)) == {argus: "darwin-argus"}
+    monkeypatch.setenv("NIXCFG_CLOSURE_GATE_SLICE", "packages")
+    with pytest.raises(jobs.CachixFlushError, match="roots=<unset>"):
+        jobs._stable_darwin_pin_names((home,))
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "home-george")
+    monkeypatch.setenv("NIXCFG_CLOSURE_GATE_SLICE", "root-closure-darwin-argus")
+    assert jobs._stable_darwin_pin_names((home,)) == {home: "home-george"}
 
 
 def test_pin_realized_darwin_roots_fail_closed(native_job, monkeypatch) -> None:
@@ -3284,6 +3295,9 @@ def test_native_fault_evidence_and_artifact_contract() -> None:
     assert flush["if"] == "always()"
     assert flush["env"]["NIXCFG_CI_STAGE"] == "flush-cachix"
     assert flush["env"]["NIXCFG_CLOSURE_ROOTS"] == "${{ inputs.closure_roots }}"
+    assert (
+        flush["env"]["NIXCFG_CLOSURE_GATE_SLICE"] == "${{ inputs.closure_gate_slice }}"
+    )
     assert flush["env"]["CACHIX_AUTH_TOKEN"] == "${{ secrets.CACHIX_AUTH_TOKEN }}"  # noqa: S105 -- Actions expression, not a credential.
     assert native["jobs"]["native"]["steps"][-1] is flush
     dump = next(

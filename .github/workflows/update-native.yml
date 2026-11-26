@@ -324,7 +324,10 @@ jobs:
           # Step env is not inherited. The shard root names the pin
           # (darwin-argus, home-george); a hash-named pin is a new pin
           # every closure and filled the Cachix pin quota (43613142360).
+          # A closure-gate slice is root-closure-<pin> and does not pass
+          # closure_roots. jobs.py names the pin from that slice.
           NIXCFG_CLOSURE_ROOTS: ${{ inputs.closure_roots }}
+          NIXCFG_CLOSURE_GATE_SLICE: ${{ inputs.closure_gate_slice }}
           CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
         run: |
           import runpy

@@ -78,6 +78,33 @@ def test_rusty_v8_links_compiler_rt_at_chromiums_builtins_path() -> None:
     )
 
 
+def test_rusty_v8_indexes_linux_archives_for_gnu_ld() -> None:
+    """Clang without lld emits a thin archive ld.bfd cannot read. Goose and Codex share the wrapper."""
+    assert_nix_ast_equal(
+        nix_file_binding_expr("lib/rusty-v8.nix", "llvmArLink"),
+        """
+        if pkgs.stdenv.hostPlatform.isLinux then
+          ''
+            cat > $llvm_bin/llvm-ar <<PY
+            #!${pkgs.python3}/bin/python3
+            import os
+            import sys
+            llvm_ar = "${pkgs.llvmPackages.llvm}/bin/llvm-ar"
+            args = ["-s" if arg == "-S" else arg for arg in sys.argv[1:]]
+            os.execv(llvm_ar, [llvm_ar, *args])
+            PY
+            chmod +x $llvm_bin/llvm-ar
+          ''
+        else if pkgs.stdenv.hostPlatform.isDarwin then
+          ''
+            ln -sf ${pkgs.llvmPackages.llvm}/bin/llvm-ar $llvm_bin/llvm-ar
+          ''
+        else
+          abort "rusty-v8 has no llvm-ar layout for this platform"
+        """,
+    )
+
+
 def test_rusty_v8_linux_gn_can_run_pkg_config() -> None:
     """The Linux compiler config probes glib, so the native build needs pkg-config."""
     assert_nix_ast_equal(

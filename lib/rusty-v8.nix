@@ -121,6 +121,30 @@ in
         else
           abort "rusty-v8 has no compiler-rt builtins layout for this platform";
 
+      # Chromium's thin_archive config passes -S when the compiler is clang
+      # and use_lld is false. GNU ld.bfd then reports "archive has no index".
+      # The gcc-on-linux branch of that config passes -s. Goose and Codex
+      # both link the host tools with ld.bfd through this bundle.
+      llvmArLink =
+        if pkgs.stdenv.hostPlatform.isLinux then
+          ''
+            cat > $llvm_bin/llvm-ar <<PY
+            #!${pkgs.python3}/bin/python3
+            import os
+            import sys
+            llvm_ar = "${pkgs.llvmPackages.llvm}/bin/llvm-ar"
+            args = ["-s" if arg == "-S" else arg for arg in sys.argv[1:]]
+            os.execv(llvm_ar, [llvm_ar, *args])
+            PY
+            chmod +x $llvm_bin/llvm-ar
+          ''
+        else if pkgs.stdenv.hostPlatform.isDarwin then
+          ''
+            ln -sf ${pkgs.llvmPackages.llvm}/bin/llvm-ar $llvm_bin/llvm-ar
+          ''
+        else
+          abort "rusty-v8 has no llvm-ar layout for this platform";
+
       chromiumToolchainBundle = pkgs.runCommand "${name}-toolchain-${version}" { } ''
         clang_resource_version="$(${pkgs.python3}/bin/python3 \
           ${patchScriptsDir}/patch_compiler_gni.py --print-release-version \
@@ -146,8 +170,8 @@ in
         mkdir -p $llvm_bin
         ln -sf ${pkgs.llvmPackages.clang}/bin/clang $llvm_bin/clang
         ln -sf ${pkgs.llvmPackages.clang}/bin/clang++ $llvm_bin/clang++
+        ${llvmArLink}
         for tool in \
-          llvm-ar \
           llvm-cxxfilt \
           llvm-install-name-tool \
           llvm-libtool-darwin \

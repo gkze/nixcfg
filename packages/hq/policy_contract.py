@@ -418,6 +418,93 @@ _DISABLED_ARM64_CORE_INSTALL_GUARD_339 = _aarch64_words(
     (0x52800264, _AARCH64_EXACT_MASK),
 )
 
+# 0.11.39 keeps the test-al / je decision at the same offset and replaces
+# the trailing rip-relative LEA with state-relative loads of the extra
+# report arguments (disp8 movs, then mov rdi, rbx, then the report call).
+_X86_64_CORE_INSTALL_GUARD_1139 = _relax_destination_register(
+    _masked_bytes(
+        bytes.fromhex(
+            "48 8d bb 00 00 00 00 e8 00 00 00 00 "
+            "48 8b bb 00 00 00 00 48 8b b3 00 00 00 00 "
+            "e8 00 00 00 00 84 c0 0f 84 00 00 00 00 "
+            "48 8b b3 00 00 00 00 "
+            "48 8b 93 00 00 00 00 "
+            "48 8b 4b 00 "
+            "4c 8b 43 00 "
+            "48 89 df "
+            "e8 00 00 00 00"
+        ),
+        (3, 7),
+        (8, 12),
+        (15, 19),
+        (22, 26),
+        (27, 31),
+        (35, 39),
+        (42, 46),
+        (49, 53),
+        (56, 57),
+        (60, 61),
+        (65, 69),
+    ),
+    rex=39,
+    modrm=41,
+)
+_DISABLED_X86_64_CORE_INSTALL_GUARD_1139 = _relax_destination_register(
+    _masked_bytes(
+        bytes.fromhex(
+            "48 8d bb 00 00 00 00 e8 00 00 00 00 "
+            "48 8b bb 00 00 00 00 48 8b b3 00 00 00 00 "
+            "e8 00 00 00 00 84 c0 e9 00 00 00 00 90 "
+            "48 8b b3 00 00 00 00 "
+            "48 8b 93 00 00 00 00 "
+            "48 8b 4b 00 "
+            "4c 8b 43 00 "
+            "48 89 df "
+            "e8 00 00 00 00"
+        ),
+        (3, 7),
+        (8, 12),
+        (15, 19),
+        (22, 26),
+        (27, 31),
+        (34, 38),
+        (42, 46),
+        (49, 53),
+        (56, 57),
+        (60, 61),
+        (65, 69),
+    ),
+    rex=39,
+    modrm=41,
+)
+# 0.11.39 keeps the two post-branch x19 pair reloads and the mov x0, x19
+# report argument, then calls before the adrp/add of the report string.
+# 0.10.375 ends that window with the continuation add instead of adrp.
+_ARM64_CORE_INSTALL_GUARD_1139 = _aarch64_words(
+    (0x940AB883, _AARCH64_BRANCH26_MASK),
+    (0xA9528660, _AARCH64_LDP_STATE_MASK),
+    (0x97CCA50E, _AARCH64_BRANCH26_MASK),
+    (0x36000A60, _AARCH64_TBZ_MASK),
+    (0xA9528A61, _AARCH64_LDP_STATE_MASK),
+    (0xA9431263, _AARCH64_LDP_STATE_MASK),
+    (0xAA1303E0, _AARCH64_EXACT_MASK),
+    (0x940A19DD, _AARCH64_BRANCH26_MASK),
+    (0x9000A979, _AARCH64_ADRP_MASK),
+    (0x91294339, _AARCH64_ADD_IMMEDIATE_MASK),
+)
+_DISABLED_ARM64_CORE_INSTALL_GUARD_1139 = _aarch64_words(
+    (0x940AB883, _AARCH64_BRANCH26_MASK),
+    (0xA9528660, _AARCH64_LDP_STATE_MASK),
+    (0x97CCA50E, _AARCH64_BRANCH26_MASK),
+    (0x14000000, _AARCH64_BRANCH26_MASK),
+    (0xA9528A61, _AARCH64_LDP_STATE_MASK),
+    (0xA9431263, _AARCH64_LDP_STATE_MASK),
+    (0xAA1303E0, _AARCH64_EXACT_MASK),
+    (0x940A19DD, _AARCH64_BRANCH26_MASK),
+    (0x9000A979, _AARCH64_ADRP_MASK),
+    (0x91294339, _AARCH64_ADD_IMMEDIATE_MASK),
+)
+
 AUTOMATIC_MUTATION_PATCHES = (
     MachinePatch(
         label="x86_64 automatic-update gate",
@@ -435,6 +522,15 @@ AUTOMATIC_MUTATION_PATCHES = (
         disabled=_DISABLED_X86_64_CORE_INSTALL_GUARD,
         original_branch=RelativeBranch(33, "x86-jcc-rel32"),
         disabled_branch=RelativeBranch(33, "x86-jmp-rel32"),
+        alternatives=(
+            MachinePatch(
+                label="x86_64 hq-core install guard (0.11.39)",
+                original=_X86_64_CORE_INSTALL_GUARD_1139,
+                disabled=_DISABLED_X86_64_CORE_INSTALL_GUARD_1139,
+                original_branch=RelativeBranch(33, "x86-jcc-rel32"),
+                disabled_branch=RelativeBranch(33, "x86-jmp-rel32"),
+            ),
+        ),
     ),
     MachinePatch(
         label="arm64 hq-core install guard",
@@ -447,6 +543,13 @@ AUTOMATIC_MUTATION_PATCHES = (
                 label="arm64 hq-core install guard (0.10.339)",
                 original=_ARM64_CORE_INSTALL_GUARD_339,
                 disabled=_DISABLED_ARM64_CORE_INSTALL_GUARD_339,
+                original_branch=RelativeBranch(12, "aarch64-tbz-imm14"),
+                disabled_branch=RelativeBranch(12, "aarch64-b-imm26"),
+            ),
+            MachinePatch(
+                label="arm64 hq-core install guard (0.11.39)",
+                original=_ARM64_CORE_INSTALL_GUARD_1139,
+                disabled=_DISABLED_ARM64_CORE_INSTALL_GUARD_1139,
                 original_branch=RelativeBranch(12, "aarch64-tbz-imm14"),
                 disabled_branch=RelativeBranch(12, "aarch64-b-imm26"),
             ),

@@ -3172,8 +3172,20 @@ def _darwin_pin_kind(path: str) -> str | None:
 
 
 def _closure_root_names() -> tuple[str, ...]:
-    """Return the shard's root names from the flush step environment."""
-    return tuple(os.environ.get("NIXCFG_CLOSURE_ROOTS", "").split())
+    """Return the shard's pin names.
+
+    Update shards pass ``NIXCFG_CLOSURE_ROOTS``. A closure-gate slice
+    ``root-closure-<pin>`` is that pin when roots are unset. 45673035217
+    left ``home-george`` unset and refused to pin the home generation.
+    """
+    raw = tuple(os.environ.get("NIXCFG_CLOSURE_ROOTS", "").split())
+    if raw:
+        return raw
+    slice_name = os.environ.get("NIXCFG_CLOSURE_GATE_SLICE", "").strip()
+    prefix = "root-closure-"
+    if slice_name.startswith(prefix):
+        return (slice_name.removeprefix(prefix),)
+    return ()
 
 
 def _roots_by_pin_kind(roots: tuple[str, ...]) -> dict[str, tuple[str, ...]]:

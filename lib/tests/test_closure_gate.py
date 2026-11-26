@@ -1204,6 +1204,20 @@ def test_finished_slice_attempt_ignores_a_fault_artifact(tmp_path: Path) -> None
     plain = tmp_path / "closure-gate-aarch64-darwin-gate-root-closure-home-george"
     plain.mkdir()
     assert gate.finished_slice_attempt(tmp_path) is True
+    evidence = tmp_path / "flattened"
+    evidence.mkdir()
+    (evidence / "cachix-daemon").mkdir()
+    assert gate.finished_slice_attempt(evidence) is False
+    (evidence / "device-fault.log").write_text("io error\n", encoding="utf-8")
+    assert gate.finished_slice_attempt(evidence) is False
+    (evidence / "device-fault.log").unlink()
+    (evidence / "closure-gate-result.json").write_text("{}\n", encoding="utf-8")
+    assert gate.finished_slice_attempt(evidence) is True
+    named_fault = tmp_path / "named-fault"
+    fault_child = named_fault / "closure-gate-aarch64-darwin-gate-packages"
+    fault_child.mkdir(parents=True)
+    (fault_child / "device-fault.log").write_text("io error\n", encoding="utf-8")
+    assert gate.finished_slice_attempt(named_fault) is False
 
 
 def test_prior_slice_skips_only_a_finished_attempt(tmp_path: Path, monkeypatch) -> None:
@@ -1217,5 +1231,26 @@ def test_prior_slice_skips_only_a_finished_attempt(tmp_path: Path, monkeypatch) 
     output.unlink()
     plain = tmp_path / "prior" / "closure-gate-aarch64-darwin-gate-packages"
     plain.mkdir(parents=True)
+    gate.main()
+    assert output.read_text(encoding="utf-8") == "skip=true\n"
+
+
+def test_prior_slice_rebuilds_a_flattened_fault_artifact(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """45673035217 extracted the fault artifact into PRIOR_SLICE and skipped."""
+    output = tmp_path / "github-output.txt"
+    prior = tmp_path / "prior"
+    prior.mkdir()
+    (prior / "device-fault.log").write_text("io error\n", encoding="utf-8")
+    (prior / "cachix-daemon").mkdir()
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("NIXCFG_CLOSURE_GATE_COMMAND", "prior-slice")
+    monkeypatch.setenv("PRIOR_SLICE", str(prior))
+    gate.main()
+    assert output.read_text(encoding="utf-8") == "skip=false\n"
+    output.unlink()
+    (prior / "device-fault.log").unlink()
+    (prior / "closure-gate-result.json").write_text("{}\n", encoding="utf-8")
     gate.main()
     assert output.read_text(encoding="utf-8") == "skip=true\n"

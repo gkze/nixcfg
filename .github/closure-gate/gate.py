@@ -966,19 +966,32 @@ def _bounded_text(detail: str, *, limit: int = 200_000) -> str:
     return f"{detail[:half]}\n...\n{detail[-half:]}"
 
 
-def finished_slice_attempt(prior: Path) -> bool:
-    """Treat a plain artifact as a finished slice and a fault suffix as unfinished.
+def _slice_fault_log(path: Path) -> bool:
+    return (path / "device-fault.log").is_file() or (
+        path / "runner-fault.log"
+    ).is_file()
 
-    Run 44888080350 set one ``device_fault`` output for the whole Darwin
-    matrix. home-george recorded false, so the fresh VM never started for
-    argus, zeus, or the rocinante runner that died with exit 143.
+
+def finished_slice_attempt(prior: Path) -> bool:
+    """Return whether a prior artifact finished the slice without a fault.
+
+    A one-artifact download extracts into ``prior`` itself. 45673035217
+    treated ``cachix-daemon/`` in that tree as a finished slice, so every
+    Darwin retry skipped. A ``closure-gate-*`` child is the multi-artifact
+    layout. A fault suffix or a fault log is unfinished.
     """
     if not prior.is_dir():
         return False
+    if _slice_fault_log(prior):
+        return False
+    if (prior / "closure-gate-result.json").is_file():
+        return True
     return any(
         child.is_dir()
+        and child.name.startswith("closure-gate-")
         and "device-fault" not in child.name
         and "runner-fault" not in child.name
+        and not _slice_fault_log(child)
         for child in prior.iterdir()
     )
 
