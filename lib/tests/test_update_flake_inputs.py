@@ -8,8 +8,10 @@ from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_e
 from lib.update.flake_inputs import (
     has_input_ref,
     input_declaration_text,
+    input_github_rev_url,
     restore_input_declaration,
     root_input_bindings,
+    set_input_github_rev,
     set_input_ref,
 )
 
@@ -198,3 +200,68 @@ def test_root_input_bindings_reject_non_literal_roots(
     """Only a literal root attribute set has statically known inputs."""
     with pytest.raises(ValueError, match=message):
         root_input_bindings(source.encode())
+
+
+_REV_PIN = """{
+  inputs.rust-overlay = {
+    # Keep an exact rev.
+    url = "github:oxalica/rust-overlay/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; # pin
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+}
+"""
+
+
+def test_input_github_rev_url_reads_the_url_binding() -> None:
+    """A comment that names another revision is not the declared URL."""
+    commented = _REV_PIN.replace(
+        "# Keep an exact rev.",
+        "# github:oxalica/rust-overlay/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    )
+    assert (
+        input_github_rev_url(commented, "rust-overlay")
+        == "github:oxalica/rust-overlay/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    )
+    assert input_github_rev_url(commented, "missing") is None
+    assert (
+        input_github_rev_url(
+            "{ inputs.rust-overlay = { flake = false; }; }", "rust-overlay"
+        )
+        is None
+    )
+    branched = commented.replace(
+        "github:oxalica/rust-overlay/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "github:oxalica/rust-overlay/master",
+    )
+    assert input_github_rev_url(branched, "rust-overlay") is None
+
+
+def test_set_input_github_rev_replaces_only_the_commit() -> None:
+    """Comments and sibling bindings survive a rev-pinned URL rewrite."""
+    rewritten = set_input_github_rev(_REV_PIN, "rust-overlay", "b" * 40)
+
+    assert _changed_lines(_REV_PIN, rewritten) == [
+        (
+            '    url = "github:oxalica/rust-overlay/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; # pin',
+            '    url = "github:oxalica/rust-overlay/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"; # pin',
+        )
+    ]
+    assert set_input_github_rev(rewritten, "rust-overlay", "b" * 40) == rewritten
+
+
+def test_set_input_github_rev_rejects_a_non_rev_pin() -> None:
+    """A branch URL, a missing attrset, and a bad sha are not rewritten."""
+    with pytest.raises(ValueError, match="40 lowercase hex"):
+        set_input_github_rev(_REV_PIN, "rust-overlay", "B" * 40)
+    with pytest.raises(RuntimeError, match="Could not find flake input attrset"):
+        set_input_github_rev(_REV_PIN, "missing", "b" * 40)
+    with pytest.raises(RuntimeError, match="has no url"):
+        set_input_github_rev(
+            "{ inputs.rust-overlay = { flake = false; }; }", "rust-overlay", "b" * 40
+        )
+    branched = _REV_PIN.replace(
+        "github:oxalica/rust-overlay/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "github:oxalica/rust-overlay",
+    )
+    with pytest.raises(RuntimeError, match="not an exact github rev pin"):
+        set_input_github_rev(branched, "rust-overlay", "b" * 40)

@@ -1,11 +1,10 @@
 """Updater for the Rio source package."""
 
-import re
-import tomllib
 from typing import TYPE_CHECKING
 
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.net import fetch_url, github_raw_url
+from lib.update.rust_toolchain import rust_toolchain_channel
 from lib.update.updaters import (
     GitHubReleaseUpdater,
     SourceThenOverlayHashMixin,
@@ -19,25 +18,6 @@ if TYPE_CHECKING:
     from lib.update.updaters import UpdateContext
 
 _RUST_TOOLCHAIN_FILE = "rust-toolchain.toml"
-_EXACT_STABLE_CHANNEL = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
-
-
-def rust_toolchain_channel(manifest: bytes, *, context: str) -> str:
-    """Return the exact stable Rust release a rust-toolchain.toml pins."""
-    try:
-        payload = tomllib.loads(manifest.decode("utf-8"))
-    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
-        msg = f"{context} is not a valid rust-toolchain.toml"
-        raise ValueError(msg) from exc
-    toolchain = payload.get("toolchain")
-    channel = toolchain.get("channel") if isinstance(toolchain, dict) else None
-    if not isinstance(channel, str) or not _EXACT_STABLE_CHANNEL.fullmatch(channel):
-        msg = (
-            f"{context} must pin an exact stable toolchain.channel "
-            f"(for example 1.99.1), got {channel!r}"
-        )
-        raise ValueError(msg)
-    return channel
 
 
 @register_updater

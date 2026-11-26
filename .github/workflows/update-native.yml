@@ -110,7 +110,10 @@ jobs:
       device_fault: |-
         ${{ steps.candidate.outputs.device_fault ||
         steps.storage.outputs.device_fault }}
-      runner_fault: ${{ steps.candidate.outputs.runner_fault }}
+      runner_fault: |-
+        ${{ steps.candidate.outputs.runner_fault ||
+        steps.realize.outputs.runner_fault ||
+        steps.storage.outputs.runner_fault }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -192,21 +195,22 @@ jobs:
           path: ${{ runner.temp }}/closure-gate
           github-token: ${{ github.token }}
           run-id: ${{ github.run_id }}
+      # The parent stays python. It publishes the framework interpreter on
+      # GITHUB_PATH, runs the gate as a child, and records runner_fault when
+      # that child exits 129-159 (macOS SIGBUS is 138).
       - name: Realize changed outputs and root closures
+        id: realize
         if: inputs.stage == 'closure-gate'
         env:
           NIXCFG_CLOSURE_GATE_COMMAND: realize
           NIXCFG_CLOSURE_GATE_PLAN: ${{ runner.temp }}/closure-gate/plan.json
           SYSTEM: ${{ inputs.system }}
+          NIXCFG_RECORD_SIGNAL: "1"
+          NIXCFG_HOSTED_TARGET: .github/closure-gate/gate.py
         shell: python
         run: |
-          import os
           import runpy
-
-          nix_bin = "/nix/var/nix/profiles/default/bin"
-          if os.path.isfile(os.path.join(nix_bin, "nix")):
-              os.environ["PATH"] = nix_bin + os.pathsep + os.environ.get("PATH", "")
-          runpy.run_path(".github/closure-gate/gate.py", run_name="__main__")
+          runpy.run_path(".github/closure-gate/hosted_python.py", run_name="__main__")
       - name: Prepare or validate candidate
         id: candidate
         if: inputs.stage != 'closure-gate'
@@ -255,10 +259,13 @@ jobs:
         if: failure() || steps.candidate.outputs.device_fault == 'true'
         env:
           NIXCFG_CI_STAGE: dump-storage-fault
+          NIXCFG_HOSTED_TARGET: lib/update/ci/jobs.py
+          NIXCFG_REALIZE_OUTCOME: ${{ steps.realize.outcome }}
+          NIXCFG_REALIZE_RUNNER_FAULT: ${{ steps.realize.outputs.runner_fault }}
+        shell: python
         run: |
           import runpy
-          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
-        shell: python
+          runpy.run_path(".github/closure-gate/hosted_python.py", run_name="__main__")
       # A faulted runner's candidate keeps a distinct name: no consumer can
       # download it, and a fresh-VM retry cannot overwrite its evidence.
       - name: Retain candidate and failure evidence
@@ -279,7 +286,9 @@ jobs:
             format('{0}-{1}-{2}', inputs.stage, inputs.system, inputs.scope),
             (steps.candidate.outputs.device_fault == 'true' ||
             steps.storage.outputs.device_fault == 'true') && '-device-fault' ||
-            steps.candidate.outputs.runner_fault == 'true' && '-runner-fault' || '',
+            (steps.candidate.outputs.runner_fault == 'true' ||
+            steps.realize.outputs.runner_fault == 'true' ||
+            steps.storage.outputs.runner_fault == 'true') && '-runner-fault' || '',
             inputs.artifact_namespace != '' && format('-{0}', inputs.artifact_namespace) || '') }}
           path: ${{ runner.temp }}/update-artifacts
           if-no-files-found: warn
@@ -297,7 +306,8 @@ jobs:
           # every closure and filled the Cachix pin quota (43613142360).
           NIXCFG_CLOSURE_ROOTS: ${{ inputs.closure_roots }}
           CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          NIXCFG_HOSTED_TARGET: lib/update/ci/jobs.py
+        shell: python
         run: |
           import runpy
-          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
-        shell: python
+          runpy.run_path(".github/closure-gate/hosted_python.py", run_name="__main__")

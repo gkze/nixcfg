@@ -4,7 +4,10 @@ import tomllib
 from typing import TYPE_CHECKING, ClassVar
 
 from lib.update.derivation_validation import DerivationValidation
-from lib.update.net import fetch_url
+from lib.update.events import EventSink, ignore_event
+from lib.update.net import fetch_url, github_raw_url
+from lib.update.rust_overlay import ensure_root_rust_overlay_has_channel
+from lib.update.rust_toolchain import rust_toolchain_channel
 from lib.update.updaters import (
     Crate2NixMetadataUpdater,
     VersionInfo,
@@ -15,6 +18,7 @@ from lib.update.updaters.metadata import FlakeInputMetadata
 if TYPE_CHECKING:
     import aiohttp
 
+    from lib.nix.models.flake_lock import FlakeLockNode
     from lib.update.updaters.core import UpdateContext
 
 
@@ -24,10 +28,13 @@ class ZedEditorNightlyUpdater(Crate2NixMetadataUpdater):
 
     name = "zed-editor-nightly"
     input_name = "zed"
-    # Root rust-overlay is rev-pinned after #1265; this stays a no-op until
-    # that nightly rustc is in gkze.cachix.org and the flake.nix pin lifts.
+    # The derivation selects rust-bin.stable from Zed's rust-toolchain.toml.
+    # additional_input_names keeps that pin in Zed's refresh and rollback
+    # closure; align_inputs moves the exact rev when the channel is missing.
+    # nix flake update cannot, because the rev is embedded in the flake URL.
     additional_input_names = ("rust-overlay",)
     _MANIFEST_PATH = "crates/zed/Cargo.toml"
+    _RUST_TOOLCHAIN_PATH = "rust-toolchain.toml"
     # A shared Darwin cache can pair this C API leaf with incompatible Rust
     # metadata for its tree-sitter consumers (rustc E0460). Recording the one
     # affected crate version here lets Nix rebuild that leaf and its dependents
@@ -59,21 +66,61 @@ class ZedEditorNightlyUpdater(Crate2NixMetadataUpdater):
             ),
         )
 
-    async def fetch_latest(
-        self, session: aiohttp.ClientSession, *, context: UpdateContext
-    ) -> VersionInfo:
-        """Resolve the current app version from the locked upstream manifest."""
-        _ = context
+    def _locked_github_source(self) -> tuple[FlakeLockNode, str, str, str]:
+        """Return the locked Zed node plus its owner, repo, and revision."""
         node = self._resolve_flake_node(VersionInfo(version="ignored"))
         locked = node.locked
         owner = locked.owner if locked is not None else None
         repo = locked.repo if locked is not None else None
         rev = locked.rev if locked is not None else None
-        if not all(isinstance(value, str) and value for value in (owner, repo, rev)):
+        if (
+            not isinstance(owner, str)
+            or not owner
+            or not isinstance(repo, str)
+            or not repo
+            or not isinstance(rev, str)
+            or not rev
+        ):
             msg = "zed flake input is missing owner/repo/rev metadata"
             raise RuntimeError(msg)
+        return node, owner, repo, rev
 
-        manifest_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{rev}/{self._MANIFEST_PATH}"
+    async def align_inputs(
+        self,
+        session: aiohttp.ClientSession,
+        *,
+        emit: EventSink = ignore_event,
+    ) -> None:
+        """Advance root rust-overlay to the stable channel this Zed commit pins.
+
+        Runs after the lock refresh and before metadata resolution, so the
+        derivation evaluates against a pin that contains the toolchain. The
+        chosen rev is the first rust-overlay commit that ships the channel,
+        not rust-overlay HEAD.
+        """
+        _node, owner, repo, rev = self._locked_github_source()
+        manifest = await fetch_url(
+            session,
+            github_raw_url(owner, repo, rev, self._RUST_TOOLCHAIN_PATH),
+            request_timeout=self.config.default_timeout,
+            config=self.config,
+            user_agent=self.config.default_user_agent,
+        )
+        channel = rust_toolchain_channel(
+            manifest, context=f"Zed {rev} {self._RUST_TOOLCHAIN_PATH}"
+        )
+        await ensure_root_rust_overlay_has_channel(
+            session, channel, source=self.name, emit=emit, config=self.config
+        )
+
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
+        """Resolve the current app version from the locked upstream manifest."""
+        _ = context
+        node, owner, repo, rev = self._locked_github_source()
+
+        manifest_url = github_raw_url(owner, repo, rev, self._MANIFEST_PATH)
         manifest_bytes = await fetch_url(
             session,
             manifest_url,

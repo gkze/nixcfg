@@ -12,12 +12,16 @@ because the repository flake's outputs contain syntax that nix-manipulator
 keeps as an opaque raw expression.
 """
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from nix_manipulator.parser import parse_to_ast
 
 from lib.update.nix_expr import nix_str
+
+_GITHUB_REV_URL = re.compile(rb'^"github:([^"/]+)/([^"/]+)/([0-9a-f]{40})"$')
+_REV = re.compile(r"^[0-9a-f]{40}$")
 
 if TYPE_CHECKING:
     from tree_sitter import Node
@@ -202,6 +206,72 @@ def restore_input_declaration(current: str, baseline: str, input_name: str) -> s
     ).decode()
 
 
+def _url_expression(source: bytes, input_name: str) -> Node | None:
+    """Return the ``url`` expression of ``input_name``, not a comment that names it."""
+    attrset = _input_attrset(source, input_name)
+    if attrset is None:
+        return None
+    return next(
+        (
+            binding.child_by_field_name("expression")
+            for binding in _bindings(attrset)
+            if _attrpath_parts(binding) == (b"url",)
+        ),
+        None,
+    )
+
+
+def input_github_rev_url(source: str, input_name: str) -> str | None:
+    """Return ``github:owner/repo/<rev>`` when that is the input's url binding.
+
+    Comments inside the declaration do not count. A branch, forge, or missing
+    url is ``None``, because only an exact GitHub revision pin is that shape.
+    """
+    url_value = _url_expression(source.encode(), input_name)
+    if url_value is None:
+        return None
+    if url_value.text is None:  # pragma: no cover -- tree-sitter always fills it
+        return None
+    if _GITHUB_REV_URL.fullmatch(url_value.text) is None:
+        return None
+    return url_value.text[1:-1].decode()
+
+
+def set_input_github_rev(source: str, input_name: str, rev: str) -> str:
+    """Replace the commit embedded in an input's ``github:owner/repo/<rev>`` URL.
+
+    Only those 40 hex characters change. Comments, spacing, and sibling
+    bindings stay byte for byte. A URL that is not an exact GitHub rev pin
+    is left untouched and reported, because rewriting a branch or forge URL
+    would change which repository the input names.
+    """
+    if _REV.fullmatch(rev) is None:
+        msg = f"flake input rev must be 40 lowercase hex characters, got {rev!r}"
+        raise ValueError(msg)
+    encoded = source.encode()
+    url_value = _url_expression(encoded, input_name)
+    if url_value is None:
+        if _input_attrset(encoded, input_name) is None:
+            msg = f"Could not find flake input attrset for {input_name!r}"
+        else:
+            msg = f"Flake input {input_name!r} has no url"
+        raise RuntimeError(msg)
+    if url_value.text is None:  # pragma: no cover -- tree-sitter always fills it
+        msg = f"Flake input {input_name!r} has no url"
+        raise RuntimeError(msg)
+    match = _GITHUB_REV_URL.fullmatch(url_value.text)
+    if match is None:
+        msg = f"Flake input {input_name!r} url is not an exact github rev pin"
+        raise RuntimeError(msg)
+    if match.group(3).decode() == rev:
+        return source
+    replacement = b'"github:' + match.group(1) + b"/" + match.group(2) + b"/"
+    replacement += rev.encode() + b'"'
+    return (
+        encoded[: url_value.start_byte] + replacement + encoded[url_value.end_byte :]
+    ).decode()
+
+
 def set_input_ref(source: str, input_name: str, ref: str) -> str:
     """Set (or add) the ``ref`` of an attrset-declared flake input.
 
@@ -219,8 +289,10 @@ def set_input_ref(source: str, input_name: str, ref: str) -> str:
 __all__ = [
     "has_input_ref",
     "input_declaration_text",
+    "input_github_rev_url",
     "restore_input_declaration",
     "root_attrset",
     "root_input_bindings",
+    "set_input_github_rev",
     "set_input_ref",
 ]

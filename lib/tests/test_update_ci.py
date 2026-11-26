@@ -3302,9 +3302,10 @@ def test_native_fault_evidence_and_artifact_contract() -> None:
         native["on"]["workflow_call"]["outputs"]["device_fault"]["value"]
         == "${{ jobs.native.outputs.device_fault }}"
     )
-    assert (
-        native["jobs"]["native"]["outputs"]["runner_fault"]
-        == "${{ steps.candidate.outputs.runner_fault }}"
+    assert " ".join(native["jobs"]["native"]["outputs"]["runner_fault"].split()) == (
+        "${{ steps.candidate.outputs.runner_fault || "
+        "steps.realize.outputs.runner_fault || "
+        "steps.storage.outputs.runner_fault }}"
     )
     assert (
         native["on"]["workflow_call"]["outputs"]["runner_fault"]["value"]
@@ -3344,7 +3345,9 @@ def test_native_fault_evidence_and_artifact_contract() -> None:
     assert (
         "(steps.candidate.outputs.device_fault == 'true' || "
         "steps.storage.outputs.device_fault == 'true') && '-device-fault' || "
-        "steps.candidate.outputs.runner_fault == 'true' && '-runner-fault' || ''"
+        "(steps.candidate.outputs.runner_fault == 'true' || "
+        "steps.realize.outputs.runner_fault == 'true' || "
+        "steps.storage.outputs.runner_fault == 'true') && '-runner-fault' || ''"
         in artifact
     )
     assert artifact.endswith(

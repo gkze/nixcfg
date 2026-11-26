@@ -4,7 +4,9 @@ import ast
 import builtins
 import importlib.util
 import json
+import os
 import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -28,6 +30,15 @@ assert _SPEC.loader is not None
 gate = importlib.util.module_from_spec(_SPEC)
 sys.modules["closure_gate"] = gate
 _SPEC.loader.exec_module(gate)
+_HOSTED_SPEC = importlib.util.spec_from_file_location(
+    "hosted_python",
+    ROOT / ".github/closure-gate/hosted_python.py",
+)
+assert _HOSTED_SPEC is not None
+assert _HOSTED_SPEC.loader is not None
+hosted = importlib.util.module_from_spec(_HOSTED_SPEC)
+sys.modules["hosted_python"] = hosted
+_HOSTED_SPEC.loader.exec_module(hosted)
 
 _BASE = "a" * 40
 _HEAD = "b" * 40
@@ -758,12 +769,23 @@ def test_pull_request_workflow_is_same_repo_and_keeps_darwin() -> None:
     assert "lib/tests/test_closure_gate.py" in quality
 
 
-def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -> None:
-    """44005867871: a faulted Nix Store read is not a closure result.
+_REALIZE_RETRY = (
+    "needs.realize-aarch64-darwin.outputs.device_fault == 'true' || "
+    "needs.realize-aarch64-darwin.outputs.runner_fault == 'true' || "
+    "(needs.realize-aarch64-darwin.result == 'failure' && "
+    "needs.realize-aarch64-darwin.outputs.runner_fault == '' && "
+    "needs.realize-aarch64-darwin.outputs.device_fault == '')"
+)
 
-    substituteInPlace reported null bytes after disk2s7 I/O errors. The first
-    job must not satisfy the gate. The fresh VM's result does, and only when
-    the first job recorded device_fault.
+
+def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -> None:
+    """A faulted store or a signalled realize is not a closure result.
+
+    44005867871: substituteInPlace reported null bytes after disk2s7 I/O errors.
+    45788923798: the realize process exited 138 during zeus and recorded neither
+    flag, so the retry stayed skipped. The fresh VM's result is the gate
+    result when device_fault, runner_fault, or a flagless failure selected it.
+    A GateError records runner_fault=false and does not select the retry.
     """
     jobs = _workflow("pr-closure-gate.yml")["jobs"]
     first = jobs["realize-aarch64-darwin"]
@@ -773,7 +795,7 @@ def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -
         "always() && !cancelled() && "
         "github.event.pull_request.head.repo.full_name == github.repository && "
         "needs.route.result == 'success' && "
-        "needs.realize-aarch64-darwin.outputs.device_fault == 'true'"
+        f"({_REALIZE_RETRY})"
     )
     assert retry["concurrency"] == first["concurrency"]
     assert retry["uses"] == first["uses"]
@@ -787,10 +809,20 @@ def test_faulted_darwin_realize_reruns_once_and_the_retry_is_the_gate_result() -
     )
     realized = " ".join(aggregate["env"]["REALIZE_RESULTS"].split())
     assert (
-        "needs.realize-aarch64-darwin.outputs.device_fault == 'true' && "
+        f"({_REALIZE_RETRY}) && "
         "needs.realize-aarch64-darwin-retry.result || "
         "needs.realize-aarch64-darwin.result"
     ) in realized
+    darwin_result = next(
+        step
+        for step in jobs["closure-gate"]["steps"]
+        if isinstance(step.get("with"), dict)
+        and step["with"].get("name") == "closure-gate-aarch64-darwin-gate"
+    )
+    assert " ".join(darwin_result["if"].split()) == (
+        "needs.realize-aarch64-darwin.result == 'success' || "
+        "needs.realize-aarch64-darwin-retry.result == 'success'"
+    )
 
 
 def test_realize_reuses_the_update_native_runner() -> None:
@@ -808,7 +840,23 @@ def test_realize_reuses_the_update_native_runner() -> None:
     )
     assert candidate["if"] == "inputs.stage != 'closure-gate'"
     assert flush["if"] == "always()"
+    assert flush["shell"] == "python"
+    assert "hosted_python.py" in flush["run"]
+    assert flush["env"]["NIXCFG_HOSTED_TARGET"] == "lib/update/ci/jobs.py"
+    assert realize["id"] == "realize"
+    assert realize["shell"] == "python"
+    assert "hosted_python.py" in realize["run"]
+    assert realize["env"]["NIXCFG_RECORD_SIGNAL"] == "1"
+    assert realize["env"]["NIXCFG_HOSTED_TARGET"] == ".github/closure-gate/gate.py"
     assert realize["env"]["NIXCFG_CLOSURE_GATE_COMMAND"] == "realize"
+    storage = next(step for step in steps if step.get("id") == "storage")
+    assert storage["shell"] == "python"
+    assert "hosted_python.py" in storage["run"]
+    assert storage["env"]["NIXCFG_REALIZE_OUTCOME"] == "${{ steps.realize.outcome }}"
+    assert (
+        storage["env"]["NIXCFG_REALIZE_RUNNER_FAULT"]
+        == "${{ steps.realize.outputs.runner_fault }}"
+    )
     update = _workflow("update.yml")
     budgets = [
         job["with"]["closure_budget_seconds"]
@@ -818,3 +866,163 @@ def test_realize_reuses_the_update_native_runner() -> None:
     assert budgets
     assert set(budgets) == {"18000"}
     assert gate.BUILD_BUDGET_SECONDS == 18000
+
+
+def test_runner_signal_is_the_shell_status_range() -> None:
+    """129 through 159 is a signal. Python's negative status is the same death."""
+    assert hosted.reported_status(-signal.SIGBUS) == 128 + signal.SIGBUS
+    assert hosted.is_runner_signal(-signal.SIGBUS)
+    for status in (129, 138, 159, -1, -31):
+        assert hosted.is_runner_signal(status)
+    for status in (0, 1, 128, 160, -32):
+        assert not hosted.is_runner_signal(status)
+
+
+def test_hosted_python_publishes_the_framework_and_nix_bins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Later shell: python steps inherit the interpreter realize resolved."""
+    github_path = tmp_path / "github-path"
+    monkeypatch.setenv("GITHUB_PATH", str(github_path))
+    monkeypatch.setenv("PATH", "/usr/bin")
+    monkeypatch.setattr(hosted, "FRAMEWORK_BIN", "/framework/bin")
+    monkeypatch.setattr(hosted, "NIX_BIN", "/nix/bin")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    hosted.publish_hosted_path()
+    published = os.environ["PATH"].split(os.pathsep)
+    assert published[:3] == [
+        "/framework/bin",
+        "/nix/bin",
+        str(tmp_path / ".nix-profile" / "bin"),
+    ]
+    assert published[-1] == "/usr/bin"
+    assert github_path.read_text(encoding="utf-8").splitlines() == published[:3]
+
+
+def test_hosted_python_records_a_signalled_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """45788923798: the realize child exits 138 and the parent records the fault."""
+    target = tmp_path / "child.py"
+    target.write_text("import os, sys\nsys.exit(int(os.environ['EXIT_CODE']))\n")
+    output = tmp_path / "github-output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("NIXCFG_HOSTED_TARGET", str(target))
+    monkeypatch.setenv("NIXCFG_RECORD_SIGNAL", "1")
+    monkeypatch.delenv("NIXCFG_REALIZE_OUTCOME", raising=False)
+    monkeypatch.delenv("NIXCFG_REALIZE_RUNNER_FAULT", raising=False)
+    monkeypatch.delenv("GITHUB_PATH", raising=False)
+    for status in (129, 138, 159):
+        output.unlink(missing_ok=True)
+        monkeypatch.setenv("EXIT_CODE", str(status))
+        with pytest.raises(SystemExit) as raised:
+            hosted.main()
+        assert raised.value.code == status
+        assert output.read_text(encoding="utf-8") == "runner_fault=true\n"
+    for status in (0, 1, 128, 160):
+        output.unlink(missing_ok=True)
+        monkeypatch.setenv("EXIT_CODE", str(status))
+        with pytest.raises(SystemExit) as raised:
+            hosted.main()
+        assert raised.value.code == status
+        assert output.read_text(encoding="utf-8") == "runner_fault=false\n"
+
+
+def test_hosted_python_maps_a_real_signal_death(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A child killed by SIGBUS is status -SIGBUS, which the runner logs as 138."""
+    target = tmp_path / "child.py"
+    target.write_text("import os, signal\nos.kill(os.getpid(), signal.SIGBUS)\n")
+    output = tmp_path / "github-output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("NIXCFG_HOSTED_TARGET", str(target))
+    monkeypatch.setenv("NIXCFG_RECORD_SIGNAL", "1")
+    monkeypatch.delenv("NIXCFG_REALIZE_OUTCOME", raising=False)
+    monkeypatch.delenv("GITHUB_PATH", raising=False)
+    with pytest.raises(SystemExit) as raised:
+        hosted.main()
+    assert raised.value.code == 128 + signal.SIGBUS
+    assert output.read_text(encoding="utf-8") == "runner_fault=true\n"
+
+
+def test_hosted_python_prefers_an_explicit_interpreter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """NIXCFG_PYTHON wins, then the framework binary, then this process."""
+    chosen = tmp_path / "chosen"
+    chosen.write_text("")
+    chosen.chmod(0o755)
+    framework = tmp_path / "framework"
+    framework.mkdir()
+    (framework / "python").write_text("")
+    (framework / "python").chmod(0o755)
+    monkeypatch.setattr(hosted, "FRAMEWORK_BIN", str(framework))
+    monkeypatch.setenv("NIXCFG_PYTHON", str(chosen))
+    assert hosted.resolve_interpreter() == str(chosen)
+    monkeypatch.setenv("NIXCFG_PYTHON", str(tmp_path / "missing"))
+    assert hosted.resolve_interpreter() == str(framework / "python")
+    monkeypatch.delenv("NIXCFG_PYTHON")
+    monkeypatch.setattr(hosted, "FRAMEWORK_BIN", str(tmp_path / "absent"))
+    assert hosted.resolve_interpreter() == sys.executable
+
+
+def test_hosted_python_notes_a_realize_that_wrote_no_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The storage step records the fault when the realize shell died too."""
+    target = tmp_path / "child.py"
+    target.write_text("marker = True\n")
+    output = tmp_path / "github-output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("NIXCFG_HOSTED_TARGET", str(target))
+    monkeypatch.delenv("NIXCFG_RECORD_SIGNAL", raising=False)
+    monkeypatch.delenv("GITHUB_PATH", raising=False)
+    monkeypatch.setenv("NIXCFG_REALIZE_OUTCOME", "failure")
+    monkeypatch.setenv("NIXCFG_REALIZE_RUNNER_FAULT", "")
+    hosted.main()
+    assert output.read_text(encoding="utf-8") == "runner_fault=true\n"
+    output.unlink()
+    monkeypatch.setenv("NIXCFG_REALIZE_RUNNER_FAULT", "false")
+    hosted.main()
+    assert not output.exists()
+    monkeypatch.setenv("NIXCFG_REALIZE_OUTCOME", "skipped")
+    monkeypatch.setenv("NIXCFG_REALIZE_RUNNER_FAULT", "")
+    hosted.main()
+    assert not output.exists()
+
+
+def test_hosted_python_reexecs_a_different_interpreter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Dump and flush replace this process with the framework interpreter."""
+    target = tmp_path / "child.py"
+    target.write_text("raise SystemExit(0)\n")
+    framework = tmp_path / "framework"
+    framework.mkdir()
+    interpreter = framework / "python"
+    interpreter.write_text("")
+    interpreter.chmod(0o755)
+    monkeypatch.setattr(hosted, "FRAMEWORK_BIN", str(framework))
+    monkeypatch.delenv("NIXCFG_PYTHON", raising=False)
+    monkeypatch.delenv("NIXCFG_RECORD_SIGNAL", raising=False)
+    monkeypatch.delenv("NIXCFG_REALIZE_OUTCOME", raising=False)
+    monkeypatch.setenv("NIXCFG_HOSTED_TARGET", str(target))
+    seen: list[list[str]] = []
+
+    def _execv(path: str, argv: list[str]) -> None:
+        seen.append([path, *argv])
+        raise SystemExit(0)
+
+    monkeypatch.setattr(hosted.os, "execv", _execv)
+    with pytest.raises(SystemExit):
+        hosted.main()
+    assert seen == [[str(interpreter), str(interpreter), str(target)]]
+
+
+def test_hosted_python_requires_a_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("NIXCFG_HOSTED_TARGET", raising=False)
+    monkeypatch.delenv("GITHUB_PATH", raising=False)
+    monkeypatch.delenv("NIXCFG_REALIZE_OUTCOME", raising=False)
+    with pytest.raises(SystemExit, match="NIXCFG_HOSTED_TARGET is required"):
+        hosted.main()

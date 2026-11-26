@@ -1,6 +1,7 @@
 """Additional tests for flake/refs update helpers."""
 
 import asyncio
+import re
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -13,7 +14,12 @@ from lib.nix.commands.base import CommandResult as ProcessResult
 from lib.nix.commands.base import ProcessDone, ProcessLine
 from lib.nix.models.flake_lock import FlakeLock, FlakeLockNode, LockedRef, OriginalRef
 from lib.tests._assertions import expect_instance
-from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
+from lib.tests._nix_ast import (
+    assert_nix_ast_equal,
+    binding_map,
+    expect_binding,
+    parse_nix_expr,
+)
 from lib.tests._updater_helpers import collect_events
 from lib.update.config import resolve_config
 from lib.update.events import (
@@ -33,6 +39,7 @@ from lib.update.flake import (
     resolve_root_input_node,
     update_flake_input,
 )
+from lib.update.flake_inputs import input_declaration_text
 from lib.update.paths import REPO_ROOT
 from lib.update.refs import (
     ChannelTag,
@@ -69,7 +76,7 @@ if TYPE_CHECKING:
     from lib.update.config import UpdateConfig
     from lib.update.process import RunCommandOptions
 
-_CACHED_RUST_OVERLAY = "87ffb7f777aef2e2647fd8fd718a5b3cbc825588"
+_EXACT_REV = re.compile(r"^[0-9a-f]{40}$")
 
 
 def _run_async[T](
@@ -287,16 +294,39 @@ def test_load_flake_lock_cache_can_be_invalidated(
     invalidate_flake_lock()
 
 
-def test_root_rust_overlay_is_rev_pinned_to_cached_nightly() -> None:
-    """#1265 floated rust-overlay nightly; keep the exact rev Rio's stable 1.99.1 needs."""
+def test_root_rust_overlay_is_an_exact_rev_pin() -> None:
+    """#1265 floated nightly; the updater may advance the rev, not the pin shape.
+
+    A hardcoded revision would reject the next legitimate advance, when Zed's
+    rust-toolchain.toml asks for a stable this pin does not ship. The invariant
+    that prevents another nightly explosion is an exact rev in both the URL and
+    the lock, with no branch.
+    """
     lock = FlakeLock.from_file(REPO_ROOT / "flake.lock")
     node, follows = resolve_root_input_node(lock, "rust-overlay")
     assert follows is None
     assert node is not None
     assert node.original is not None
     assert node.locked is not None
-    assert node.original.rev == _CACHED_RUST_OVERLAY
-    assert node.locked.rev == _CACHED_RUST_OVERLAY
+    rev = node.locked.rev
+    assert isinstance(rev, str)
+    assert _EXACT_REV.fullmatch(rev)
+    assert node.original.rev == rev
+    assert node.original.ref is None
+    # The repository flake's outputs do not parse as a nix-manipulator AST.
+    # The rust-overlay declaration node does, so the url binding is checked
+    # there. A copy of the URL in a comment cannot satisfy this.
+    declaration = input_declaration_text(
+        (REPO_ROOT / "flake.nix").read_text(encoding="utf-8"),
+        "rust-overlay",
+    )
+    assert declaration is not None
+    overlay = expect_instance(parse_nix_expr(declaration), AttributeSet)
+    assert "ref" not in binding_map(overlay.values)
+    assert_nix_ast_equal(
+        expect_binding(overlay.values, "url").value,
+        f'"github:oxalica/rust-overlay/{rev}"',
+    )
 
 
 def test_refs_version_parsing_and_selection_helpers() -> None:
