@@ -14,7 +14,12 @@ from lib.nix.commands.base import CommandResult as ProcessResult
 from lib.nix.commands.base import ProcessDone, ProcessLine
 from lib.nix.models.flake_lock import FlakeLock, FlakeLockNode, LockedRef, OriginalRef
 from lib.tests._assertions import expect_instance
-from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
+from lib.tests._nix_ast import (
+    assert_nix_ast_equal,
+    binding_map,
+    expect_binding,
+    parse_nix_expr,
+)
 from lib.tests._updater_helpers import collect_events
 from lib.update.config import resolve_config
 from lib.update.events import (
@@ -34,6 +39,7 @@ from lib.update.flake import (
     resolve_root_input_node,
     update_flake_input,
 )
+from lib.update.flake_inputs import input_declaration_text
 from lib.update.paths import REPO_ROOT
 from lib.update.refs import (
     ChannelTag,
@@ -307,8 +313,19 @@ def test_root_rust_overlay_is_an_exact_rev_pin() -> None:
     assert _EXACT_REV.fullmatch(rev)
     assert node.original.rev == rev
     assert node.original.ref is None
-    assert f"github:oxalica/rust-overlay/{rev}" in (REPO_ROOT / "flake.nix").read_text(
-        encoding="utf-8"
+    # The repository flake's outputs do not parse as a nix-manipulator AST.
+    # The rust-overlay declaration node does, so the url binding is checked
+    # there. A copy of the URL in a comment cannot satisfy this.
+    declaration = input_declaration_text(
+        (REPO_ROOT / "flake.nix").read_text(encoding="utf-8"),
+        "rust-overlay",
+    )
+    assert declaration is not None
+    overlay = expect_instance(parse_nix_expr(declaration), AttributeSet)
+    assert "ref" not in binding_map(overlay.values)
+    assert_nix_ast_equal(
+        expect_binding(overlay.values, "url").value,
+        f'"github:oxalica/rust-overlay/{rev}"',
     )
 
 

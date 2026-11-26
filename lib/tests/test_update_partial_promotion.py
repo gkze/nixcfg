@@ -9,7 +9,10 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from nix_manipulator.expressions.set import AttributeSet
 
+from lib.tests._assertions import expect_instance
+from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
 from lib.tests._run_updates_helpers import drain_events, make_run_plan
 from lib.tests._update_workspace_helpers import init_update_workspace_repo
 from lib.update.cli import (
@@ -1775,6 +1778,19 @@ _DESKTOP_OLD = "7" * 40
 _DESKTOP_NEW = "8" * 40
 
 
+def _assert_declared_binding(source: str, name: str, binding: str, nix: str) -> None:
+    """Assert one binding of an input attrset, ignoring comments around it."""
+    declaration = input_declaration_text(source, name)
+    assert declaration is not None
+    attrset = expect_instance(parse_nix_expr(declaration), AttributeSet)
+    assert_nix_ast_equal(expect_binding(attrset.values, binding).value, nix)
+
+
+def _assert_input_url(source: str, name: str, url: str) -> None:
+    """Assert the input's url binding is exactly ``url``."""
+    _assert_declared_binding(source, name, "url", f'"{url}"')
+
+
 def _rev_nix(*, overlay: str, codex: str, desktop_ref: str | None = None) -> str:
     desktop = ""
     if desktop_ref is not None:
@@ -1903,9 +1919,9 @@ def test_withhold_restores_a_rev_pinned_url_and_keeps_unrelated_pins(
     )
 
     flake = (tmp_path / "flake.nix").read_text(encoding="utf-8")
-    assert f"github:oxalica/rust-overlay/{_OLD_REV}" in flake
+    _assert_input_url(flake, "rust-overlay", f"github:oxalica/rust-overlay/{_OLD_REV}")
     assert "# pin" in flake
-    assert f"github:openai/codex/{_CODEX_NEW}" in flake
+    _assert_input_url(flake, "codex", f"github:openai/codex/{_CODEX_NEW}")
     assert _locked_node_revs(tmp_path) == {
         "zed": _ZED_OLD,
         "rust-overlay": _OLD_REV,
@@ -1957,9 +1973,9 @@ def test_withhold_restores_a_rev_pin_alongside_a_ref(
     )
 
     flake = (tmp_path / "flake.nix").read_text(encoding="utf-8")
-    assert f'ref = "{old_ref}"' in flake
-    assert f"github:oxalica/rust-overlay/{_OLD_REV}" in flake
-    assert f"github:openai/codex/{_CODEX_NEW}" in flake
+    _assert_declared_binding(flake, "github-desktop", "ref", f'"{old_ref}"')
+    _assert_input_url(flake, "rust-overlay", f"github:oxalica/rust-overlay/{_OLD_REV}")
+    _assert_input_url(flake, "codex", f"github:openai/codex/{_CODEX_NEW}")
     assert _locked_node_revs(tmp_path)["github-desktop"] == _DESKTOP_OLD
     assert _locked_node_revs(tmp_path)["rust-overlay"] == _OLD_REV
     assert _locked_node_revs(tmp_path)["codex"] == _CODEX_NEW

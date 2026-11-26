@@ -206,6 +206,37 @@ def restore_input_declaration(current: str, baseline: str, input_name: str) -> s
     ).decode()
 
 
+def _url_expression(source: bytes, input_name: str) -> Node | None:
+    """Return the ``url`` expression of ``input_name``, not a comment that names it."""
+    attrset = _input_attrset(source, input_name)
+    if attrset is None:
+        return None
+    return next(
+        (
+            binding.child_by_field_name("expression")
+            for binding in _bindings(attrset)
+            if _attrpath_parts(binding) == (b"url",)
+        ),
+        None,
+    )
+
+
+def input_github_rev_url(source: str, input_name: str) -> str | None:
+    """Return ``github:owner/repo/<rev>`` when that is the input's url binding.
+
+    Comments inside the declaration do not count. A branch, forge, or missing
+    url is ``None``, because only an exact GitHub revision pin is that shape.
+    """
+    url_value = _url_expression(source.encode(), input_name)
+    if url_value is None:
+        return None
+    if url_value.text is None:  # pragma: no cover -- tree-sitter always fills it
+        return None
+    if _GITHUB_REV_URL.fullmatch(url_value.text) is None:
+        return None
+    return url_value.text[1:-1].decode()
+
+
 def set_input_github_rev(source: str, input_name: str, rev: str) -> str:
     """Replace the commit embedded in an input's ``github:owner/repo/<rev>`` URL.
 
@@ -218,20 +249,12 @@ def set_input_github_rev(source: str, input_name: str, rev: str) -> str:
         msg = f"flake input rev must be 40 lowercase hex characters, got {rev!r}"
         raise ValueError(msg)
     encoded = source.encode()
-    attrset = _input_attrset(encoded, input_name)
-    if attrset is None:
-        msg = f"Could not find flake input attrset for {input_name!r}"
-        raise RuntimeError(msg)
-    url_value = next(
-        (
-            binding.child_by_field_name("expression")
-            for binding in _bindings(attrset)
-            if _attrpath_parts(binding) == (b"url",)
-        ),
-        None,
-    )
+    url_value = _url_expression(encoded, input_name)
     if url_value is None:
-        msg = f"Flake input {input_name!r} has no url"
+        if _input_attrset(encoded, input_name) is None:
+            msg = f"Could not find flake input attrset for {input_name!r}"
+        else:
+            msg = f"Flake input {input_name!r} has no url"
         raise RuntimeError(msg)
     if url_value.text is None:  # pragma: no cover -- tree-sitter always fills it
         msg = f"Flake input {input_name!r} has no url"
@@ -266,6 +289,7 @@ def set_input_ref(source: str, input_name: str, ref: str) -> str:
 __all__ = [
     "has_input_ref",
     "input_declaration_text",
+    "input_github_rev_url",
     "restore_input_declaration",
     "root_attrset",
     "root_input_bindings",

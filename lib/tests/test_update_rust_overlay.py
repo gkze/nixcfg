@@ -5,11 +5,15 @@ from collections.abc import Callable, Coroutine
 from pathlib import Path
 
 import pytest
+from nix_manipulator.expressions.set import AttributeSet
 
 from lib.http_utils import NonRetryableStatusError
 from lib.nix.models.flake_lock import FlakeLockNode, LockedRef, OriginalRef
+from lib.tests._assertions import expect_instance
+from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
 from lib.update.config import resolve_config
 from lib.update.events import UpdateEvent, ignore_event
+from lib.update.flake_inputs import input_declaration_text
 from lib.update.rust_overlay import (
     _lock_rewritten_pin,
     ensure_root_rust_overlay_has_channel,
@@ -112,7 +116,7 @@ def _install(
     tmp_path: Path,
     github: _GitHub,
     *,
-    node: FlakeLockNode | None | object = _UNSET,
+    node: FlakeLockNode | object | None = _UNSET,
     follows: str | None = None,
     flake: str | None = None,
 ) -> _GitHub:
@@ -182,7 +186,13 @@ def test_missing_channel_advances_to_the_oldest_manifest_commit(
 
     assert github.updates == [["rust-overlay"]]
     text = (tmp_path / "flake.nix").read_text(encoding="utf-8")
-    assert f"github:oxalica/rust-overlay/{_NEW}" in text
+    declaration = input_declaration_text(text, "rust-overlay")
+    assert declaration is not None
+    overlay = expect_instance(parse_nix_expr(declaration), AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(overlay.values, "url").value,
+        f'"github:oxalica/rust-overlay/{_NEW}"',
+    )
     assert "# exact rev" in text
     assert "# pin" in text
     assert events[0].message == f"Advancing rust-overlay to {_NEW} for stable 1.100.0"
@@ -241,6 +251,17 @@ def test_url_must_match_the_locked_rev(
     _install(monkeypatch, tmp_path, _GitHub(), flake=_flake(_NEW))
     with pytest.raises(RuntimeError, match="not the locked oxalica rev pin"):
         _run(_ensure())
+
+    commented = _flake(_NEW).replace(
+        "# exact rev",
+        f"# github:oxalica/rust-overlay/{_OLD}",
+    )
+    github = _GitHub()
+    _install(monkeypatch, tmp_path, github, flake=commented)
+    with pytest.raises(RuntimeError, match="not the locked oxalica rev pin"):
+        _run(_ensure())
+    assert github.urls == []
+    assert github.apis == []
 
 
 def test_manifest_transport_errors_propagate(

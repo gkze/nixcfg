@@ -27,7 +27,7 @@ from lib.update.flake import (
     resolve_root_input_node,
     update_flake_inputs,
 )
-from lib.update.flake_inputs import input_declaration_text, set_input_github_rev
+from lib.update.flake_inputs import input_github_rev_url, set_input_github_rev
 from lib.update.net import fetch_github_api, fetch_url, github_raw_url
 from lib.update.paths import get_repo_root
 from lib.update.rust_toolchain import EXACT_STABLE_CHANNEL
@@ -104,9 +104,14 @@ def _pinned_rev() -> str:
 
 
 def _url_matches_pin(source: str, rev: str) -> bool:
-    """Return whether the declared URL is oxalica/rust-overlay at ``rev``."""
-    declaration = input_declaration_text(source, RUST_OVERLAY_INPUT)
-    return declaration is not None and f"github:{_OWNER}/{_REPO}/{rev}" in declaration
+    """Return whether the url binding is oxalica/rust-overlay at ``rev``.
+
+    A comment that mentions the revision is not the pin. The binding itself
+    has to be that exact GitHub URL.
+    """
+    return input_github_rev_url(source, RUST_OVERLAY_INPUT) == (
+        f"github:{_OWNER}/{_REPO}/{rev}"
+    )
 
 
 async def _manifest_exists(

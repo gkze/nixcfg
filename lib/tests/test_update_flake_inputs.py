@@ -8,6 +8,7 @@ from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_e
 from lib.update.flake_inputs import (
     has_input_ref,
     input_declaration_text,
+    input_github_rev_url,
     restore_input_declaration,
     root_input_bindings,
     set_input_github_rev,
@@ -209,6 +210,30 @@ _REV_PIN = """{
   };
 }
 """
+
+
+def test_input_github_rev_url_reads_the_url_binding() -> None:
+    """A comment that names another revision is not the declared URL."""
+    commented = _REV_PIN.replace(
+        "# Keep an exact rev.",
+        "# github:oxalica/rust-overlay/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    )
+    assert (
+        input_github_rev_url(commented, "rust-overlay")
+        == "github:oxalica/rust-overlay/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    )
+    assert input_github_rev_url(commented, "missing") is None
+    assert (
+        input_github_rev_url(
+            "{ inputs.rust-overlay = { flake = false; }; }", "rust-overlay"
+        )
+        is None
+    )
+    branched = commented.replace(
+        "github:oxalica/rust-overlay/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "github:oxalica/rust-overlay/master",
+    )
+    assert input_github_rev_url(branched, "rust-overlay") is None
 
 
 def test_set_input_github_rev_replaces_only_the_commit() -> None:
