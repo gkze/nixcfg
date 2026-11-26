@@ -726,21 +726,27 @@ def test_held_declarations_leave_a_flake_they_cannot_splice() -> None:
     assert held["flake.nix"] == bare
 
 
+@pytest.mark.parametrize(
+    ("pinned_rev", "pinned_ref"),
+    [
+        ("fb55b5a6d7f5b5df96c8f817f1cde6a81880d9f1", "v1.60.2"),
+        ("66a0e6ce7c1cbe7da735779adcbf2035144f2906", "66a0e6ce"),
+    ],
+)
 def test_fold_rewinds_a_pin_whose_source_entry_stayed_on_the_baseline(
     tmp_path: Path,
+    pinned_rev: str,
+    pinned_ref: str,
 ) -> None:
-    """Updates 44258507999 and 44694691236: goose's pin moved and its files did not.
+    """A newer Goose pin is rewound when sources.json did not move with it.
 
-    44694691236 evaluated ``fb55b5a6`` / ``v1.60.2`` against sources.json
-    ``2bcb8583`` / ``v1.55.0``. The withhold restored the source files and the
-    crate artifacts, and the hold did not name the goose input. The rewind
-    puts that pin back after the fold and does not quarantine the package.
-    Codex, whose source files are not part of the goose entry, stays on the
-    candidate pin.
+    Update 44694691236 evaluated ``fb55b5a6`` / ``v1.60.2`` against
+    sources.json ``2bcb8583`` / ``v1.55.0``. Update 45775088251 evaluated
+    ``66a0e6ce`` the same way. The rewind keys off the owned files staying
+    put, not off one revision. Codex stays on the candidate pin.
     """
     root = tmp_path / "repo"
     baseline_rev = "2bcb8583a18a0623eb78c9ed845d597ed99fae48"
-    pinned_rev = "fb55b5a6d7f5b5df96c8f817f1cde6a81880d9f1"
     sources = json.dumps({
         "commit": baseline_rev,
         "hashes": [],
@@ -754,7 +760,7 @@ def test_fold_rewinds_a_pin_whose_source_entry_stayed_on_the_baseline(
     baseline_nix = _input_flake(desktop="v1.55.0", codex="v1").replace(
         "github-desktop", "goose"
     )
-    pinned_nix = _input_flake(desktop="v1.60.2", codex="v2").replace(
+    pinned_nix = _input_flake(desktop=pinned_ref, codex="v2").replace(
         "github-desktop", "goose"
     )
     init_update_workspace_repo(

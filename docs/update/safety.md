@@ -281,6 +281,9 @@ flowchart TD
    left the source metadata behind (Update 44258507999). Update 44694691236
    is the same split with a newer Goose pin: ``fb55b5a6`` / ``v1.60.2`` in
    the lock, ``2bcb8583`` / ``v1.55.0`` in ``overlays/goose-cli/sources.json``.
+   Update 45775088251 is that split again, with ``66a0e6ce`` in the lock and
+   the same sources entry. The rewind matches any revision whose owned files
+   stayed on the baseline.
    The same merge
    restores a consumer, and the flake input it pins, when that consumer's
    ``electronVersion`` is not in the Electron inventory the fold kept.
