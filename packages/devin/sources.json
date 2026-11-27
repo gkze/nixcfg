@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-MKLlvIuX0sW6lLCbmMCu01c02HZ3vb3xdgw9DT79Psc="
+    "aarch64-darwin": "sha256-WAgFZNJieHE+Pdv4Qpp76JDD2/rBPGdGOnPoqIzsay4="
   },
   "urls": {
-    "aarch64-darwin": "https://windsurf-stable.codeiumdata.com/darwin-arm64/stable/053434014dbdb7a662a14e38752946a0dafb97f2/Devin-darwin-arm64-3.11.228.zip"
+    "aarch64-darwin": "https://windsurf-stable.codeiumdata.com/darwin-arm64/stable/cfa79668e1a5e000e036cea74fc23449b0aedec3-c16c32bf7d9d42345cd0c798c527a68e/Devin-darwin-arm64-3.15.14.zip"
   },
-  "version": "3.11.228"
+  "version": "3.15.14"
 }
