@@ -248,10 +248,11 @@ stdenv.mkDerivation {
           ;;
       esac
     done < "$machoInventory"
-    # The reviewed archive has 110 Mach-O files. One is the nested
-    # HQ Capture executable; the helper is not an extra unsigned binary.
-    if [ "$machoCount" -ne 110 ]; then
-      echo "HQ Mach-O inventory expected 110 files, got $machoCount" >&2
+    # The reviewed 0.11.39 archive has 110 Mach-O files and no
+    # Contents/MacOS/recall-desktop-sdk. The install compiles that launcher
+    # and adds it, so the signed app has 111. HQ Capture is one of the 110.
+    if [ "$machoCount" -ne 111 ]; then
+      echo "HQ Mach-O inventory expected 111 files, got $machoCount" >&2
       exit 1
     fi
 
