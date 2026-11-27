@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-mG102EaPsIYei3uNX3iBvO1cHIHGGKDkNkVY+sgb3JE=",
-    "x86_64-darwin": "sha256-mG102EaPsIYei3uNX3iBvO1cHIHGGKDkNkVY+sgb3JE="
+    "aarch64-darwin": "sha256-6IfGQlcQl1+JCJg7xRChjES6jK3BrwYMS/tglqwPT+c=",
+    "x86_64-darwin": "sha256-6IfGQlcQl1+JCJg7xRChjES6jK3BrwYMS/tglqwPT+c="
   },
   "urls": {
-    "aarch64-darwin": "https://api.github.com/repos/zen-browser/desktop/releases/assets/789663676",
-    "x86_64-darwin": "https://api.github.com/repos/zen-browser/desktop/releases/assets/789663676"
+    "aarch64-darwin": "https://api.github.com/repos/zen-browser/desktop/releases/assets/801381128",
+    "x86_64-darwin": "https://api.github.com/repos/zen-browser/desktop/releases/assets/801381128"
   },
-  "version": "1.26t-20261124114104"
+  "version": "1.26t-20261127024448"
 }
