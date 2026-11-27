@@ -133,7 +133,8 @@ in
       # rust-bindgen does not invoke that driver. It forwards the same cflags
       # to libclang, which rejects the flag as an unknown argument and stops
       # the FFI action before testing.cc is compiled. The bindgen binary gets
-      # the same rewrite when the probe fails.
+      # the same rewrite when the probe fails. It is not linked first: cp
+      # follows that symlink and tries to write the Nix store.
       ubsanArgvWrapper =
         name: executable:
         pkgs.writeScript "rusty-v8-${name}" ''
@@ -158,6 +159,7 @@ in
         then
           ln -sf ${pkgs.llvmPackages.clang}/bin/clang $llvm_bin/clang
           ln -sf ${pkgs.llvmPackages.clang}/bin/clang++ $llvm_bin/clang++
+          ln -sf ${pkgs.rust-bindgen}/bin/bindgen $rust_toolchain/bin/bindgen
         else
           cp ${ubsanArgvWrapper "clang" "${pkgs.llvmPackages.clang}/bin/clang"} $llvm_bin/clang
           cp ${ubsanArgvWrapper "clang++" "${pkgs.llvmPackages.clang}/bin/clang++"} $llvm_bin/clang++
@@ -203,7 +205,6 @@ in
         printf '%s\n' '${pkgs.rustc.version}' > $rust_toolchain/VERSION
 
         mkdir -p $rust_toolchain/bin
-        ln -sf ${pkgs.rust-bindgen}/bin/bindgen $rust_toolchain/bin/bindgen
         ln -sf ${pkgs.rustc}/bin/rustc $rust_toolchain/bin/rustc
         ln -sf ${pkgs.cargo}/bin/cargo $rust_toolchain/bin/cargo
         ln -sf ${pkgs.rustfmt}/bin/rustfmt $rust_toolchain/bin/rustfmt

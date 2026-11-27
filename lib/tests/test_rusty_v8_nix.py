@@ -101,6 +101,7 @@ def test_rusty_v8_keeps_trap_only_ubsan_off_the_sanitizer_runtime() -> None:
           then
             ln -sf ${pkgs.llvmPackages.clang}/bin/clang $llvm_bin/clang
             ln -sf ${pkgs.llvmPackages.clang}/bin/clang++ $llvm_bin/clang++
+            ln -sf ${pkgs.rust-bindgen}/bin/bindgen $rust_toolchain/bin/bindgen
           else
             cp ${
               ubsanArgvWrapper "clang" "${pkgs.llvmPackages.clang}/bin/clang"
@@ -377,6 +378,8 @@ def test_rusty_v8_toolchain_builder_parses_as_bash() -> None:
 
     Gate 45798854564 then failed rust-bindgen, which forwards the same flag to
     libclang. The probe's failure branch has to install that rewrite on bindgen.
+    Gate 45944200904 copied it onto the symlink cp follows into the store, so
+    bindgen is linked only when the probe succeeds.
     """
     for platform in ("linux", "darwin"):
         script = _toolchain_builder(platform)
@@ -386,6 +389,7 @@ def test_rusty_v8_toolchain_builder_parses_as_bash() -> None:
         assert f"cp {_PLACEHOLDER} $llvm_bin/clang\n" in script
         assert f"cp {_PLACEHOLDER} $llvm_bin/clang++\n" in script
         assert f"cp {_PLACEHOLDER} $rust_toolchain/bin/bindgen\n" in script
+        assert "bindgen" not in script.partition("if printf")[0]
         assert "-fsanitize-ignore-for-ubsan-feature=return" in script
         assert "for tool in clang" not in script
         if platform == "linux":
