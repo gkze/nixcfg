@@ -102,9 +102,16 @@ def test_rusty_v8_keeps_trap_only_ubsan_off_the_sanitizer_runtime() -> None:
             ln -sf ${pkgs.llvmPackages.clang}/bin/clang $llvm_bin/clang
             ln -sf ${pkgs.llvmPackages.clang}/bin/clang++ $llvm_bin/clang++
           else
-            cp ${ubsanClangWrapper "clang"} $llvm_bin/clang
-            cp ${ubsanClangWrapper "clang++"} $llvm_bin/clang++
-            chmod +x $llvm_bin/clang $llvm_bin/clang++
+            cp ${
+              ubsanArgvWrapper "clang" "${pkgs.llvmPackages.clang}/bin/clang"
+            } $llvm_bin/clang
+            cp ${
+              ubsanArgvWrapper "clang++" "${pkgs.llvmPackages.clang}/bin/clang++"
+            } $llvm_bin/clang++
+            cp ${
+              ubsanArgvWrapper "bindgen" "${pkgs.rust-bindgen}/bin/bindgen"
+            } $rust_toolchain/bin/bindgen
+            chmod +x $llvm_bin/clang $llvm_bin/clang++ $rust_toolchain/bin/bindgen
           fi
         ''
         """,
@@ -183,7 +190,7 @@ def _builder_bindings() -> tuple[dict[str, Node], bytes]:
                 if name in {
                     *_SHELL_BINDINGS,
                     "chromiumToolchainBundle",
-                    "ubsanClangWrapper",
+                    "ubsanArgvWrapper",
                 }:
                     found[name] = children[1]
         for child in node.named_children:
@@ -333,11 +340,11 @@ def test_bash_n_accepts_a_heredoc_whose_terminator_dedents_to_column_zero() -> N
     assert result.returncode == 0, result.stderr
 
 
-def test_ubsan_clang_wrapper_stays_trap_only_python() -> None:
+def test_ubsan_argv_wrapper_stays_trap_only_python() -> None:
     """The wrapper still clears the feature so testing.cc does not include the sanitizer runtime."""
     bindings, encoded = _builder_bindings()
     script = _render_indented(
-        _only_indented_string(bindings["ubsanClangWrapper"]),
+        _only_indented_string(bindings["ubsanArgvWrapper"]),
         encoded,
         lambda _expression: "placeholder",
     )
@@ -366,7 +373,11 @@ def test_ubsan_clang_wrapper_stays_trap_only_python() -> None:
 
 
 def test_rusty_v8_toolchain_builder_parses_as_bash() -> None:
-    """Gate 45785077844 failed this runCommand because its heredoc swallowed `done`."""
+    """Gate 45785077844 failed this runCommand because its heredoc swallowed `done`.
+
+    Gate 45798854564 then failed rust-bindgen, which forwards the same flag to
+    libclang. The probe's failure branch has to install that rewrite on bindgen.
+    """
     for platform in ("linux", "darwin"):
         script = _toolchain_builder(platform)
         _assert_heredocs_close_at_column_zero(script)
@@ -374,6 +385,7 @@ def test_rusty_v8_toolchain_builder_parses_as_bash() -> None:
         assert result.returncode == 0, (platform, result.stderr)
         assert f"cp {_PLACEHOLDER} $llvm_bin/clang\n" in script
         assert f"cp {_PLACEHOLDER} $llvm_bin/clang++\n" in script
+        assert f"cp {_PLACEHOLDER} $rust_toolchain/bin/bindgen\n" in script
         assert "-fsanitize-ignore-for-ubsan-feature=return" in script
         assert "for tool in clang" not in script
         if platform == "linux":

@@ -129,9 +129,14 @@ in
       # The wrapper is its own script. A heredoc nested under the if in
       # clangLink stays indented after Nix dedents that string, so the
       # terminator never matches and bash exits before `done`.
-      ubsanClangWrapper =
-        tool:
-        pkgs.writeScript "rusty-v8-${tool}" ''
+      #
+      # rust-bindgen does not invoke that driver. It forwards the same cflags
+      # to libclang, which rejects the flag as an unknown argument and stops
+      # the FFI action before testing.cc is compiled. The bindgen binary gets
+      # the same rewrite when the probe fails.
+      ubsanArgvWrapper =
+        name: executable:
+        pkgs.writeScript "rusty-v8-${name}" ''
           #!${pkgs.python3}/bin/python3
           import os
           import sys
@@ -139,9 +144,9 @@ in
           sys.path.insert(0, "${patchScriptsDir}")
           from clang_ubsan_feature import rewrite_args
 
-          compiler = "${pkgs.llvmPackages.clang}/bin/${tool}"
+          tool = "${executable}"
           args = rewrite_args(sys.argv[1:], ignore_flag_supported=False)
-          os.execv(compiler, [compiler, *args])
+          os.execv(tool, [tool, *args])
         '';
 
       clangLink = ''
@@ -154,9 +159,10 @@ in
           ln -sf ${pkgs.llvmPackages.clang}/bin/clang $llvm_bin/clang
           ln -sf ${pkgs.llvmPackages.clang}/bin/clang++ $llvm_bin/clang++
         else
-          cp ${ubsanClangWrapper "clang"} $llvm_bin/clang
-          cp ${ubsanClangWrapper "clang++"} $llvm_bin/clang++
-          chmod +x $llvm_bin/clang $llvm_bin/clang++
+          cp ${ubsanArgvWrapper "clang" "${pkgs.llvmPackages.clang}/bin/clang"} $llvm_bin/clang
+          cp ${ubsanArgvWrapper "clang++" "${pkgs.llvmPackages.clang}/bin/clang++"} $llvm_bin/clang++
+          cp ${ubsanArgvWrapper "bindgen" "${pkgs.rust-bindgen}/bin/bindgen"} $rust_toolchain/bin/bindgen
+          chmod +x $llvm_bin/clang $llvm_bin/clang++ $rust_toolchain/bin/bindgen
         fi
       '';
 
