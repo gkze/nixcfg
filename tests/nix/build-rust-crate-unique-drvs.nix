@@ -60,8 +60,48 @@ let
       buildRustCrateForPkgsFunc = builderFor;
     }).drvPath;
 
+  # The output check is a derivation attribute. Parsing the overlay does not
+  # show that `.override` still carries it, which is how crate2nix and zed
+  # select the toolchain.
+  integrityLeaf = (buildRustCrateOverride.withIntegrityCheck lib (buildRustCrateOverride.upstreamFor pkgs)) {
+    crateName = "leaf";
+    version = "0.1.0";
+    src = pkgs.emptyDirectory;
+  };
+  overriddenLeaf =
+    (buildRustCrateOverride.withIntegrityCheck lib (buildRustCrateOverride.upstreamFor pkgs)).override
+      { }
+      {
+        crateName = "leaf";
+        version = "0.1.0";
+        src = pkgs.emptyDirectory;
+      };
+
   checks =
-    lib.optionals current [
+    [
+      (lib.assertMsg (
+        lib.hasInfix "nixcfg-verify-crate-outputs" (integrityLeaf.postInstall or "")
+      ) "crate output check must run from postInstall")
+      (lib.assertMsg (
+        lib.hasInfix "rust-end-file" (integrityLeaf.postInstall or "")
+      ) "crate output check must reject metadata rustc's decoder rejects")
+      (lib.assertMsg (
+        lib.hasInfix "nixcfg-verify-crate-outputs" (integrityLeaf.postFixup or "")
+      ) "crate output check must run again after fixup")
+      (lib.assertMsg integrityLeaf.dontStrip "crate outputs must not be stripped")
+      (lib.assertMsg (
+        lib.hasInfix "nixcfg-verify-crate-outputs" (overriddenLeaf.postInstall or "")
+      ) "crate output check must survive .override")
+      (lib.assertMsg overriddenLeaf.dontStrip "dontStrip must survive .override")
+      (lib.assertMsg (
+        integrityLeaf.drvPath != (buildRustCrateOverride.upstreamFor pkgs {
+          crateName = "leaf";
+          version = "0.1.0";
+          src = pkgs.emptyDirectory;
+        }).drvPath
+      ) "crate output check must change the derivation so a published path is not reused")
+    ]
+    ++ lib.optionals current [
       (lib.assertMsg (
         vendoredGraph.top.drvPath == upstreamGraph.top.drvPath
       ) "synthetic graph: vendored and upstream drvPaths differ")

@@ -4,6 +4,8 @@ from types import ModuleType
 from typing import TYPE_CHECKING
 
 from lib.system_policy import bun_artifact_names, supported_systems
+from lib.tests._nix_ast import assert_nix_ast_equal
+from lib.tests._nix_source import nix_source_fragment_expr
 from lib.tests._updater_helpers import load_repo_module, run_async
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.updaters import UpdateContext, VersionInfo
@@ -88,4 +90,22 @@ def test_bun_updater_tracks_official_release_binaries_for_exported_systems(
             systems=supported_systems(),
             mode="build",
         ),
+    )
+
+
+def test_bun_overlay_declares_platforms_from_the_hashes_it_ships() -> None:
+    """The platform check must see the systems this overlay ships binaries for.
+
+    nixpkgs derives ``meta.platforms`` from ``passthru.sources``. Replacing
+    ``passthru`` leaves that check with an empty list, so a newer bun is
+    refused on aarch64-darwin while t3code evaluates it.
+    """
+    meta = nix_source_fragment_expr(
+        "overlays/bun/default.nix",
+        "    meta = ",
+        "\n    doInstallCheck",
+    )
+    assert_nix_ast_equal(
+        meta,
+        "old.meta // { platforms = builtins.attrNames selfSource.hashes; }",
     )

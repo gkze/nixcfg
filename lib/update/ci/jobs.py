@@ -843,9 +843,21 @@ def dump_hosted_storage_fault() -> None:
             _append_command_output(
                 report, f"diskutil info {target}", [diskutil, "info", target]
             )
-    kernel_log = _dump_kernel_storage_log(artifacts / "apfs-io.log", report)
+    kernel_log, query_failed = _dump_kernel_storage_log(
+        artifacts / "apfs-io.log", report
+    )
     marker = artifacts / _DEVICE_FAULT_NAME
-    if not marker.is_file() and (faults := device_fault_lines(kernel_log)):
+    if query_failed:
+        # 44388423654 realize-aarch64-darwin-retry: log show did not finish,
+        # so this dump recorded no device fault. Flush then tried to drain
+        # the daemon and the action post hung until the 6h job cancel, which
+        # dropped the realize log. An unfinished query leaves the store
+        # unverified; flush publishes nothing and releases the daemon dir.
+        (artifacts / _DEVICE_UNVERIFIED_NAME).write_text(
+            (artifacts / "apfs-io.log").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+    elif not marker.is_file() and (faults := device_fault_lines(kernel_log)):
         _record_device_fault(artifacts, faults)
     if os.environ.get("GITHUB_OUTPUT"):
         _outputs(device_fault=str(marker.is_file()).lower())
@@ -884,12 +896,16 @@ def _kernel_log_window() -> list[str]:
     return ["--start", time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(boot))]
 
 
-def _dump_kernel_storage_log(log_path: Path, report: Path) -> str:
-    """Retain this VM's storage kernel log since boot and return its text."""
+def _dump_kernel_storage_log(log_path: Path, report: Path) -> tuple[str, bool]:
+    """Retain this VM's storage kernel log since boot.
+
+    The text is the log. The flag is true when the query did not answer, so
+    the caller can withhold the store instead of treating silence as healthy.
+    """
     log_bin = shutil.which("log")
     if log_bin is None:
         log_path.write_text("log show missing\n", encoding="utf-8")
-        return ""
+        return "", True
     try:
         result = subprocess.run(  # noqa: S603 -- resolved log path
             [
@@ -908,13 +924,13 @@ def _dump_kernel_storage_log(log_path: Path, report: Path) -> str:
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         log_path.write_text(f"{type(error).__name__}: {error}\n", encoding="utf-8")
-        return ""
+        return "", True
     log_path.write_text(result.stdout + result.stderr, encoding="utf-8")
     with report.open("a", encoding="utf-8") as handle:
         handle.write(
             f"## log show exit={result.returncode} bytes={log_path.stat().st_size}\n"
         )
-    return result.stdout
+    return result.stdout, False
 
 
 class HostedDeviceStateError(RuntimeError):
@@ -3156,8 +3172,20 @@ def _darwin_pin_kind(path: str) -> str | None:
 
 
 def _closure_root_names() -> tuple[str, ...]:
-    """Return the shard's root names from the flush step environment."""
-    return tuple(os.environ.get("NIXCFG_CLOSURE_ROOTS", "").split())
+    """Return the shard's pin names.
+
+    Update shards pass ``NIXCFG_CLOSURE_ROOTS``. A closure-gate slice
+    ``root-closure-<pin>`` is that pin when roots are unset. 45673035217
+    left ``home-george`` unset and refused to pin the home generation.
+    """
+    raw = tuple(os.environ.get("NIXCFG_CLOSURE_ROOTS", "").split())
+    if raw:
+        return raw
+    slice_name = os.environ.get("NIXCFG_CLOSURE_GATE_SLICE", "").strip()
+    prefix = "root-closure-"
+    if slice_name.startswith(prefix):
+        return (slice_name.removeprefix(prefix),)
+    return ()
 
 
 def _roots_by_pin_kind(roots: tuple[str, ...]) -> dict[str, tuple[str, ...]]:

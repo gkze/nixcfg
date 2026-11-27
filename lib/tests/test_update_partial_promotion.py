@@ -1761,3 +1761,114 @@ def test_withhold_holds_both_flake_files_after_a_whole_file_revert(
         paths=("flake.lock", "flake.nix", "packages/tool-src/sources.json")
     )
     assert {Path("flake.nix"), Path("flake.lock")} <= set(workspace.restored)
+
+
+def test_withhold_keeps_an_aggregate_siblings_refreshed_hash(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Update 45347647927: a sibling failure must not restore a refreshed hash.
+
+    Paseo failed. Goose only shares the electron-runtimes aggregate, so the
+    hash and pin its updater wrote stay. The aggregate itself is withheld,
+    because its inventory is derived from the failed member. Codex, on its
+    own input, stays. The shard does not rewrite the lock.
+    """
+    monkeypatch.chdir(tmp_path)
+    pin = _nodes_lock(goose="c" * 40, codex="b" * 40)
+    (tmp_path / "flake.lock").write_text(pin, encoding="utf-8")
+
+    class _Paseo(Updater):
+        aggregate_into = ("electron-runtimes",)
+
+    class _Goose(Updater):
+        input_name = "goose"
+        aggregate_into = ("electron-runtimes",)
+
+    class _Runtimes(Updater):
+        pass
+
+    class _Codex(Updater):
+        input_name = "codex"
+
+    class _Notes(Updater):
+        input_name = "goose"
+
+    outcome = _RunOutcome()
+    outcome.summary.accumulate({
+        "paseo": "error",
+        "goose-cli": "updated",
+        "electron-runtimes": "updated",
+        "codex-cli": "updated",
+        "goose-notes": "no_change",
+    })
+    outcome.written_paths = (
+        _source_path("goose-cli"),
+        _source_path("codex-cli"),
+        _source_path("paseo"),
+    )
+    _withhold_for_hold(
+        monkeypatch,
+        _HoldWorkspace(pin.encode()),
+        make_run_plan(
+            source_names=(
+                "paseo",
+                "goose-cli",
+                "electron-runtimes",
+                "codex-cli",
+                "goose-notes",
+            )
+        ),
+        outcome,
+        {
+            "paseo": _Paseo,
+            "goose-cli": _Goose,
+            "electron-runtimes": _Runtimes,
+            "codex-cli": _Codex,
+            "goose-notes": _Notes,
+        },
+    )
+
+    assert outcome.quarantine_hold.inputs == ()
+    assert "packages/goose-cli/sources.json" not in outcome.quarantine_hold.paths
+    assert "packages/goose-notes/sources.json" not in outcome.quarantine_hold.paths
+    assert "packages/electron-runtimes/sources.json" in outcome.quarantine_hold.paths
+    assert "packages/codex-cli/sources.json" not in outcome.quarantine_hold.paths
+    assert "flake.lock" not in outcome.quarantine_hold.paths
+    assert (tmp_path / "flake.lock").read_text(encoding="utf-8") == pin
+    assert "codex-cli" not in outcome.dropped
+    assert "goose-cli" not in outcome.dropped
+    assert outcome.dropped["electron-runtimes"] == "coupled to failed target paseo"
+
+
+def test_withhold_records_an_inherited_pin_for_the_failed_source(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Update 44258507999: a failed source records the pin this shard inherited.
+
+    The pins seed already wrote the goose pin and this shard did not move the
+    lock. The failed source's files go back to the baseline, so the hold names
+    that input and the fold puts the pin back with the files.
+    """
+    monkeypatch.chdir(tmp_path)
+    pin = _nodes_lock(goose="c" * 40)
+    (tmp_path / "flake.lock").write_text(pin, encoding="utf-8")
+
+    class _Goose(Updater):
+        input_name = "goose"
+
+    outcome = _RunOutcome()
+    outcome.summary.accumulate({"goose-cli": "error"})
+    _withhold_for_hold(
+        monkeypatch,
+        _HoldWorkspace(pin.encode()),
+        make_run_plan(source_names=("goose-cli",)),
+        outcome,
+        {"goose-cli": _Goose},
+    )
+
+    assert outcome.quarantine_hold.inputs == ("goose",)
+    assert "packages/goose-cli/sources.json" in outcome.quarantine_hold.paths
+    assert "flake.lock" not in outcome.quarantine_hold.paths
+    assert (tmp_path / "flake.lock").read_text(encoding="utf-8") == pin

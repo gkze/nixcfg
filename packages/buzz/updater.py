@@ -2,15 +2,18 @@
 
 import asyncio
 import hashlib
+import io
 import json
 import re
 import shlex
+import tarfile
 import tomllib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, cast
 
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
+from nix_manipulator.expressions.primitive import Primitive
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib import json_utils
@@ -284,6 +287,9 @@ _MESH_SOURCE_DIGESTS: dict[str, str] = {
         "3bafc39ebc117295f524b9a27a969537b6949ac9b6f4904215700e2cf9cf4fd4"
     ),
 }
+# Tag v1.27.0, commit 8f0278c77bf44b0cc83c098c6c722b92a36ac4b5.
+# github.com/microsoft/onnxruntime has been private since 2026-11-17.
+_ONNX_SOURCE_COMMIT = "8f0278c77bf44b0cc83c098c6c722b92a36ac4b5"
 _ONNX_SOURCE_DIGESTS: dict[str, str] = {
     "VERSION_NUMBER": (
         "7ef1ea58fece676ff7345f6edac427e671daf20f0d7499ef2e42ada241d4fe24"
@@ -364,6 +370,29 @@ def _require_exact(actual: object, expected: object, *, context: str) -> None:
     if actual != expected:
         msg = f"Buzz {context} drifted: expected {expected!r}, got {actual!r}"
         raise RuntimeError(msg)
+
+
+def archive_member_payloads(archive: bytes, paths: tuple[str, ...]) -> dict[str, bytes]:
+    """Read the stripped root of a tag archive, keyed by the requested paths."""
+    wanted = set(paths)
+    found: dict[str, bytes] = {}
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:*") as tar:
+        for member in tar.getmembers():
+            if not member.isfile():
+                continue
+            _root, separator, relative = member.name.partition("/")
+            if separator == "" or relative not in wanted:
+                continue
+            stream = tar.extractfile(member)
+            if stream is None:  # pragma: no cover -- file members always have a stream
+                msg = f"ONNX Runtime archive member {member.name} has no contents"
+                raise RuntimeError(msg)
+            found[relative] = stream.read()
+    missing = [path for path in paths if path not in found]
+    if missing:
+        msg = f"ONNX Runtime archive is missing {missing}"
+        raise RuntimeError(msg)
+    return {path: found[path] for path in paths}
 
 
 def _require_exact_version(value: str, *, context: str) -> str:
@@ -1458,8 +1487,10 @@ class BuzzUpdater(GitHubReleaseUpdater):
     supported_platforms = (DARWIN_PLATFORM,)
     generated_artifact_files = ("native-lock.json",)
     compatibility_pin_rationale = (
-        "The package-local static ONNX Runtime recipe is deliberately reviewed "
-        "against one upstream release independently of Buzz's release manifests."
+        "The package-local static ONNX Runtime recipe is reviewed against "
+        "release 1.27.0, commit 8f0278c77bf44b0cc83c098c6c722b92a36ac4b5. "
+        "The GitHub repository is private, so the source is that tag's "
+        "official archive from the npmmirror binary mirror."
     )
     compatibility_pins: ClassVar[dict[str, str]] = {"onnxruntimeVersion": "1.27.0"}
     compatibility_source_digest_rationale = (
@@ -1484,6 +1515,33 @@ class BuzzUpdater(GitHubReleaseUpdater):
     @staticmethod
     def _archive_url(owner: str, repo: str, commit: str) -> str:
         return f"https://github.com/{owner}/{repo}/archive/{commit}.tar.gz"
+
+    @staticmethod
+    def onnxruntime_archive_url(version: str) -> str:
+        """Return the official tag archive mirrored after the GitHub repo went private."""
+        return (
+            "https://registry.npmmirror.com/-/binary/onnxruntime/"
+            f"v{version}/v{version}.tar.gz"
+        )
+
+    def _onnxruntime_src_expr(self, version: str) -> str:
+        expression = FunctionCall(
+            name=identifier_attr_path("pkgs", "fetchzip"),
+            argument=AttributeSet(
+                values=[
+                    Binding(
+                        name="url",
+                        value=nix_str(self.onnxruntime_archive_url(version)),
+                    ),
+                    Binding(
+                        name="hash",
+                        value=identifier_attr_path("pkgs", "lib", "fakeHash"),
+                    ),
+                    Binding(name="stripRoot", value=Primitive(value=True)),
+                ]
+            ),
+        )
+        return compact_nix_expr(expression.rebuild())
 
     @staticmethod
     def _fetchurl_expr(url: str) -> str:
@@ -1624,12 +1682,13 @@ class BuzzUpdater(GitHubReleaseUpdater):
         )
         _require_exact(
             result["onnxruntimeUrl"],
-            cls._archive_url(
-                "microsoft",
-                "onnxruntime",
-                result["onnxruntimeCommit"],
-            ),
+            cls.onnxruntime_archive_url(result["onnxruntimeVersion"]),
             context="ONNX Runtime source URL",
+        )
+        _require_exact(
+            result["onnxruntimeCommit"],
+            _ONNX_SOURCE_COMMIT,
+            context="ONNX Runtime source commit",
         )
         _require_exact(
             result["sherpaOnnxUrl"],
@@ -1693,7 +1752,7 @@ class BuzzUpdater(GitHubReleaseUpdater):
         )
         onnxruntime_version = self.get_compatibility_pin("onnxruntimeVersion")
 
-        mesh_commit, sherpa_commit, onnxruntime_commit = await asyncio.gather(
+        mesh_commit, sherpa_commit = await asyncio.gather(
             resolve_tag_commit(
                 session,
                 context="Buzz",
@@ -1710,15 +1769,8 @@ class BuzzUpdater(GitHubReleaseUpdater):
                 tag=f"v{release_contract.sherpa_version}",
                 config=self.config,
             ),
-            resolve_tag_commit(
-                session,
-                context="Buzz",
-                owner="microsoft",
-                repo="onnxruntime",
-                tag=f"v{onnxruntime_version}",
-                config=self.config,
-            ),
         )
+        onnxruntime_commit = _ONNX_SOURCE_COMMIT
         _require_exact(
             mesh_commit,
             release_contract.mesh_commit,
@@ -1748,20 +1800,14 @@ class BuzzUpdater(GitHubReleaseUpdater):
                 for path in mesh_source_paths
             )
         )
-        onnx_source_payloads = await asyncio.gather(
-            *(
-                fetch_url(
-                    session,
-                    github_raw_url(
-                        "microsoft",
-                        "onnxruntime",
-                        onnxruntime_commit,
-                        path,
-                    ),
-                    config=self.config,
-                )
-                for path in onnx_source_paths
-            )
+        onnx_archive = await fetch_url(
+            session,
+            self.onnxruntime_archive_url(onnxruntime_version),
+            config=self.config,
+        )
+        onnx_source_payloads = archive_member_payloads(
+            onnx_archive,
+            onnx_source_paths,
         )
         sherpa_source_payloads = await asyncio.gather(
             *(
@@ -1782,7 +1828,7 @@ class BuzzUpdater(GitHubReleaseUpdater):
             dict(zip(mesh_source_paths, mesh_source_payloads, strict=True)),
         )
         _validate_onnx_source_contract(
-            dict(zip(onnx_source_paths, onnx_source_payloads, strict=True)),
+            onnx_source_payloads,
             expected_version=onnxruntime_version,
         )
         _validate_sherpa_source_contract(
@@ -1812,11 +1858,7 @@ class BuzzUpdater(GitHubReleaseUpdater):
                 ),
                 "meshLlmVersion": release_contract.mesh_version,
                 "onnxruntimeCommit": onnxruntime_commit,
-                "onnxruntimeUrl": self._archive_url(
-                    "microsoft",
-                    "onnxruntime",
-                    onnxruntime_commit,
-                ),
+                "onnxruntimeUrl": self.onnxruntime_archive_url(onnxruntime_version),
                 "onnxruntimeVersion": onnxruntime_version,
                 "pnpmVersion": release_contract.pnpm_version,
                 "rustVersion": release_contract.rust_version,
@@ -1923,11 +1965,8 @@ class BuzzUpdater(GitHubReleaseUpdater):
             _HashRequest(
                 hash_type="srcHash",
                 url=onnxruntime_url,
-                expr=lambda _resolved: _build_fetch_from_github_expr(
-                    "microsoft",
-                    "onnxruntime",
-                    rev=metadata["onnxruntimeCommit"],
-                    fetch_submodules=False,
+                expr=lambda _resolved: self._onnxruntime_src_expr(
+                    metadata["onnxruntimeVersion"]
                 ),
             ),
             _HashRequest(

@@ -64,29 +64,27 @@ stdenv.mkDerivation {
       echo "HQ release archive does not contain the reviewed HQ.app root" >&2
       exit 1
     fi
-    unexpectedApps="$(${lib.getExe python3} - "$unpackRoot" <<'PY'
-    from pathlib import Path
-    import sys
-
-    root = Path(sys.argv[1])
-    apps = sorted(path.relative_to(root).as_posix() for path in root.rglob("*.app"))
-    if apps != ["HQ.app"]:
-        raise SystemExit(f"unexpected HQ app inventory: {apps!r}")
-    PY
-    )"
-    test -z "$unexpectedApps"
+    ${lib.getExe python3} ${./app_inventory.py} "$unpackRoot"
 
     cp -R "$unpackRoot/HQ.app" "$app"
     chmod -R u+w "$app"
-    rm -rf "$app/Contents/_CodeSignature" "$app/Contents/CodeResources"
+    captureHelper="$app/Contents/Helpers/HQ Capture.app"
+    # The vendor signature on the nested helper does not survive re-signing
+    # its executable. Both bundles get one ad-hoc signature, helper first.
+    rm -rf \
+      "$app/Contents/_CodeSignature" \
+      "$app/Contents/CodeResources" \
+      "$captureHelper/Contents/_CodeSignature" \
+      "$captureHelper/Contents/CodeResources"
     rm -f "$app/Contents/MacOS/._recall-desktop-sdk"
     ${darwin.xattr}/bin/xattr -cr "$app"
 
     mainExecutable="$app/Contents/MacOS/hq-sync-menubar"
+    captureExecutable="$captureHelper/Contents/MacOS/HQ Capture"
     recallLauncher="$app/Contents/MacOS/recall-desktop-sdk"
     uiRecorder="$app/Contents/Resources/recall-sdk-bridge/node_modules/@recallai/desktop-sdk/Frameworks/libui_recorder.dylib"
     bridge="$app/Contents/Resources/recall-sdk-bridge/bridge.mjs"
-    for required in "$mainExecutable" "$uiRecorder" "$bridge"; do
+    for required in "$mainExecutable" "$captureExecutable" "$uiRecorder" "$bridge"; do
       if [ ! -f "$required" ]; then
         echo "HQ release archive is missing required runtime path: $required" >&2
         exit 1
@@ -148,6 +146,13 @@ stdenv.mkDerivation {
       --timestamp=none \
       --options runtime \
       --entitlements ${./Entitlements.plist} \
+      "$captureHelper"
+    /usr/bin/codesign \
+      --force \
+      --sign - \
+      --timestamp=none \
+      --options runtime \
+      --entitlements ${./Entitlements.plist} \
       "$mainExecutable"
     /usr/bin/codesign \
       --force \
@@ -167,6 +172,8 @@ stdenv.mkDerivation {
     runHook preInstallCheck
 
     app="$out/Applications/HQ.app"
+    captureHelper="$app/Contents/Helpers/HQ Capture.app"
+    captureExecutable="$captureHelper/Contents/MacOS/HQ Capture"
     mainExecutable="$app/Contents/MacOS/hq-sync-menubar"
     recallLauncher="$app/Contents/MacOS/recall-desktop-sdk"
     infoPlist="$app/Contents/Info.plist"
@@ -174,6 +181,8 @@ stdenv.mkDerivation {
 
     for required in \
       "$app" \
+      "$captureHelper" \
+      "$captureExecutable" \
       "$mainExecutable" \
       "$recallLauncher" \
       "$infoPlist" \
@@ -239,8 +248,11 @@ stdenv.mkDerivation {
           ;;
       esac
     done < "$machoInventory"
-    if [ "$machoCount" -ne 110 ]; then
-      echo "HQ Mach-O inventory expected 110 files, got $machoCount" >&2
+    # The reviewed 0.11.39 archive has 110 Mach-O files and no
+    # Contents/MacOS/recall-desktop-sdk. The install compiles that launcher
+    # and adds it, so the signed app has 111. HQ Capture is one of the 110.
+    if [ "$machoCount" -ne 111 ]; then
+      echo "HQ Mach-O inventory expected 111 files, got $machoCount" >&2
       exit 1
     fi
 
@@ -257,6 +269,7 @@ stdenv.mkDerivation {
       "$machoCount" \
       "$app"
 
+    /usr/bin/codesign --verify --strict --verbose=2 "$captureHelper"
     /usr/bin/codesign --verify --deep --strict --verbose=2 "$app"
 
     runHook postInstallCheck

@@ -263,6 +263,138 @@ def test_hq_0375_staging_guard_is_unique_and_preserves_its_target(
         module.patch_payload(mixed)
 
 
+# HQ 0.11.39 x86_64 at file offset 0x163b1f6. The je stays at offset 33.
+# The trailing rip-relative lea is now mov rcx,[rbx+disp8]; mov r8,[rbx+disp8];
+# mov rdi, rbx; call.
+_HQ_01139_X86_64_CORE_INSTALL_GUARD = bytes.fromhex(
+    "48 8d bb 20 01 00 00 e8 6e 6e 31 00 48 8b bb 28 "
+    "01 00 00 48 8b b3 30 01 00 00 e8 1b 19 0c ff 84 "
+    "c0 0f 84 b1 01 00 00 48 8b b3 28 01 00 00 48 8b "
+    "93 30 01 00 00 48 8b 4b 30 4c 8b 43 38 48 89 df "
+    "e8 55 84 2e 00"
+)
+# HQ 0.11.39 arm64 at file offset 0x4189dd4. The tbz stays at offset 12.
+# The window ends with the report call's adrp/add, not 0.10.375's continuation add.
+_HQ_01139_ARM64_CORE_INSTALL_GUARD = bytes.fromhex(
+    "83 b8 0a 94 60 86 52 a9 0e a5 cc 97 60 0a 00 36 "
+    "61 8a 52 a9 63 12 43 a9 e0 03 13 aa dd 19 0a 94 "
+    "79 a9 00 90 39 43 29 91"
+)
+
+
+@pytest.mark.parametrize("copies", [0, 1, 2])
+def test_hq_01139_x86_core_install_guard_is_unique_and_preserves_its_target(
+    tmp_path: Path, copies: int
+) -> None:
+    """0.11.39's extra x86 report arguments must stay a single install guard."""
+    module = _load_hq_module("patch_updater.py", "hq_01139_x86_patch_test")
+    validator = _load_hq_module("validate_artifact.py", "hq_01139_x86_validator_test")
+    guard = _HQ_01139_X86_64_CORE_INSTALL_GUARD
+    paths = (
+        *_CURRENT_AUTOMATIC_MUTATION_PATHS[:2],
+        *([guard] * copies),
+        *_CURRENT_AUTOMATIC_MUTATION_PATHS[3:],
+    )
+    payload = _mutation_fixture(module, paths)
+    if copies != 1:
+        with pytest.raises(ValueError, match="x86_64 hq-core install guard inventory"):
+            module.patch_payload(payload)
+        return
+
+    patched = module.patch_payload(payload)
+    offset = payload.index(guard)
+    original_target = 39 + int.from_bytes(guard[35:39], "little", signed=True)
+    replacement_target = 38 + int.from_bytes(
+        patched[offset + 34 : offset + 38],
+        "little",
+        signed=True,
+    )
+    assert len(patched) == len(payload)
+    assert patched[offset : offset + 33] == guard[:33]
+    assert patched[offset + 39 : offset + len(guard)] == guard[39:]
+    assert patched[offset + 33] == 0xE9
+    assert patched[offset + 38] == 0x90
+    assert replacement_target == original_target
+
+    executable = tmp_path / "hq-sync-menubar"
+    executable.write_bytes(patched)
+    info = tmp_path / "Info.plist"
+    info.write_bytes(
+        plistlib.dumps({
+            "CFBundleExecutable": "hq-sync-menubar",
+            "CFBundleIdentifier": "ai.indigo.hq-sync-menubar",
+            "CFBundleShortVersionString": "0.11.39",
+            "CFBundleVersion": "0.11.39",
+            "LSMinimumSystemVersion": "13.0",
+            "LSUIElement": True,
+        })
+    )
+    validator.validate_artifact(
+        info_plist=info,
+        main_executable=executable,
+        expected_version="0.11.39",
+    )
+    mixed = _mutation_fixture(module, (*paths, _CURRENT_AUTOMATIC_MUTATION_PATHS[2]))
+    with pytest.raises(ValueError, match="inventory drifted: expected 1, got 2"):
+        module.patch_payload(mixed)
+
+
+@pytest.mark.parametrize("copies", [0, 1, 2])
+def test_hq_01139_arm64_core_install_guard_is_unique_and_preserves_its_target(
+    tmp_path: Path, copies: int
+) -> None:
+    """0.11.39's arm64 report adrp must stay a single install guard."""
+    module = _load_hq_module("patch_updater.py", "hq_01139_arm64_patch_test")
+    validator = _load_hq_module("validate_artifact.py", "hq_01139_arm64_validator_test")
+    guard = _HQ_01139_ARM64_CORE_INSTALL_GUARD
+    paths = (
+        *_CURRENT_AUTOMATIC_MUTATION_PATHS[:3],
+        *([guard] * copies),
+        *_CURRENT_AUTOMATIC_MUTATION_PATHS[4:],
+    )
+    payload = _mutation_fixture(module, paths)
+    if copies != 1:
+        with pytest.raises(ValueError, match="arm64 hq-core install guard inventory"):
+            module.patch_payload(payload)
+        return
+
+    patched = module.patch_payload(payload)
+    offset = payload.index(guard)
+    word = int.from_bytes(guard[12:16], "little")
+    immediate = (word >> 5) & 0x3FFF
+    if immediate & 0x2000:
+        immediate -= 0x4000
+    expected_target = 12 + (immediate << 2)
+    branch = int.from_bytes(patched[offset + 12 : offset + 16], "little")
+    assert len(patched) == len(payload)
+    assert patched[offset : offset + 12] == guard[:12]
+    assert patched[offset + 16 : offset + len(guard)] == guard[16:]
+    assert branch >> 26 == 0b000101
+    assert 12 + ((branch & 0x03FFFFFF) << 2) == expected_target
+
+    executable = tmp_path / "hq-sync-menubar"
+    executable.write_bytes(patched)
+    info = tmp_path / "Info.plist"
+    info.write_bytes(
+        plistlib.dumps({
+            "CFBundleExecutable": "hq-sync-menubar",
+            "CFBundleIdentifier": "ai.indigo.hq-sync-menubar",
+            "CFBundleShortVersionString": "0.11.39",
+            "CFBundleVersion": "0.11.39",
+            "LSMinimumSystemVersion": "13.0",
+            "LSUIElement": True,
+        })
+    )
+    validator.validate_artifact(
+        info_plist=info,
+        main_executable=executable,
+        expected_version="0.11.39",
+    )
+    mixed = _mutation_fixture(module, (*paths, _CURRENT_AUTOMATIC_MUTATION_PATHS[3]))
+    with pytest.raises(ValueError, match="inventory drifted: expected 1, got 2"):
+        module.patch_payload(mixed)
+
+
 # HQ 0.11.13 arm64 at file offsets 0x301e6f0 (autoUpdate gate) and
 # 0x3072ad4 (menubar.json reader for machineIdentityOptOut). Both share
 # the 0xc0-frame prologue the 0.10.399 contract matched exactly.

@@ -89,6 +89,109 @@ in
       # Chromium records the resource-directory name beside the exact V8
       # source. Derive it there so a V8 update cannot leave a duplicate pin
       # behind in each consumer's updater metadata.
+      #
+      # clang_lib("compiler_builtins") then looks that directory up itself:
+      # lib/clang/$RELEASE_VERSION/lib/<triple>/libclang_rt.builtins.a on
+      # Linux, and lib/darwin/libclang_rt.osx.a on Darwin. Nix clang's
+      # resource directory does not ship those archives. compiler-rt does,
+      # under lib/linux and lib/darwin. Goose and Codex both use this bundle.
+      clangRuntimeLink =
+        if pkgs.stdenv.hostPlatform.isLinux then
+          ''
+            runtime_dir="$version_dir/lib/${pkgs.stdenv.hostPlatform.config}"
+            rm -rf "$runtime_dir"
+            mkdir -p "$runtime_dir"
+            ln -s ${pkgs.llvmPackages.compiler-rt}/lib/linux/libclang_rt.builtins-${pkgs.stdenv.hostPlatform.parsed.cpu.name}${pkgs.stdenv.hostPlatform.extensions.staticLibrary} \
+              "$runtime_dir/libclang_rt.builtins${pkgs.stdenv.hostPlatform.extensions.staticLibrary}"
+          ''
+        else if pkgs.stdenv.hostPlatform.isDarwin then
+          ''
+            runtime_dir="$version_dir/lib/darwin"
+            rm -rf "$runtime_dir"
+            mkdir -p "$runtime_dir"
+            if [ -d ${pkgs.llvmPackages.clang}/resource-root/lib/darwin ]; then
+              for entry in ${pkgs.llvmPackages.clang}/resource-root/lib/darwin/*; do
+                [ -e "$entry" ] || continue
+                ln -s "$entry" "$runtime_dir/$(basename "$entry")"
+              done
+            fi
+            ln -sfn ${pkgs.llvmPackages.compiler-rt}/lib/darwin/libclang_rt.osx${pkgs.stdenv.hostPlatform.extensions.staticLibrary} \
+              "$runtime_dir/libclang_rt.osx${pkgs.stdenv.hostPlatform.extensions.staticLibrary}"
+          ''
+        else
+          abort "rusty-v8 has no compiler-rt builtins layout for this platform";
+
+      # Chromium's trap-only checks pass -fsanitize-ignore-for-ubsan-feature so
+      # __has_feature(undefined_behavior_sanitizer) stays false. Without that,
+      # v8/src/sandbox/testing.cc includes the sanitizer runtime. A clang that
+      # accepts the flag is linked through. Goose and Codex share this bundle.
+      #
+      # The wrapper is its own script. A heredoc nested under the if in
+      # clangLink stays indented after Nix dedents that string, so the
+      # terminator never matches and bash exits before `done`.
+      #
+      # rust-bindgen does not invoke that driver. It forwards the same cflags
+      # to libclang, which rejects the flag as an unknown argument and stops
+      # the FFI action before testing.cc is compiled. The bindgen binary gets
+      # the same rewrite when the probe fails. It is not linked first: cp
+      # follows that symlink and tries to write the Nix store.
+      ubsanArgvWrapper =
+        name: executable:
+        pkgs.writeScript "rusty-v8-${name}" ''
+          #!${pkgs.python3}/bin/python3
+          import os
+          import sys
+
+          sys.path.insert(0, "${patchScriptsDir}")
+          from clang_ubsan_feature import rewrite_args
+
+          tool = "${executable}"
+          args = rewrite_args(sys.argv[1:], ignore_flag_supported=False)
+          os.execv(tool, [tool, *args])
+        '';
+
+      clangLink = ''
+        if printf 'int nixcfg_ubsan_probe;\n' | ${pkgs.llvmPackages.clang}/bin/clang \
+          -fsanitize=return \
+          -fsanitize-trap=return \
+          -fsanitize-ignore-for-ubsan-feature=return \
+          -x c -c -o /dev/null - >/dev/null 2>&1
+        then
+          ln -sf ${pkgs.llvmPackages.clang}/bin/clang $llvm_bin/clang
+          ln -sf ${pkgs.llvmPackages.clang}/bin/clang++ $llvm_bin/clang++
+          ln -sf ${pkgs.rust-bindgen}/bin/bindgen $rust_toolchain/bin/bindgen
+        else
+          cp ${ubsanArgvWrapper "clang" "${pkgs.llvmPackages.clang}/bin/clang"} $llvm_bin/clang
+          cp ${ubsanArgvWrapper "clang++" "${pkgs.llvmPackages.clang}/bin/clang++"} $llvm_bin/clang++
+          cp ${ubsanArgvWrapper "bindgen" "${pkgs.rust-bindgen}/bin/bindgen"} $rust_toolchain/bin/bindgen
+          chmod +x $llvm_bin/clang $llvm_bin/clang++ $rust_toolchain/bin/bindgen
+        fi
+      '';
+
+      # Chromium's thin_archive config passes -S when the compiler is clang
+      # and use_lld is false. GNU ld.bfd then reports "archive has no index".
+      # The gcc-on-linux branch of that config passes -s. Goose and Codex
+      # both link the host tools with ld.bfd through this bundle.
+      llvmArLink =
+        if pkgs.stdenv.hostPlatform.isLinux then
+          ''
+            cat > $llvm_bin/llvm-ar <<PY
+            #!${pkgs.python3}/bin/python3
+            import os
+            import sys
+            llvm_ar = "${pkgs.llvmPackages.llvm}/bin/llvm-ar"
+            args = ["-s" if arg == "-S" else arg for arg in sys.argv[1:]]
+            os.execv(llvm_ar, [llvm_ar, *args])
+            PY
+            chmod +x $llvm_bin/llvm-ar
+          ''
+        else if pkgs.stdenv.hostPlatform.isDarwin then
+          ''
+            ln -sf ${pkgs.llvmPackages.llvm}/bin/llvm-ar $llvm_bin/llvm-ar
+          ''
+        else
+          abort "rusty-v8 has no llvm-ar layout for this platform";
+
       chromiumToolchainBundle = pkgs.runCommand "${name}-toolchain-${version}" { } ''
         clang_resource_version="$(${pkgs.python3}/bin/python3 \
           ${patchScriptsDir}/patch_compiler_gni.py --print-release-version \
@@ -102,7 +205,6 @@ in
         printf '%s\n' '${pkgs.rustc.version}' > $rust_toolchain/VERSION
 
         mkdir -p $rust_toolchain/bin
-        ln -sf ${pkgs.rust-bindgen}/bin/bindgen $rust_toolchain/bin/bindgen
         ln -sf ${pkgs.rustc}/bin/rustc $rust_toolchain/bin/rustc
         ln -sf ${pkgs.cargo}/bin/cargo $rust_toolchain/bin/cargo
         ln -sf ${pkgs.rustfmt}/bin/rustfmt $rust_toolchain/bin/rustfmt
@@ -112,10 +214,9 @@ in
           $rust_toolchain/lib/rustlib/src/rust/library
 
         mkdir -p $llvm_bin
-        ln -sf ${pkgs.llvmPackages.clang}/bin/clang $llvm_bin/clang
-        ln -sf ${pkgs.llvmPackages.clang}/bin/clang++ $llvm_bin/clang++
+        ${clangLink}
+        ${llvmArLink}
         for tool in \
-          llvm-ar \
           llvm-cxxfilt \
           llvm-install-name-tool \
           llvm-libtool-darwin \
@@ -127,9 +228,24 @@ in
           ln -sf ${pkgs.llvmPackages.llvm}/bin/$tool $llvm_bin/$tool
         done
 
-        mkdir -p $llvm_bundle/lib/clang
-        ln -sf ${pkgs.llvmPackages.clang}/resource-root \
-          "$llvm_bundle/lib/clang/$clang_resource_version"
+        resource=${pkgs.llvmPackages.clang}/resource-root
+        version_dir="$llvm_bundle/lib/clang/$clang_resource_version"
+        mkdir -p "$version_dir/lib"
+        for entry in "$resource"/*; do
+          [ -e "$entry" ] || continue
+          entry_name="$(basename "$entry")"
+          if [ "$entry_name" = lib ]; then
+            continue
+          fi
+          ln -s "$entry" "$version_dir/$entry_name"
+        done
+        if [ -d "$resource/lib" ]; then
+          for entry in "$resource"/lib/*; do
+            [ -e "$entry" ] || continue
+            ln -s "$entry" "$version_dir/lib/$(basename "$entry")"
+          done
+        fi
+        ${clangRuntimeLink}
       '';
 
       patchedSrc =
@@ -152,8 +268,8 @@ in
               $out/build/config/compiler/compiler.gni
             python ${patchScriptsDir}/patch_compiler_gni.py \
               $out/build/config/compiler/BUILD.gn
-            python ${patchScriptsDir}/patch_compiler_gni.py \
-              $out/build/config/sanitizers/sanitizers.gni
+            python ${patchScriptsDir}/patch_v8_ubsan_feature.py \
+              $out/v8/src/base/macros.h
             python ${patchScriptsDir}/patch_stdlib_adler.py \
               $out/build/rust/std/BUILD.gn
             python ${patchScriptsDir}/patch_allocator_build.py \
@@ -228,7 +344,15 @@ in
               pkgs.ninja
               pkgs.python3
             ]
-            ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ pkgs.xcodebuild ];
+            ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ pkgs.xcodebuild ]
+            # Importing //build/config/linux:compiler evaluates pkg_config("glib")
+            # whenever use_glib is true. The script's "Could not run pkg-config"
+            # is the missing binary or a non-zero probe, and both look the same.
+            ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.pkg-config ];
+
+            # The pkg-config hook exports buildInputs' .pc files. glib provides
+            # glib-2.0, gmodule-2.0, gobject-2.0, and gthread-2.0.
+            buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.glib ];
 
             dontConfigure = true;
             dontFixup = true;

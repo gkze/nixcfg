@@ -855,7 +855,18 @@ aggregate.
 Realize calls the Update reusable workflow (`update-native.yml`) with stage
 `closure-gate` on `macos-15`, `ubuntu-24.04-arm`, and `ubuntu-24.04`. The
 build flags are the validation build (`nix build --no-update-lock-file
---no-link --keep-going --fallback`) plus `--print-out-paths`. The build
+--no-link --fallback`) plus `--max-jobs 1` and `--print-out-paths`. The
+gate does not pass `--keep-going`: a slice builds one installable, and
+continuing after the first failure records the dependent `Cannot build`
+lines instead of the builder that failed. Each changed installable is its
+own build. After it,
+the gate roots the printed paths, deletes leftover `nix-*` directories
+under `/nix/var/nix/builds`, and reclaims the store when free space is
+under the skip threshold. Run 44713152415 lost the first Darwin runner
+and the retry was stopped during one combined build of all eight outputs.
+Run 44158690416 faulted `disk2s7` while two vendor trees were unlinked
+together. The build directory stays on the Nix store volume: Determinate
+Nix rejects `/private/tmp` as world-writable (44569736549). The build
 budget is the Darwin shard budget, 18000 seconds, inside the 360-minute job.
 The receipt is `--print-out-paths`. Derivation show of a Darwin system
 names a different output than the build realizes, so it does not choose
@@ -864,6 +875,51 @@ pushes only printed paths whose gkze narinfo is not 200. `cachix push`
 must exit 0 and the narinfo must then be 200, or the job fails. The flush step still runs and
 fails closed. The aggregating step writes the pushed and already-cached
 store paths into the job summary.
+
+Darwin realize is one VM per slice: the changed packages, then each
+`root-closure-*` on its own. The slices share the Darwin lane, so they queue
+rather than taking a runner each. Each installable is pushed before the next
+build. Runs 44744612180 and 44776913311 lost both the first VM and its retry
+while one job still held every output, and the push had not run. The
+aggregate joins `closure-gate-aarch64-darwin-gate-*`. A second slice fault
+fails the gate. Process output is decoded with replacement: nix on Darwin
+can write a path that is not UTF-8, and a strict decode drops the exit code.
+Run 44817523361's home-george slice died that way twice, on byte 0xdd, and
+recorded neither the build result nor a device fault. The same run's
+rocinante slice rejected `GoogleDrive.dmg` on both VMs with one hash, now in
+`packages/google-drive/sources.json`. Run 44910664125 then substituted
+`rust_zerocopy-0.8.52-lib` and `rust_serde_core-1.0.228-lib` from gkze.
+Both narinfos were 200 and both nars were signed, and neither rlib was an
+archive: `lib/link` was the single byte `+` or `@`, which `setup_link_paths`
+passed to rustc. `overlays/_lib/build-rust-crate` rejects that output and
+changes the crate hash so the published path is not reused. Run 45379398481
+was a compiler failure on both platforms, not a timeout or a device fault:
+x86_64 gitbutler aborted in `adler32furious` because Rust 1.99's stdarch
+emits an LLVM 23 intrinsic that this nixpkgs' LLVM 21 rustc rejects, and
+Darwin substituted `rust_crossbeam-utils-0.8.21-lib` whose rlib had an
+archive header but no `rust-end-file` trailer, so `crossbeam-channel`
+reported E0786. The builder now uses `llvmPackages_23` and refuses to
+publish an rlib without that trailer. The zeus, home-george, packages, and
+argus retries of that run skipped: their first artifacts were finished
+build failures (Coast Local's DMG digest moved, and HQ 0.11.15's asset
+404s), and a finished slice does not rebuild.
+`packages/coast-local/sources.json` now pins the digest the Darwin builder
+and a second fetch of the same URL both got.
+`packages/hq/sources.json` pins `HQ_0.11.39_universal.app.tar.gz`, the asset
+the current release publishes. Run 44910664125's
+rocinante slice stopped on Reason 0.1.118 because the public 307 named
+`/desktop/stable/0.1.131/`; `packages/reason/sources.json` pins that object.
+Run 44888080350 recorded
+`device_fault=false` on home-george only. The matrix exposes one output, so
+that false skipped the fresh VM for the faulted argus and zeus slices and
+for rocinante, whose runner received a shutdown signal before it recorded
+one. The retry now starts whenever the Darwin matrix failed. A cell
+rebuilds a slice whose first artifact is missing or named with a fault
+suffix, and it does not upload over a slice the first VM already finished.
+Run 44926356549's zeus slice then 404'd
+`super.engineering-nightly-c0f9eaa7-arm64.dmg`. The public download now names
+`super.engineering-nightly-e7a1b735-arm64.dmg`, last-modified 2026-11-20, and
+`packages/superconductor/sources.json` pins that object.
 
 A Darwin realize whose kernel logged block-device I/O errors does not push.
 Flush clears the Cachix daemon directory so the action's post hook cannot
@@ -874,8 +930,13 @@ had started. Run 44005867871's `home-manager-generation` builder reported
 `substituteInPlace` reads the activation script in one pass, and that read
 hit the faulted volume. The tree had no NUL bytes. The realize job records
 `device_fault` and `realize-aarch64-darwin-retry` rebuilds the same outputs
-once on a fresh VM, which is the attempt allowed to push. A second fault
-fails the gate.
+once on a fresh VM, which is the attempt allowed to push. A realize that
+fails without recording `device_fault=false` is the same missing result:
+run 44498744364 attempt 2 died while the realize step was still running, so
+the output was never set and the retry did not start. A finished realize
+that records `device_fault=false` is a build failure and does not rerun. The
+aggregate downloads `closure-gate-aarch64-darwin-gate-*` from whichever of
+those jobs succeeded. A second fault fails the gate.
 
 Fork pull requests do not run the workflow's jobs. The trigger is
 `pull_request` for a head in this repository, and the Cachix token is passed

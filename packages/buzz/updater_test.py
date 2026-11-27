@@ -1,8 +1,10 @@
 """Focused contracts for the blocked, source-first Buzz desktop foundation."""
 
 import hashlib
+import io
 import json
 import re
+import tarfile
 from types import ModuleType
 from typing import cast
 
@@ -621,16 +623,32 @@ def _archive_url(owner: str, repo: str, commit: str) -> str:
     return f"https://github.com/{owner}/{repo}/archive/{commit}.tar.gz"
 
 
+def _onnxruntime_archive_url(version: str = _ONNX_RUNTIME_VERSION) -> str:
+    return (
+        "https://registry.npmmirror.com/-/binary/onnxruntime/"
+        f"v{version}/v{version}.tar.gz"
+    )
+
+
+def _onnx_archive(payloads: dict[str, bytes]) -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        directory = tarfile.TarInfo(name=f"onnxruntime-{_ONNX_RUNTIME_VERSION}")
+        directory.type = tarfile.DIRTYPE
+        archive.addfile(directory)
+        for path, data in payloads.items():
+            info = tarfile.TarInfo(name=f"onnxruntime-{_ONNX_RUNTIME_VERSION}/{path}")
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+    return buffer.getvalue()
+
+
 def _urls(*, commit: str = _COMMIT) -> dict[str, str]:
     return {
         "buzzUrl": _archive_url("block", "buzz", commit),
         "llamaCppUrl": _LLAMA_URL,
         "meshLlmUrl": _MESH_URL,
-        "onnxruntimeUrl": _archive_url(
-            "microsoft",
-            "onnxruntime",
-            _ONNX_RUNTIME_COMMIT,
-        ),
+        "onnxruntimeUrl": _onnxruntime_archive_url(),
         "sherpaOnnxUrl": _archive_url(
             "k2-fsa",
             "sherpa-onnx",
@@ -655,11 +673,7 @@ def _metadata(
         "meshLlmUrl": _MESH_URL,
         "meshLlmVersion": _MESH_VERSION,
         "onnxruntimeCommit": _ONNX_RUNTIME_COMMIT,
-        "onnxruntimeUrl": _archive_url(
-            "microsoft",
-            "onnxruntime",
-            _ONNX_RUNTIME_COMMIT,
-        ),
+        "onnxruntimeUrl": _onnxruntime_archive_url(),
         "onnxruntimeVersion": _ONNX_RUNTIME_VERSION,
         "pnpmVersion": pnpm_version,
         "rustVersion": rust_version,
@@ -821,15 +835,7 @@ def test_buzz_audits_the_exact_release_source_topology(
     # Mesh's digest-pinned upstream.txt is the available behavioral anchor for
     # llama.cpp. Direct llama raw-byte checks stay absent until independently
     # authoritative digests exist; its archive identity is still hashed below.
-    raw_payloads.update({
-        github_raw_url(
-            "microsoft",
-            "onnxruntime",
-            _ONNX_RUNTIME_COMMIT,
-            path,
-        ): payload
-        for path, payload in onnx_payloads.items()
-    })
+    raw_payloads[_onnxruntime_archive_url()] = _onnx_archive(onnx_payloads)
     raw_payloads.update({
         github_raw_url(
             "k2-fsa",
@@ -866,9 +872,6 @@ def test_buzz_audits_the_exact_release_source_topology(
             (
                 f"repos/k2-fsa/sherpa-onnx/commits/v{_SHERPA_ONNX_VERSION}"
             ): _SHERPA_ONNX_COMMIT,
-            (
-                f"repos/microsoft/onnxruntime/commits/v{_ONNX_RUNTIME_VERSION}"
-            ): _ONNX_RUNTIME_COMMIT,
         }
         return {"sha": commits[path]}
 
@@ -914,9 +917,27 @@ def test_buzz_audits_the_exact_release_source_topology(
         f"repos/block/buzz/commits/{candidate_tag}",
         f"repos/Mesh-LLM/mesh-llm/commits/v{_MESH_VERSION}",
         f"repos/k2-fsa/sherpa-onnx/commits/v{_SHERPA_ONNX_VERSION}",
-        f"repos/microsoft/onnxruntime/commits/v{_ONNX_RUNTIME_VERSION}",
     ]
     assert set(fetched_urls) == set(raw_payloads)
+
+
+def test_onnx_archive_members_require_the_reviewed_paths() -> None:
+    """The tag archive is accepted only when every reviewed file is present."""
+    module = _load_updater_module()
+    payloads = _onnx_source_payloads()
+    archive = _onnx_archive(payloads)
+    assert module.archive_member_payloads(archive, tuple(payloads)) == payloads
+    assert module.archive_member_payloads(archive, ("VERSION_NUMBER",)) == {
+        "VERSION_NUMBER": payloads["VERSION_NUMBER"]
+    }
+    flat = io.BytesIO()
+    with tarfile.open(fileobj=flat, mode="w:gz") as archive:
+        info = tarfile.TarInfo(name="VERSION_NUMBER")
+        info.size = 0
+        archive.addfile(info, io.BytesIO(b""))
+
+    with pytest.raises(RuntimeError, match="archive is missing"):
+        module.archive_member_payloads(flat.getvalue(), ("VERSION_NUMBER",))
 
 
 def test_buzz_onnx_source_contract_pins_the_exact_audited_revision() -> None:
@@ -926,6 +947,11 @@ def test_buzz_onnx_source_contract_pins_the_exact_audited_revision() -> None:
     assert module.BuzzUpdater.compatibility_pins == {
         "onnxruntimeVersion": _ONNX_RUNTIME_VERSION
     }
+    assert module._ONNX_SOURCE_COMMIT == _ONNX_RUNTIME_COMMIT
+    assert (
+        module.BuzzUpdater.onnxruntime_archive_url(_ONNX_RUNTIME_VERSION)
+        == _onnxruntime_archive_url()
+    )
     assert module.BuzzUpdater.get_compatibility_source_digest_contract(
         "onnxruntime"
     ) == {
@@ -2020,7 +2046,12 @@ def test_buzz_native_lock_serializes_discovered_release_identity() -> None:
         ("meshLlmCommit", "a" * 40, "Mesh source URL drifted"),
         ("sherpaOnnxCommit", "b" * 40, "sherpa-onnx source URL drifted"),
         ("onnxruntimeVersion", "1.27.1", "supported onnxruntimeVersion drifted"),
-        ("onnxruntimeCommit", "c" * 40, "ONNX Runtime source URL drifted"),
+        ("onnxruntimeCommit", "c" * 40, "ONNX Runtime source commit drifted"),
+        (
+            "onnxruntimeUrl",
+            "https://example.invalid/onnx.tar.gz",
+            "ONNX Runtime source URL drifted",
+        ),
         ("llamaCppCommit", "d" * 40, "llama.cpp source URL drifted"),
     ],
 )
@@ -2396,12 +2427,11 @@ def test_buzz_hashes_source_pnpm_and_both_cargo_locks_without_exporting(
     )
     assert_nix_ast_equal(
         str(calls[1]["expr"]),
-        _build_fetch_from_github_call(
-            "microsoft",
-            "onnxruntime",
-            rev=_ONNX_RUNTIME_COMMIT,
-            fetch_submodules=False,
-        ),
+        "pkgs.fetchzip { "
+        f'url = "{_onnxruntime_archive_url()}"; '
+        "hash = pkgs.lib.fakeHash; "
+        "stripRoot = true; "
+        "}",
     )
     assert_nix_ast_equal(
         str(calls[2]["expr"]),
@@ -2667,6 +2697,11 @@ def test_buzz_updater_owns_the_complete_native_lock() -> None:
 
     def source_commit(name: str) -> str:
         assert source.urls is not None
+        if name == "onnxruntime":
+            assert source.urls[name] == updater.onnxruntime_archive_url(
+                updater.get_compatibility_pin("onnxruntimeVersion")
+            )
+            return _ONNX_RUNTIME_COMMIT
         match = re.fullmatch(
             r"https://github\.com/[^/]+/[^/]+/archive/([0-9a-f]{40})\.tar\.gz",
             source.urls[name],
@@ -2855,6 +2890,7 @@ def test_buzz_source_metadata_pins_every_authoritative_fixed_output() -> None:
 
     commit = expect_instance(source.commit, str)
     onnxruntime = expect_instance(native_lock["onnxruntime"], dict)
+    assert onnxruntime["commit"] == module._ONNX_SOURCE_COMMIT
     sherpa = expect_instance(native_lock["sherpaOnnx"], dict)
     mesh = expect_instance(native_lock["meshLlm"], dict)
     llama = expect_instance(native_lock["llamaCpp"], dict)
@@ -2870,10 +2906,8 @@ def test_buzz_source_metadata_pins_every_authoritative_fixed_output() -> None:
             "mesh-llm",
             expect_instance(mesh["commit"], str),
         ),
-        "onnxruntime": updater._archive_url(
-            "microsoft",
-            "onnxruntime",
-            expect_instance(onnxruntime["commit"], str),
+        "onnxruntime": updater.onnxruntime_archive_url(
+            updater.get_compatibility_pin("onnxruntimeVersion")
         ),
         "sherpaOnnx": updater._archive_url(
             "k2-fsa",
@@ -2965,8 +2999,9 @@ def test_buzz_onnxruntime_slot_uses_the_url_scoped_promoted_hash() -> None:
           null
         else
           import ./native/onnxruntime.nix {
-            inherit abseil-cpp_202601 cctools fetchFromGitHub ld64 lib nativeLock onnxruntime protobuf python3 stdenv;
+            inherit abseil-cpp_202601 cctools fetchzip ld64 lib nativeLock onnxruntime protobuf python3 stdenv;
             srcHash = onnxRuntimeSrcHashEntry.hash;
+            srcUrl = source.urls.onnxruntime;
           }""",
     )
     assert_nix_ast_equal(
@@ -3035,8 +3070,9 @@ def test_buzz_sherpa_slot_selects_only_its_url_scoped_promoted_hash() -> None:
           null
         else
           import ./native/onnxruntime.nix {
-            inherit abseil-cpp_202601 cctools fetchFromGitHub ld64 lib nativeLock onnxruntime protobuf python3 stdenv;
+            inherit abseil-cpp_202601 cctools fetchzip ld64 lib nativeLock onnxruntime protobuf python3 stdenv;
             srcHash = onnxRuntimeSrcHashEntry.hash;
+            srcUrl = source.urls.onnxruntime;
           }""",
     )
     native_slots = expect_instance(
@@ -3123,7 +3159,7 @@ def test_buzz_onnxruntime_native_slot_is_static_cpu_only_darwin() -> None:
     assert {
         "abseil-cpp_202601",
         "cctools",
-        "fetchFromGitHub",
+        "fetchzip",
         "ld64",
         "lib",
         "nativeLock",
@@ -3131,6 +3167,7 @@ def test_buzz_onnxruntime_native_slot_is_static_cpu_only_darwin() -> None:
         "protobuf",
         "python3",
         "srcHash",
+        "srcUrl",
         "stdenv",
     } == {
         argument.name
@@ -3222,12 +3259,10 @@ def test_buzz_onnxruntime_native_slot_is_static_cpu_only_darwin() -> None:
     assert_nix_ast_equal(
         expect_binding(attrs.values, "src").value,
         nix_attrset_call(
-            Identifier(name="fetchFromGitHub"),
-            owner="microsoft",
-            repo="onnxruntime",
-            rev=Identifier(name="commit"),
-            fetchSubmodules=False,
+            Identifier(name="fetchzip"),
+            url=Identifier(name="srcUrl"),
             hash=Identifier(name="srcHash"),
+            stripRoot=True,
         ),
     )
     for binding in ("doCheck", "doInstallCheck", "separateDebugInfo"):

@@ -378,8 +378,10 @@ in
     };
 
   # CRX3 container layout: "Cr24" magic, LE32 version, LE32 header length,
-  # protobuf header, then a zip whose first entry is the inner DMG. Google
-  # distributes Gemini for macOS this way through its Omaha update service.
+  # protobuf header, then a zip. Older Gemini payloads put an inner DMG in
+  # that zip. Current Omaha payloads name the zip root ("."), and the zip's
+  # root is the app bundle. Google distributes Gemini for macOS this way
+  # through its Omaha update service.
   mkCrx3DmgApp =
     {
       pname,
@@ -458,25 +460,30 @@ in
             tail -c +"$((13 + header_len))" "$src" > "$inner_zip"
 
             inner_dmg="$unpack_dir/${innerDmgName}"
-            if ! unzip -qq -j "$inner_zip" "${innerDmgName}" -d "$unpack_dir"; then
-              echo "Expected ${innerDmgName} in ${pname} CRX3 container" >&2
+            app_source=""
+            if unzip -qq -j "$inner_zip" "${innerDmgName}" -d "$unpack_dir"; then
+              dmg_dir="$TMPDIR/${pname}-dmg"
+              mkdir -p "$dmg_dir"
+              (
+                cd "$dmg_dir"
+                undmg "$inner_dmg"
+              )
+              app_source="$dmg_dir/${resolvedBundleName}"
+            elif unzip -qq "$inner_zip" "${resolvedBundleName}/*" -d "$unpack_dir"; then
+              # Omaha path "." : the zip root is the app bundle, not a DMG.
+              app_source="$unpack_dir/${resolvedBundleName}"
+            else
+              echo "Expected ${innerDmgName} or ${resolvedBundleName} in ${pname} CRX3 container" >&2
               unzip -l "$inner_zip" >&2
               exit 1
             fi
-
-            dmg_dir="$TMPDIR/${pname}-dmg"
-            mkdir -p "$dmg_dir"
-            (
-              cd "$dmg_dir"
-              undmg "$inner_dmg"
-            )
-            if [ ! -d "$dmg_dir/${resolvedBundleName}" ]; then
-              echo "Expected ${resolvedBundleName} in ${pname} DMG" >&2
-              find "$dmg_dir" -maxdepth 2 -type d >&2
+            if [ ! -d "$app_source" ]; then
+              echo "Expected ${resolvedBundleName} in ${pname} CRX3 container" >&2
+              find "$unpack_dir" -maxdepth 2 -type d >&2
               exit 1
             fi
 
-            cp -R "$dmg_dir/${resolvedBundleName}" "$out/Applications/${resolvedBundleName}"
+            cp -R "$app_source" "$out/Applications/${resolvedBundleName}"
             ${clearBundleXattrs ''"$out/Applications/${resolvedBundleName}"''}
             ${postInstallApp}
             ${prev.lib.optionalString codesignApp (signAndVerifyBundle {

@@ -262,3 +262,40 @@ def test_dependency_clusters_couple_companions_aggregates_and_inputs() -> None:
     }
     assert failure_closure(["unknown"], clusters) == {"unknown"}
     assert failure_closure([], clusters) == frozenset()
+
+
+def test_promotion_failure_withholds_the_aggregate_not_its_siblings() -> None:
+    """A failed member withholds the inventory it feeds, not a sibling hash."""
+    from lib.update.planner import promotion_failure_closure
+
+    class _Member:
+        aggregate_into = ("agg",)
+        companion_of = "parent"
+
+    class _Sibling:
+        aggregate_into = ("agg",)
+
+    class _Parent:
+        pass
+
+    class _Agg:
+        pass
+
+    updaters = {
+        "member": _Member,
+        "sibling": _Sibling,
+        "parent": _Parent,
+        "agg": _Agg,
+    }
+    closure = promotion_failure_closure(
+        ["member"],
+        names=["member", "sibling", "parent", "agg"],
+        updaters=updaters,
+    )
+
+    assert closure == frozenset({"member", "parent", "agg"})
+    assert promotion_failure_closure(
+        ["member"],
+        names=["member"],
+        updaters=updaters,
+    ) == frozenset({"member"})

@@ -59,6 +59,10 @@ on:
         description: Space-separated Darwin roots for one always-run shard
         default: ""
         type: string
+      closure_gate_slice:
+        description: Darwin closure-gate slice. Empty realizes the whole plan.
+        default: ""
+        type: string
       shard:
         description: Shard identity for artifact and receipt names
         default: ""
@@ -185,18 +189,43 @@ jobs:
           import runpy
           runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
         shell: python
+      - name: Download the slice's first attempt
+        id: prior-download
+        if: inputs.device_fault_retry && inputs.closure_gate_slice != ''
+        continue-on-error: true
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: closure-gate-${{ inputs.system }}-${{ inputs.scope }}-${{ inputs.closure_gate_slice }}*
+          path: ${{ runner.temp }}/prior-slice
+          github-token: ${{ github.token }}
+          run-id: ${{ github.run_id }}
+      - name: Keep a finished slice on its first VM
+        id: retry-slice
+        if: inputs.device_fault_retry && inputs.closure_gate_slice != ''
+        env:
+          NIXCFG_CLOSURE_GATE_COMMAND: prior-slice
+          PRIOR_SLICE: ${{ runner.temp }}/prior-slice
+        shell: python
+        run: |
+          import runpy
+          runpy.run_path(".github/closure-gate/gate.py", run_name="__main__")
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        if: inputs.stage == 'closure-gate'
+        if: >-
+          inputs.stage == 'closure-gate' &&
+          steps.retry-slice.outputs.skip != 'true'
         with:
           name: closure-gate-plan-${{ inputs.system }}
           path: ${{ runner.temp }}/closure-gate
           github-token: ${{ github.token }}
           run-id: ${{ github.run_id }}
       - name: Realize changed outputs and root closures
-        if: inputs.stage == 'closure-gate'
+        if: >-
+          inputs.stage == 'closure-gate' &&
+          steps.retry-slice.outputs.skip != 'true'
         env:
           NIXCFG_CLOSURE_GATE_COMMAND: realize
           NIXCFG_CLOSURE_GATE_PLAN: ${{ runner.temp }}/closure-gate/plan.json
+          NIXCFG_CLOSURE_GATE_SLICE: ${{ inputs.closure_gate_slice }}
           SYSTEM: ${{ inputs.system }}
         shell: python
         run: |
@@ -262,7 +291,7 @@ jobs:
       # A faulted runner's candidate keeps a distinct name: no consumer can
       # download it, and a fresh-VM retry cannot overwrite its evidence.
       - name: Retain candidate and failure evidence
-        if: always()
+        if: always() && steps.retry-slice.outputs.skip != 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: |-
@@ -295,7 +324,10 @@ jobs:
           # Step env is not inherited. The shard root names the pin
           # (darwin-argus, home-george); a hash-named pin is a new pin
           # every closure and filled the Cachix pin quota (43613142360).
+          # A closure-gate slice is root-closure-<pin> and does not pass
+          # closure_roots. jobs.py names the pin from that slice.
           NIXCFG_CLOSURE_ROOTS: ${{ inputs.closure_roots }}
+          NIXCFG_CLOSURE_GATE_SLICE: ${{ inputs.closure_gate_slice }}
           CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
         run: |
           import runpy

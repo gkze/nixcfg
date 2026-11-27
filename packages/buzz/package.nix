@@ -4,6 +4,7 @@
   fetchFromGitHub,
   fetchPnpmDeps,
   fetchurl,
+  fetchzip,
   inputs,
   ld64,
   lib,
@@ -375,7 +376,7 @@ let
         inherit
           abseil-cpp_202601
           cctools
-          fetchFromGitHub
+          fetchzip
           ld64
           lib
           nativeLock
@@ -385,6 +386,7 @@ let
           stdenv
           ;
         srcHash = onnxRuntimeSrcHashEntry.hash;
+        srcUrl = source.urls.onnxruntime;
       };
   sherpaOnnxNative =
     if sherpaOnnxSrcHashEntry == null || onnxRuntimeNative == null || !nativeLockComplete then

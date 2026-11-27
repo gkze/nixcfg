@@ -30,6 +30,15 @@ in
       sources = releaseSources;
     };
 
+    # nixpkgs derives meta.platforms from passthru.sources. overrideAttrs
+    # replaces passthru, and the check then sees an empty platform list
+    # (Update 45347647927: bun-1.4.5 refused on aarch64-darwin while t3code
+    # evaluated updateRuntimeLocks). The systems we ship binaries for are
+    # the hash keys.
+    meta = old.meta // {
+      platforms = builtins.attrNames selfSource.hashes;
+    };
+
     doInstallCheck = true;
     # $version follows overrideAttrs, so a package that swaps in another
     # release still checks the binary it actually installed.

@@ -315,11 +315,24 @@ def test_dynamic_updater_retry_error_roundtrips() -> None:
     ensure_updaters_loaded()
     module = sys.modules[UPDATERS["zen-twilight"].__module__]
     error = module._TwilightSnapshotChangedError(
-        phase="after", expected="1", observed="2"
+        phase="after",
+        expected="1",
+        observed="2",
+        asset_url="https://api.github.com/repos/zen-browser/desktop/releases/assets/1",
     )
     restored = pickle.loads(pickle.dumps(error))  # noqa: S301 -- trusted local value
     assert type(restored) is type(error)
-    assert (restored.phase, restored.expected, restored.observed) == ("after", "1", "2")
+    assert (
+        restored.phase,
+        restored.expected,
+        restored.observed,
+        restored.asset_url,
+    ) == (
+        "after",
+        "1",
+        "2",
+        "https://api.github.com/repos/zen-browser/desktop/releases/assets/1",
+    )
     assert str(restored) == str(error)
 
 

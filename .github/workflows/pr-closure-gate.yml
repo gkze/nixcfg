@@ -98,6 +98,11 @@ jobs:
   # A reusable workflow call cannot read matrix in its if, so each
   # system is its own job. An empty diff skips that job. One failure
   # does not cancel the others before their Cachix flush.
+  # One hosted macOS VM cannot realize every changed Darwin output.
+  # 44744612180 and 44776913311 lost the runner twice with the whole plan
+  # in one job, and the push never ran. Each slice is its own VM on the
+  # same Darwin lane. A slice pushes each finished installable before the
+  # next build. An unchanged root slice succeeds without a build.
   realize-aarch64-darwin:
     needs: route
     if: >-
@@ -108,12 +113,23 @@ jobs:
       group: ${{ format('nixcfg-darwin-{0}', contains(github.event.pull_request.labels.*.name, 'main-fix') && 'main-fix' || contains(github.event.pull_request.labels.*.name, 'security') && 'security' || contains(github.event.pull_request.labels.*.name, 'heal') && 'heal' || 'routine') }}
       cancel-in-progress: false
       queue: max
+    strategy:
+      fail-fast: false
+      matrix:
+        slice:
+          - packages
+          - root-closure-darwin-argus
+          - root-closure-darwin-rocinante
+          - root-closure-darwin-zeus
+          - root-closure-home-george
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
       system: aarch64-darwin
       stage: closure-gate
       scope: gate
+      shard: ${{ matrix.slice }}
+      closure_gate_slice: ${{ matrix.slice }}
       checkout_ref: ${{ github.event.pull_request.head.sha }}
     secrets:
       UPDATE_SELF_HEAL_GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
@@ -123,6 +139,16 @@ jobs:
   # consumeEntire then reported null bytes. That read is the faulted volume,
   # not a NUL in the tree. The job records device_fault and flush refuses
   # the untrusted store. One fresh VM rebuilds and pushes. A second fault fails.
+  # 44498744364 attempt 2 died with the realize step still running, so
+  # device_fault was never set and the retry did not start. A failure that
+  # did not record device_fault=false is the same missing result. A finished
+  # realize that recorded false is a build failure and does not rerun.
+  # 44888080350 recorded that false on home-george only. The matrix has one
+  # device_fault output, so that false also skipped the fresh VM for the
+  # faulted argus and zeus slices and for rocinante, whose runner died
+  # before it could record anything. The retry starts for the failed matrix.
+  # Each cell rebuilds only a slice whose first artifact is a fault suffix
+  # or missing.
   realize-aarch64-darwin-retry:
     needs:
       - route
@@ -132,17 +158,28 @@ jobs:
       !cancelled() &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       needs.route.result == 'success' &&
-      needs.realize-aarch64-darwin.outputs.device_fault == 'true'
+      needs.realize-aarch64-darwin.result == 'failure'
     concurrency:
       group: ${{ format('nixcfg-darwin-{0}', contains(github.event.pull_request.labels.*.name, 'main-fix') && 'main-fix' || contains(github.event.pull_request.labels.*.name, 'security') && 'security' || contains(github.event.pull_request.labels.*.name, 'heal') && 'heal' || 'routine') }}
       cancel-in-progress: false
       queue: max
+    strategy:
+      fail-fast: false
+      matrix:
+        slice:
+          - packages
+          - root-closure-darwin-argus
+          - root-closure-darwin-rocinante
+          - root-closure-darwin-zeus
+          - root-closure-home-george
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
       system: aarch64-darwin
       stage: closure-gate
       scope: gate
+      shard: ${{ matrix.slice }}
+      closure_gate_slice: ${{ matrix.slice }}
       checkout_ref: ${{ github.event.pull_request.head.sha }}
       device_fault_retry: true
     secrets:
@@ -205,10 +242,12 @@ jobs:
           pattern: closure-gate-plan-*
           path: plans
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        if: needs.realize-aarch64-darwin.result == 'success'
+        if: >-
+          needs.realize-aarch64-darwin.result == 'success' ||
+          needs.realize-aarch64-darwin-retry.result == 'success'
         continue-on-error: true
         with:
-          name: closure-gate-aarch64-darwin-gate
+          pattern: closure-gate-aarch64-darwin-gate-*
           path: results/aarch64-darwin
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         if: needs.realize-aarch64-linux.result == 'success'
@@ -230,7 +269,10 @@ jobs:
           REALIZE_RESULTS: >-
             ${{ format(
             '{{"aarch64-darwin":"{0}","aarch64-linux":"{1}","x86_64-linux":"{2}"}}',
-            needs.realize-aarch64-darwin.outputs.device_fault == 'true' && needs.realize-aarch64-darwin-retry.result || needs.realize-aarch64-darwin.result,
+            needs.realize-aarch64-darwin.result == 'failure'
+            && needs.realize-aarch64-darwin-retry.result != 'skipped'
+            && needs.realize-aarch64-darwin-retry.result
+            || needs.realize-aarch64-darwin.result,
             needs.realize-aarch64-linux.result,
             needs.realize-x86_64-linux.result) }}
           CHANGED: ${{ needs.route.outputs.changed || '{}' }}

@@ -1981,6 +1981,17 @@ def test_darwin_root_pin_names_follow_the_shard(monkeypatch) -> None:
     monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "darwin-argus")
     with pytest.raises(jobs.CachixFlushError, match="expected one darwin root"):
         jobs._stable_darwin_pin_names((argus, argus))
+    monkeypatch.delenv("NIXCFG_CLOSURE_ROOTS", raising=False)
+    monkeypatch.setenv("NIXCFG_CLOSURE_GATE_SLICE", "root-closure-home-george")
+    assert jobs._stable_darwin_pin_names((home,)) == {home: "home-george"}
+    monkeypatch.setenv("NIXCFG_CLOSURE_GATE_SLICE", "root-closure-darwin-argus")
+    assert jobs._stable_darwin_pin_names((argus,)) == {argus: "darwin-argus"}
+    monkeypatch.setenv("NIXCFG_CLOSURE_GATE_SLICE", "packages")
+    with pytest.raises(jobs.CachixFlushError, match="roots=<unset>"):
+        jobs._stable_darwin_pin_names((home,))
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "home-george")
+    monkeypatch.setenv("NIXCFG_CLOSURE_GATE_SLICE", "root-closure-darwin-argus")
+    assert jobs._stable_darwin_pin_names((home,)) == {home: "home-george"}
 
 
 def test_pin_realized_darwin_roots_fail_closed(native_job, monkeypatch) -> None:
@@ -3284,6 +3295,9 @@ def test_native_fault_evidence_and_artifact_contract() -> None:
     assert flush["if"] == "always()"
     assert flush["env"]["NIXCFG_CI_STAGE"] == "flush-cachix"
     assert flush["env"]["NIXCFG_CLOSURE_ROOTS"] == "${{ inputs.closure_roots }}"
+    assert (
+        flush["env"]["NIXCFG_CLOSURE_GATE_SLICE"] == "${{ inputs.closure_gate_slice }}"
+    )
     assert flush["env"]["CACHIX_AUTH_TOKEN"] == "${{ secrets.CACHIX_AUTH_TOKEN }}"  # noqa: S105 -- Actions expression, not a credential.
     assert native["jobs"]["native"]["steps"][-1] is flush
     dump = next(
@@ -6262,6 +6276,7 @@ def test_dump_hosted_storage_fault_keeps_diskutil_and_unified_logs(
     assert "diskutil info disk2" in report
     assert "list warn" in report
     assert "apfs I/O error" in (tmp_path / "update-artifacts/apfs-io.log").read_text()
+    assert not (tmp_path / "update-artifacts/device-unverified.log").exists()
     rows = [
         json.loads(line)
         for line in (tmp_path / "update-artifacts/storage.jsonl")
@@ -6281,6 +6296,9 @@ def test_dump_hosted_storage_fault_survives_missing_and_timed_out_tools(
     assert "diskutil missing" in report
     assert (
         tmp_path / "update-artifacts/apfs-io.log"
+    ).read_text() == "log show missing\n"
+    assert (
+        tmp_path / "update-artifacts/device-unverified.log"
     ).read_text() == "log show missing\n"
 
     diskutil = tmp_path / "diskutil"
@@ -6310,6 +6328,11 @@ def test_dump_hosted_storage_fault_survives_missing_and_timed_out_tools(
         .read_text()
         .startswith("TimeoutExpired:")
     )
+    assert (
+        (tmp_path / "update-artifacts/device-unverified.log")
+        .read_text()
+        .startswith("TimeoutExpired:")
+    )
 
     def run_log_oserror(args, **kwargs):
         if args[:2] == [str(diskutil), "list"]:
@@ -6324,6 +6347,11 @@ def test_dump_hosted_storage_fault_survives_missing_and_timed_out_tools(
     assert jobs.main("dump-storage-fault") == 0
     assert (
         (tmp_path / "update-artifacts/apfs-io.log").read_text().startswith("OSError:")
+    )
+    assert (
+        (tmp_path / "update-artifacts/device-unverified.log")
+        .read_text()
+        .startswith("OSError:")
     )
 
 
@@ -7391,6 +7419,7 @@ def test_dump_reports_no_device_fault_for_a_clean_kernel_log(
     output = _dump_with_kernel_log(tmp_path, monkeypatch, "Timestamp\n")
     assert output.read_text() == "device_fault=false\n"
     assert not (tmp_path / "update-artifacts/device-fault.log").exists()
+    assert not (tmp_path / "update-artifacts/device-unverified.log").exists()
 
 
 def test_append_command_output_keeps_empty_stdout_and_terminated_stderr(

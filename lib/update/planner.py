@@ -325,13 +325,18 @@ def dependency_clusters(
     updaters: Mapping[str, type[object]],
     entries: Mapping[str, SourceEntry] | None = None,
     input_names: Iterable[str] = (),
+    include_aggregates: bool = True,
 ) -> dict[str, frozenset[str]]:
     """Group targets that must be promoted together or withheld together.
 
-    Companion and aggregate edges couple sources in both directions, because
-    each side's files are derived from the other's result. A flake input
-    couples with every source that hashes against it. The result maps every
-    name, including the given input names, to its cluster.
+    Companion edges couple sources in both directions, because each side's
+    files are derived from the other's result. Aggregate edges do the same
+    when ``include_aggregates`` is set, which is the grouping used for bulk
+    holds and pull-request batches. Promotion uses
+    :func:`promotion_failure_closure` instead, so a failed member withholds
+    the inventory it feeds without discarding a sibling's pin and hashes. A
+    flake input couples with every source that hashes against it. The result
+    maps every name, including the given input names, to its cluster.
     """
     members = list(dict.fromkeys((*names, *input_names)))
     known = set(members)
@@ -354,8 +359,9 @@ def dependency_clusters(
         companion_parent = companion_source_name(updater_cls)
         if companion_parent is not None:
             union(name, companion_parent)
-        for destination in aggregate_destination_names(updater_cls):
-            union(name, destination)
+        if include_aggregates:
+            for destination in aggregate_destination_names(updater_cls):
+                union(name, destination)
         entry = None if entries is None else entries.get(name)
         backing_input = source_backing_input_name(name, updater_cls, entry)
         if backing_input is not None:
@@ -367,6 +373,40 @@ def dependency_clusters(
     for name in members:
         clusters.setdefault(find(name), set()).add(name)
     return {name: frozenset(clusters[find(name)]) for name in members}
+
+
+def promotion_failure_closure(
+    failed: Iterable[str],
+    *,
+    names: Iterable[str],
+    updaters: Mapping[str, type[object]],
+    entries: Mapping[str, SourceEntry] | None = None,
+    input_names: Iterable[str] = (),
+) -> frozenset[str]:
+    """Return the targets a promotion must withhold with these failures.
+
+    Companions and sources that share a flake input move together. The
+    aggregate a failed member feeds is withheld too, because its inventory is
+    derived from the members. Sibling members are not: their pins and
+    per-platform hashes do not depend on the failed sibling, and putting the
+    baseline hash back beside the new pin is what the canary then rejects
+    (Update 45347647927, emdash-pnpm-deps). A consumer whose Electron runtime
+    is absent from the restored inventory is put back by the fold.
+    """
+    known = set(names)
+    clusters = dependency_clusters(
+        names,
+        updaters=updaters,
+        entries=entries,
+        input_names=input_names,
+        include_aggregates=False,
+    )
+    closure = set(failure_closure(failed, clusters))
+    for name in tuple(closure):
+        for destination in aggregate_destination_names(updaters.get(name)):
+            if destination in known:
+                closure.add(destination)
+    return frozenset(closure)
 
 
 def failure_closure(
@@ -489,6 +529,7 @@ __all__ = [
     "failure_closure",
     "held_bulk_update_input_names",
     "prepare_plan_prerequisites",
+    "promotion_failure_closure",
     "resolve_update_targets",
     "select_target_source_names",
     "source_additional_input_names",
